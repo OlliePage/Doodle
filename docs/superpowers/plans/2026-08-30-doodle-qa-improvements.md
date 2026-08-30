@@ -20,6 +20,24 @@
 - Frozen dataclasses for configuration objects, matching `colouring_factory/models.py`.
 - Git identity is already set locally to `Milo Garth`. Do not pass `-c user.name` or `--author`. No `Co-Authored-By: Claude` trailer and no "Generated with Claude Code" footer.
 - Run the full suite with `.venv/bin/python -m pytest` from the repository root. It must be green before every commit.
+### Streamlit conventions (added 2026-08-30 after loading the `developing-with-streamlit` skill)
+
+Streamlit 1.62 is installed and supports all of the following; verified by inspecting the
+installed signatures, not assumed.
+
+- **Never write `use_container_width` in new code.** It is deprecated. Use `width="stretch"`.
+  The existing `app.py` uses it about forty times; those are swept in Task 10 as their own
+  commit rather than bundled into feature commits.
+- **Prefer native elements over injected HTML.** New panels use `st.container(border=True)` with
+  ordinary `st.markdown` inside, not a `<div class="geometry-box">`. The existing `.geometry-box`
+  markup stays where it already is; do not widen the diff chasing it.
+- **`st.segmented_control` rather than `st.radio(..., horizontal=True)`** for compact mode
+  switches such as the badge fit control.
+- **Sentence casing** for labels, and Material Symbols icons (`icon=":material/name:"`) rather
+  than emoji or arrow glyphs on new buttons.
+- The homepage CSS is the one deliberate exception to "do not style with CSS": the reported
+  defect is a styling collision inside Streamlit's own input chrome, which no native API exposes.
+
 - Verified provider facts (read from live documentation on 2026-08-30 — do not substitute remembered model names):
   - Google endpoint `POST https://generativelanguage.googleapis.com/v1beta/interactions`, auth header `x-goog-api-key`, image models `gemini-3.1-flash-image` / `gemini-3.1-flash-lite-image` / `gemini-3-pro-image`, text model `gemini-3.5-flash-lite`, key page `https://aistudio.google.com/apikey`.
   - OpenAI image models `gpt-image-2` / `gpt-image-1.5` / `gpt-image-1-mini`, sizes `1024x1536` and `1024x1024`, text model `gpt-5-mini`.

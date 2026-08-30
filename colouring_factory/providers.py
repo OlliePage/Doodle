@@ -18,6 +18,8 @@ class ProviderSpec:
     key_placeholder: str
     description: str
     billing_note: str
+    text_model: str = ""
+    supports_seed: bool = False
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -35,6 +37,29 @@ PROVIDERS: dict[str, ProviderSpec] = {
         key_placeholder="sk-proj-…",
         description="Best prompt-following and the simplest starting point.",
         billing_note="ChatGPT and the API are billed separately. API billing must be enabled.",
+        text_model="gpt-5-mini",
+        supports_seed=False,
+    ),
+    "google": ProviderSpec(
+        id="google",
+        label="Google Gemini",
+        env_var="GEMINI_API_KEY",
+        key_url="https://aistudio.google.com/apikey",
+        billing_url="https://aistudio.google.com/usage",
+        docs_url="https://ai.google.dev/gemini-api/docs/image-generation",
+        default_model="gemini-3.1-flash-image",
+        models=(
+            "gemini-3.1-flash-image",
+            "gemini-3.1-flash-lite-image",
+            "gemini-3-pro-image",
+        ),
+        portrait_size="3:4",
+        square_size="1:1",
+        key_placeholder="AIza…",
+        description="Has a free tier, so it is the cheapest way to start.",
+        billing_note="A free allowance covers occasional use; heavier use needs billing enabled.",
+        text_model="gemini-3.5-flash-lite",
+        supports_seed=False,
     ),
     "recraft": ProviderSpec(
         id="recraft",
@@ -50,6 +75,8 @@ PROVIDERS: dict[str, ProviderSpec] = {
         key_placeholder="Paste your Recraft API token",
         description="Strong illustration control and useful deterministic seed support.",
         billing_note="Recraft requires a positive API-unit balance before it will issue a token.",
+        text_model="",
+        supports_seed=True,
     ),
 }
 

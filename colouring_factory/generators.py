@@ -8,6 +8,8 @@ from urllib.request import Request, urlopen
 
 from .models import GeneratedArtwork
 
+GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
+
 
 class GeneratorError(RuntimeError):
     """A provider failure that can be explained directly in the interface."""
@@ -33,24 +35,52 @@ def _normalise_error(
     status_code: int | None = None,
     details: str = "",
 ) -> GeneratorError:
-    status = status_code if status_code is not None else getattr(exc, "status_code", None)
+    status = (
+        status_code if status_code is not None else getattr(exc, "status_code", None)
+    )
     raw = " ".join(part for part in (details, str(exc)) if part).lower()
 
-    if status == 401 or any(marker in raw for marker in ("incorrect api key", "invalid api key", "invalid token", "authentication")):
+    if status == 401 or any(
+        marker in raw
+        for marker in (
+            "incorrect api key",
+            "invalid api key",
+            "invalid token",
+            "authentication",
+        )
+    ):
         return GeneratorError(
             f"{provider} did not accept that API key. Create a fresh key and paste it again.",
             provider=provider,
             code="authentication",
             status_code=status,
         )
-    if any(marker in raw for marker in ("billing", "insufficient_quota", "insufficient quota", "credit balance", "api units", "payment")):
+    if any(
+        marker in raw
+        for marker in (
+            "billing",
+            "insufficient_quota",
+            "insufficient quota",
+            "credit balance",
+            "api units",
+            "payment",
+        )
+    ):
         return GeneratorError(
             f"{provider} needs API billing or available credits before it can draw this Doodle.",
             provider=provider,
             code="billing",
             status_code=status,
         )
-    if any(marker in raw for marker in ("verify", "verification", "organisation verification", "organization verification")):
+    if any(
+        marker in raw
+        for marker in (
+            "verify",
+            "verification",
+            "organisation verification",
+            "organization verification",
+        )
+    ):
         return GeneratorError(
             f"{provider} requires account or organisation verification before image generation can be used.",
             provider=provider,
@@ -71,7 +101,15 @@ def _normalise_error(
             code="rate_limit",
             status_code=status,
         )
-    if any(marker in raw for marker in ("content policy", "safety system", "moderation", "safety violation")):
+    if any(
+        marker in raw
+        for marker in (
+            "content policy",
+            "safety system",
+            "moderation",
+            "safety violation",
+        )
+    ):
         return GeneratorError(
             "The image provider declined that description. Rephrase the idea and try again.",
             provider=provider,
@@ -79,7 +117,8 @@ def _normalise_error(
             status_code=status,
         )
     if isinstance(exc, (URLError, TimeoutError, ConnectionError)) or any(
-        marker in raw for marker in ("timed out", "connection", "network", "name resolution")
+        marker in raw
+        for marker in ("timed out", "connection", "network", "name resolution")
     ):
         return GeneratorError(
             f"Doodle could not reach {provider}. Check the internet connection and try again.",
@@ -117,7 +156,9 @@ def _read_image_payload(item: Any) -> bytes:
         try:
             return base64.b64decode(encoded)
         except (ValueError, TypeError) as exc:
-            raise GeneratorError("The image provider returned invalid base64 image data.") from exc
+            raise GeneratorError(
+                "The image provider returned invalid base64 image data."
+            ) from exc
     if url:
         try:
             with urlopen(str(url), timeout=120) as response:  # nosec B310 - provider-supplied URL.
@@ -149,7 +190,9 @@ def generate_with_openai(
 
     try:
         from openai import OpenAI
-    except ImportError as exc:  # pragma: no cover - only possible in an incomplete installation.
+    except (
+        ImportError
+    ) as exc:  # pragma: no cover - only possible in an incomplete installation.
         raise GeneratorError(
             "The OpenAI Python package is not installed. Run pip install -r requirements.txt."
         ) from exc
@@ -171,7 +214,9 @@ def generate_with_openai(
                 background="opaque",
             )
             if not result.data:
-                raise GeneratorError("OpenAI returned no image data.", provider="OpenAI")
+                raise GeneratorError(
+                    "OpenAI returned no image data.", provider="OpenAI"
+                )
             item = result.data[0]
             image_bytes = _read_image_payload(item)
         except GeneratorError:
@@ -254,7 +299,9 @@ def generate_with_recraft(
                 detail = exc.read().decode("utf-8", errors="replace")
             except OSError:
                 detail = ""
-            raise _normalise_error("Recraft", exc, status_code=exc.code, details=detail) from exc
+            raise _normalise_error(
+                "Recraft", exc, status_code=exc.code, details=detail
+            ) from exc
         except (URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise _normalise_error("Recraft", exc) from exc
 
@@ -278,6 +325,100 @@ def generate_with_recraft(
                 provider="Recraft",
                 model=model,
                 metadata=metadata,
+            )
+        )
+
+    return images
+
+
+def _google_image_block(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for step in payload.get("steps") or ():
+        if not isinstance(step, dict):
+            continue
+        for block in step.get("content") or ():
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "image"
+                and block.get("data")
+            ):
+                return str(block["data"])
+    return ""
+
+
+def generate_with_google(
+    *,
+    api_key: str,
+    prompt: str,
+    variants: int = 1,
+    model: str = "gemini-3.1-flash-image",
+    size: str = "3:4",
+) -> list[GeneratedArtwork]:
+    """Generate raster artwork with the Gemini Interactions API."""
+
+    if not api_key.strip():
+        raise GeneratorError(
+            "Connect Google Gemini with an API key before generating artwork.",
+            provider="Google Gemini",
+            code="missing_key",
+        )
+    if variants < 1 or variants > 4:
+        raise GeneratorError("Variants must be between 1 and 4.")
+
+    images: list[GeneratedArtwork] = []
+    for index in range(variants):
+        variant_prompt = _variant_prompt(prompt, index, variants)
+        body = {
+            "model": model,
+            "input": [{"type": "text", "text": variant_prompt}],
+            "response_format": {
+                "type": "image",
+                "mime_type": "image/png",
+                "aspect_ratio": size,
+                "image_size": "2K",
+            },
+        }
+        request = Request(
+            GOOGLE_ENDPOINT,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "x-goog-api-key": api_key.strip(),
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=240) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            except OSError:
+                detail = ""
+            raise _normalise_error(
+                "Google Gemini", exc, status_code=exc.code, details=detail
+            ) from exc
+        except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise _normalise_error("Google Gemini", exc) from exc
+
+        encoded = _google_image_block(payload)
+        if not encoded:
+            raise GeneratorError(
+                "Google Gemini returned no image. It may have declined the description.",
+                provider="Google Gemini",
+                code="content",
+            )
+        image_bytes = _read_image_payload({"b64_json": encoded})
+
+        images.append(
+            GeneratedArtwork(
+                image_bytes=image_bytes,
+                prompt=variant_prompt,
+                provider="Google Gemini",
+                model=model,
+                metadata={"variant": index + 1, "size": size},
             )
         )
 
@@ -314,7 +455,17 @@ def generate_with_provider(
             size=size,
             random_seed=random_seed,
         )
-    raise GeneratorError(f"Unsupported image provider: {provider_id}", code="unsupported_provider")
+    if provider == "google":
+        return generate_with_google(
+            api_key=api_key,
+            prompt=prompt,
+            variants=variants,
+            model=model,
+            size=size,
+        )
+    raise GeneratorError(
+        f"Unsupported image provider: {provider_id}", code="unsupported_provider"
+    )
 
 
 def check_provider_connection(provider_id: str, api_key: str) -> dict[str, Any]:
@@ -337,17 +488,22 @@ def check_provider_connection(provider_id: str, api_key: str) -> dict[str, Any]:
     elif provider == "recraft":
         endpoint = "https://external.api.recraft.ai/v1/users/me"
         label = "Recraft"
+    elif provider == "google":
+        endpoint = "https://generativelanguage.googleapis.com/v1beta/models"
+        label = "Google Gemini"
     else:
-        raise GeneratorError(f"Unsupported image provider: {provider_id}", code="unsupported_provider")
+        raise GeneratorError(
+            f"Unsupported image provider: {provider_id}", code="unsupported_provider"
+        )
 
-    request = Request(
-        endpoint,
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Accept": "application/json",
-        },
-        method="GET",
-    )
+    # Google authenticates with its own header rather than a bearer token.
+    headers = {"Accept": "application/json"}
+    if provider == "google":
+        headers["x-goog-api-key"] = key
+    else:
+        headers["Authorization"] = f"Bearer {key}"
+
+    request = Request(endpoint, headers=headers, method="GET")
     try:
         with urlopen(request, timeout=30) as response:
             raw = response.read().decode("utf-8")
@@ -363,7 +519,9 @@ def check_provider_connection(provider_id: str, api_key: str) -> dict[str, Any]:
                 "provider": label,
                 "warning": "The key is recognised, but its restricted permissions prevented a full connection check.",
             }
-        raise _normalise_error(label, exc, status_code=exc.code, details=detail) from exc
+        raise _normalise_error(
+            label, exc, status_code=exc.code, details=detail
+        ) from exc
     except (URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise _normalise_error(label, exc) from exc
 
