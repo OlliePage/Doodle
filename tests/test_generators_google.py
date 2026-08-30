@@ -47,7 +47,7 @@ def test_google_returns_decoded_image_bytes(monkeypatch) -> None:
 
     monkeypatch.setattr(generators, "urlopen", fake_urlopen)
 
-    artworks = generate_with_google(api_key="AIza-test", prompt="a bear", size="3:4")
+    artworks = generate_with_google(api_key="AIza-test", prompts=["a bear"], size="3:4")
 
     assert len(artworks) == 1
     assert artworks[0].image_bytes == b"fake-png-bytes"
@@ -59,7 +59,7 @@ def test_google_returns_decoded_image_bytes(monkeypatch) -> None:
     assert captured["headers"]["X-goog-api-key"] == "AIza-test"
 
 
-def test_google_makes_one_request_per_variant(monkeypatch) -> None:
+def test_google_makes_one_request_per_prompt(monkeypatch) -> None:
     calls = []
 
     def fake_urlopen(request, timeout=None):
@@ -68,7 +68,7 @@ def test_google_makes_one_request_per_variant(monkeypatch) -> None:
 
     monkeypatch.setattr(generators, "urlopen", fake_urlopen)
 
-    artworks = generate_with_google(api_key="AIza-test", prompt="a bear", variants=3)
+    artworks = generate_with_google(api_key="AIza-test", prompts=["one", "two", "three"])
 
     assert len(artworks) == 3
     assert len(calls) == 3
@@ -76,7 +76,7 @@ def test_google_makes_one_request_per_variant(monkeypatch) -> None:
 
 def test_google_rejects_a_missing_key() -> None:
     with pytest.raises(GeneratorError) as caught:
-        generate_with_google(api_key="  ", prompt="a bear")
+        generate_with_google(api_key="  ", prompts=["a bear"])
     assert caught.value.code == "missing_key"
 
 
@@ -91,7 +91,7 @@ def test_google_explains_a_reply_with_no_image(monkeypatch) -> None:
     )
 
     with pytest.raises(GeneratorError) as caught:
-        generate_with_google(api_key="AIza-test", prompt="a bear")
+        generate_with_google(api_key="AIza-test", prompts=["a bear"])
     assert "no image" in str(caught.value).lower()
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Sequence
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -135,13 +136,9 @@ def _normalise_error(
     )
 
 
-def _variant_prompt(prompt: str, index: int, variants: int) -> str:
-    if variants <= 1:
-        return prompt
-    return (
-        f"{prompt}\nProduce visual alternative {index + 1} of {variants}; vary the pose or prop "
-        "while preserving every style and composition rule."
-    )
+def _check_prompts(prompts: Sequence[str]) -> None:
+    if not 1 <= len(prompts) <= 4:
+        raise GeneratorError("Between one and four pictures can be drawn at once.")
 
 
 def _read_image_payload(item: Any) -> bytes:
@@ -171,8 +168,7 @@ def _read_image_payload(item: Any) -> bytes:
 def generate_with_openai(
     *,
     api_key: str,
-    prompt: str,
-    variants: int = 1,
+    prompts: Sequence[str],
     model: str = "gpt-image-2",
     size: str = "1024x1536",
     quality: str = "low",
@@ -185,8 +181,7 @@ def generate_with_openai(
             provider="OpenAI",
             code="missing_key",
         )
-    if variants < 1 or variants > 4:
-        raise GeneratorError("Variants must be between 1 and 4.")
+    _check_prompts(prompts)
 
     try:
         from openai import OpenAI
@@ -203,8 +198,7 @@ def generate_with_openai(
         raise _normalise_error("OpenAI", exc) from exc
 
     images: list[GeneratedArtwork] = []
-    for index in range(variants):
-        variant_prompt = _variant_prompt(prompt, index, variants)
+    for index, variant_prompt in enumerate(prompts):
         try:
             result = client.images.generate(
                 model=model,
@@ -249,8 +243,7 @@ def generate_with_openai(
 def generate_with_recraft(
     *,
     api_key: str,
-    prompt: str,
-    variants: int = 1,
+    prompts: Sequence[str],
     model: str = "recraftv4_1",
     size: str = "3:4",
     random_seed: int | None = None,
@@ -263,14 +256,12 @@ def generate_with_recraft(
             provider="Recraft",
             code="missing_key",
         )
-    if variants < 1 or variants > 4:
-        raise GeneratorError("Variants must be between 1 and 4.")
+    _check_prompts(prompts)
 
     images: list[GeneratedArtwork] = []
     endpoint = "https://external.api.recraft.ai/v1/images/generations"
 
-    for index in range(variants):
-        variant_prompt = _variant_prompt(prompt, index, variants)
+    for index, variant_prompt in enumerate(prompts):
         body: dict[str, Any] = {
             "prompt": variant_prompt,
             "model": model,
@@ -350,8 +341,7 @@ def _google_image_block(payload: Any) -> str:
 def generate_with_google(
     *,
     api_key: str,
-    prompt: str,
-    variants: int = 1,
+    prompts: Sequence[str],
     model: str = "gemini-3.1-flash-image",
     size: str = "3:4",
 ) -> list[GeneratedArtwork]:
@@ -363,12 +353,10 @@ def generate_with_google(
             provider="Google Gemini",
             code="missing_key",
         )
-    if variants < 1 or variants > 4:
-        raise GeneratorError("Variants must be between 1 and 4.")
+    _check_prompts(prompts)
 
     images: list[GeneratedArtwork] = []
-    for index in range(variants):
-        variant_prompt = _variant_prompt(prompt, index, variants)
+    for index, variant_prompt in enumerate(prompts):
         body = {
             "model": model,
             "input": [{"type": "text", "text": variant_prompt}],
@@ -429,8 +417,7 @@ def generate_with_provider(
     *,
     provider_id: str,
     api_key: str,
-    prompt: str,
-    variants: int,
+    prompts: Sequence[str],
     model: str,
     size: str,
     quality: str = "low",
@@ -440,8 +427,7 @@ def generate_with_provider(
     if provider == "openai":
         return generate_with_openai(
             api_key=api_key,
-            prompt=prompt,
-            variants=variants,
+            prompts=prompts,
             model=model,
             size=size,
             quality=quality,
@@ -449,8 +435,7 @@ def generate_with_provider(
     if provider == "recraft":
         return generate_with_recraft(
             api_key=api_key,
-            prompt=prompt,
-            variants=variants,
+            prompts=prompts,
             model=model,
             size=size,
             random_seed=random_seed,
@@ -458,8 +443,7 @@ def generate_with_provider(
     if provider == "google":
         return generate_with_google(
             api_key=api_key,
-            prompt=prompt,
-            variants=variants,
+            prompts=prompts,
             model=model,
             size=size,
         )

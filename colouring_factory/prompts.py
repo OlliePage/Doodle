@@ -58,8 +58,10 @@ TARGET_RULES = {
         "within frame and leave useful white space around it."
     ),
     "Round badge": (
-        "Use a square composition. Keep all essential features near the centre so the artwork "
-        "can be placed safely inside a circular crop. Do not place details in the corners."
+        "Use a square composition built for a circular crop. Place the whole subject inside an "
+        "imaginary circle that touches the edges of the square, keep every essential feature well "
+        "within that circle, and leave the four corners empty. Nothing that matters may sit in a "
+        "corner, because the corners are cut away when the badge is made."
     ),
     "Flexible": (
         "Use a balanced, central composition that can tolerate either portrait or square cropping."
@@ -73,10 +75,15 @@ def build_colouring_prompt(
     style_name: str = "Toddler bold",
     target: str = "A4 page",
     extra_instructions: str = "",
+    variation_brief: str = "",
 ) -> str:
     concept = concept.strip()
     if not concept:
         raise ValueError("A picture idea is required.")
+
+    # A brief is one interpretation of the concept; everything else stays
+    # identical so alternatives differ in reading, not in drawing conventions.
+    scene = variation_brief.strip() or concept
 
     style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
     age_rule = AGE_RULES.get(age_profile, AGE_RULES["2-3 years"])
@@ -85,7 +92,7 @@ def build_colouring_prompt(
     prompt = f"""
     Create an original black-and-white colouring-book illustration for a young child.
 
-    Scene: {concept}
+    Scene: {scene}
 
     Visual rules:
     - Pure white background.

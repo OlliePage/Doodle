@@ -45,6 +45,7 @@ from colouring_factory.providers import (
     provider_id_from_label,
 )
 from colouring_factory.prompts import STYLE_PRESETS, build_colouring_prompt
+from colouring_factory.variations import build_variation_briefs
 from colouring_factory.storage import (
     data_root,
     delete_library_item,
@@ -425,7 +426,9 @@ def _orientation_dimensions(orientation: str) -> tuple[float, float]:
     return (210.0, 297.0) if orientation == "Portrait" else (297.0, 210.0)
 
 
-def _build_signature(image_bytes: bytes, kind: str, config: object, calibration: CalibrationProfile) -> str:
+def _build_signature(
+    image_bytes: bytes, kind: str, config: object, calibration: CalibrationProfile
+) -> str:
     payload = {
         "kind": kind,
         "config": asdict(config),
@@ -433,16 +436,18 @@ def _build_signature(image_bytes: bytes, kind: str, config: object, calibration:
     }
     digest = hashlib.sha256()
     digest.update(image_bytes)
-    digest.update(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    digest.update(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
     return digest.hexdigest()
-
 
 
 def _provider_connection_message(error: GeneratorError) -> dict[str, object]:
     return {
         "message": str(error),
         "code": getattr(error, "code", "unknown"),
-        "provider": getattr(error, "provider", "") or get_provider(_active_provider_id()).label,
+        "provider": getattr(error, "provider", "")
+        or get_provider(_active_provider_id()).label,
     }
 
 
@@ -452,7 +457,9 @@ def _continue_after_connection() -> None:
     st.session_state.connect_replace = False
     if destination == "generate":
         st.session_state.quick_mode = "ai"
-    st.session_state.screen = destination if destination in {"generate", "studio", "result"} else "generate"
+    st.session_state.screen = (
+        destination if destination in {"generate", "studio", "result"} else "generate"
+    )
     st.rerun()
 
 
@@ -487,7 +494,11 @@ def _render_connection_setup() -> None:
     top_left, top_middle, top_right = st.columns([1, 3, 1])
     with top_left:
         if st.button("← Back", use_container_width=True):
-            st.session_state.screen = "home" if st.session_state.connect_return == "generate" else st.session_state.connect_return
+            st.session_state.screen = (
+                "home"
+                if st.session_state.connect_return == "generate"
+                else st.session_state.connect_return
+            )
             st.session_state.connection_error = None
             st.rerun()
     with top_middle:
@@ -495,7 +506,10 @@ def _render_connection_setup() -> None:
     with top_right:
         st.empty()
 
-    st.markdown('<div class="connection-title">Connect an image generator</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="connection-title">Connect an image generator</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         '<div class="connection-subtitle">One key lets Doodle turn your description into a printable picture. You only do this once.</div>',
         unsafe_allow_html=True,
@@ -529,7 +543,10 @@ def _render_connection_setup() -> None:
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="step-label">1 · Create a provider key</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="step-label">1 · Create a provider key</div>',
+        unsafe_allow_html=True,
+    )
     link_a, link_b = st.columns(2)
     with link_a:
         st.link_button(
@@ -555,24 +572,38 @@ def _render_connection_setup() -> None:
         )
 
     connection_error = st.session_state.get("connection_error")
-    if connection_error and str(connection_error.get("provider", "")).lower() in {"", spec.label.lower()}:
+    if connection_error and str(connection_error.get("provider", "")).lower() in {
+        "",
+        spec.label.lower(),
+    }:
         st.error(str(connection_error.get("message", "The connection failed.")))
         code = str(connection_error.get("code", ""))
         if code == "billing":
-            st.info("The key may be valid, but the provider has no usable API balance or billing method.")
+            st.info(
+                "The key may be valid, but the provider has no usable API balance or billing method."
+            )
         elif code == "verification":
-            st.info("Finish the provider's account verification, then try the same key again.")
+            st.info(
+                "Finish the provider's account verification, then try the same key again."
+            )
 
     existing_key, existing_source = _provider_key(provider_id)
     replacing = bool(st.session_state.get("connect_replace"))
 
     if existing_key and not replacing:
-        st.markdown('<div class="step-label">2 · Confirm the connection</div>', unsafe_allow_html=True)
-        st.success(f"{spec.label} is connected using {mask_key(existing_key)} ({existing_source}).")
+        st.markdown(
+            '<div class="step-label">2 · Confirm the connection</div>',
+            unsafe_allow_html=True,
+        )
+        st.success(
+            f"{spec.label} is connected using {mask_key(existing_key)} ({existing_source})."
+        )
         use_col, replace_col = st.columns(2)
         with use_col:
             if st.button(
-                "Use this connection" if st.session_state.connect_return != "generate" else "Use this connection & draw",
+                "Use this connection"
+                if st.session_state.connect_return != "generate"
+                else "Use this connection & draw",
                 type="primary",
                 use_container_width=True,
             ):
@@ -593,9 +624,13 @@ def _render_connection_setup() -> None:
                 st.session_state.connection_error = None
                 st.rerun()
         else:
-            st.caption(f"This key comes from the {spec.env_var} environment variable. Remove it in Terminal to disconnect it.")
+            st.caption(
+                f"This key comes from the {spec.env_var} environment variable. Remove it in Terminal to disconnect it."
+            )
     else:
-        st.markdown('<div class="step-label">2 · Paste the key</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="step-label">2 · Paste the key</div>', unsafe_allow_html=True
+        )
         with st.form(f"connect_{provider_id}", clear_on_submit=False):
             pasted_key = st.text_input(
                 f"{spec.label} API key",
@@ -604,8 +639,14 @@ def _render_connection_setup() -> None:
                 help="Doodle never writes this key into artwork, PDFs or the Git repository.",
             )
             remember_key = st.checkbox("Remember on this Mac", value=True)
-            submit_label = "3 · Connect & draw" if st.session_state.connect_return == "generate" else "3 · Connect"
-            connect_clicked = st.form_submit_button(submit_label, type="primary", use_container_width=True)
+            submit_label = (
+                "3 · Connect & draw"
+                if st.session_state.connect_return == "generate"
+                else "3 · Connect"
+            )
+            connect_clicked = st.form_submit_button(
+                submit_label, type="primary", use_container_width=True
+            )
 
         with st.expander("Where is my key stored?"):
             st.caption(
@@ -659,24 +700,34 @@ def _render_connection_setup() -> None:
         st.session_state.screen = "generate"
         st.session_state.connection_error = None
         st.rerun()
-    st.caption("The sample tests the complete print flow, but it will not match the description you entered.")
+    st.caption(
+        "The sample tests the complete print flow, but it will not match the description you entered."
+    )
 
 
 def _quick_generate() -> None:
     idea = str(st.session_state.get("generation_idea", "")).strip()
     if not idea:
-        raise GeneratorError("Describe what Doodle should draw first.", code="missing_prompt")
+        raise GeneratorError(
+            "Describe what Doodle should draw first.", code="missing_prompt"
+        )
 
     if st.session_state.get("quick_mode") == "demo":
         demos = list(list_demo_artwork().items())
         nonce = int(st.session_state.get("generation_nonce", 0))
-        index = int(hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16) % len(demos)
+        index = int(
+            hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
+        ) % len(demos)
         demo_name, demo_path = demos[index]
         raw = demo_path.read_bytes()
         _set_current_artwork(
             raw,
             title=idea,
-            metadata={"source": "Built-in sample", "sample": demo_name, "concept": idea},
+            metadata={
+                "source": "Built-in sample",
+                "sample": demo_name,
+                "concept": idea,
+            },
         )
         st.session_state.candidates = []
     else:
@@ -703,12 +754,13 @@ def _quick_generate() -> None:
             model = spec.default_model
         quality = str(settings.get("openai_quality", "low"))
         nonce = int(st.session_state.get("generation_nonce", 0))
-        random_seed = int(hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16)
+        random_seed = int(
+            hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
+        )
         artworks = generate_with_provider(
             provider_id=provider_id,
             api_key=api_key,
-            prompt=prompt,
-            variants=1,
+            prompts=[prompt],
             model=model,
             size=spec.portrait_size,
             quality=quality,
@@ -727,7 +779,9 @@ def _quick_generate() -> None:
             },
         )
 
-    processed = _cached_process(st.session_state.current_raw, 215, True, True, 5.0, 3, 0)
+    processed = _cached_process(
+        st.session_state.current_raw, 215, True, True, 5.0, 3, 0
+    )
     config = FullPageConfig(
         page_width_mm=210.0,
         page_height_mm=297.0,
@@ -759,7 +813,9 @@ def _render_generating_screen() -> None:
         unsafe_allow_html=True,
     )
     st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
-    st.markdown('<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True
+    )
     safe_idea = html.escape(str(st.session_state.get("generation_idea", "")))
     st.markdown(f'<div class="drawing-idea">{safe_idea}</div>', unsafe_allow_html=True)
 
@@ -776,7 +832,10 @@ def _render_generating_screen() -> None:
         else:
             st.session_state.connection_error = _provider_connection_message(exc)
             st.session_state.connect_return = "generate"
-            st.session_state.connect_replace = exc.code in {"authentication", "permission"}
+            st.session_state.connect_replace = exc.code in {
+                "authentication",
+                "permission",
+            }
             if exc.code == "authentication":
                 session_keys = dict(st.session_state.get("session_provider_keys", {}))
                 session_keys.pop(provider_id, None)
@@ -804,7 +863,9 @@ def _render_first_result() -> None:
         unsafe_allow_html=True,
     )
     st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
-    st.markdown('<div class="happy-title">Your Doodle is ready</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="happy-title">Your Doodle is ready</div>', unsafe_allow_html=True
+    )
     safe_title = html.escape(str(st.session_state.get("current_title", "")))
     st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
     st.image(st.session_state.quick_processed, use_container_width=True)
@@ -812,12 +873,18 @@ def _render_first_result() -> None:
     again_col, love_col, print_col = st.columns([1, 1, 1.35])
     with again_col:
         if st.button("↻ Again", use_container_width=True):
-            st.session_state.generation_nonce = int(st.session_state.get("generation_nonce", 0)) + 1
+            st.session_state.generation_nonce = (
+                int(st.session_state.get("generation_nonce", 0)) + 1
+            )
             st.session_state.screen = "generate"
             st.rerun()
     with love_col:
         love_label = "✓ Saved" if st.session_state.get("quick_saved") else "♡ Love it"
-        if st.button(love_label, use_container_width=True, disabled=bool(st.session_state.get("quick_saved"))):
+        if st.button(
+            love_label,
+            use_container_width=True,
+            disabled=bool(st.session_state.get("quick_saved")),
+        ):
             save_library_item(
                 processed_image=st.session_state.quick_processed,
                 raw_image=st.session_state.current_raw,
@@ -850,9 +917,7 @@ def _render_first_result() -> None:
             change_clicked = st.form_submit_button("Apply", use_container_width=True)
     if change_clicked:
         if change.strip():
-            st.session_state.generation_idea = (
-                f"{st.session_state.current_title}. Change it like this: {change.strip()}"
-            )
+            st.session_state.generation_idea = f"{st.session_state.current_title}. Change it like this: {change.strip()}"
             st.session_state.generation_nonce = 0
             st.session_state.quick_mode = "ai"
             api_key, _source = _provider_key()
@@ -864,7 +929,9 @@ def _render_first_result() -> None:
             st.warning("Describe the change first.")
 
     with st.expander("Other sizes & advanced options"):
-        st.caption("Badges, exact millimetre sizes, captions, saved artwork and printer calibration live in Doodle Studio.")
+        st.caption(
+            "Badges, exact millimetre sizes, captions, saved artwork and printer calibration live in Doodle Studio."
+        )
         studio_col, provider_col = st.columns(2)
         with studio_col:
             if st.button("Open Doodle Studio", use_container_width=True):
@@ -884,7 +951,11 @@ def _render_first_result() -> None:
 
 # A direct prompt should always enter the happy path. Injected artwork in tests or
 # a restored session goes straight to the advanced studio.
-if st.session_state.current_raw is not None and st.session_state.screen == "home" and not st.session_state.home_prompt:
+if (
+    st.session_state.current_raw is not None
+    and st.session_state.screen == "home"
+    and not st.session_state.home_prompt
+):
     st.session_state.screen = "studio"
 
 if st.session_state.screen == "home":
@@ -937,7 +1008,9 @@ with st.sidebar:
     else:
         st.warning(f"{studio_provider.label} is not connected.")
 
-    connection_label = "Change connection" if api_key else f"Connect {studio_provider.label}"
+    connection_label = (
+        "Change connection" if api_key else f"Connect {studio_provider.label}"
+    )
     if st.button(
         connection_label,
         type="secondary" if api_key else "primary",
@@ -951,7 +1024,9 @@ with st.sidebar:
         st.session_state.screen = "connect"
         st.rerun()
 
-    saved_model = str(settings.get(f"{studio_provider_id}_model", studio_provider.default_model))
+    saved_model = str(
+        settings.get(f"{studio_provider_id}_model", studio_provider.default_model)
+    )
     if saved_model not in studio_provider.models:
         saved_model = studio_provider.default_model
     model = st.selectbox(
@@ -986,7 +1061,10 @@ with st.sidebar:
     st.markdown("### Print calibration")
     st.metric("Horizontal scale", f"{calibration_profile.x_scale * 100:.3f}%")
     st.metric("Vertical scale", f"{calibration_profile.y_scale * 100:.3f}%")
-    if abs(calibration_profile.x_offset_mm) > 0.001 or abs(calibration_profile.y_offset_mm) > 0.001:
+    if (
+        abs(calibration_profile.x_offset_mm) > 0.001
+        or abs(calibration_profile.y_offset_mm) > 0.001
+    ):
         st.caption(
             f"Offset: x {calibration_profile.x_offset_mm:+.2f} mm, "
             f"y {calibration_profile.y_offset_mm:+.2f} mm"
@@ -1000,7 +1078,10 @@ create_tab, library_tab, calibration_tab, guide_tab = st.tabs(
 )
 
 with create_tab:
-    st.markdown('<div class="step-label">Step 1 - Choose the artwork source</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="step-label">Step 1 - Choose the artwork source</div>',
+        unsafe_allow_html=True,
+    )
     source_mode = st.radio(
         "Artwork source",
         ["Generate with AI", "Upload artwork", "Use demo artwork"],
@@ -1022,15 +1103,24 @@ with create_tab:
             with field_2:
                 style_name = st.selectbox("Drawing profile", list(STYLE_PRESETS.keys()))
             with field_3:
-                target = st.selectbox("Intended use", ["A4 page", "Round badge", "Flexible"])
+                target = st.selectbox(
+                    "Intended use", ["A4 page", "Round badge", "Flexible"]
+                )
 
             field_4, field_5 = st.columns([1, 2])
             with field_4:
-                variants = st.number_input("Alternatives", min_value=1, max_value=4, value=2, step=1)
+                variants = st.number_input(
+                    "Alternatives", min_value=1, max_value=4, value=2, step=1
+                )
             with field_5:
-                extra = st.text_input("Extra direction", placeholder="For example: wearing wellington boots")
+                extra = st.text_input(
+                    "Extra direction",
+                    placeholder="For example: wearing wellington boots",
+                )
 
-            generate_clicked = st.form_submit_button("Create doodles", type="primary", use_container_width=True)
+            generate_clicked = st.form_submit_button(
+                "Create doodles", type="primary", use_container_width=True
+            )
 
         if generate_clicked:
             if not idea.strip():
@@ -1045,28 +1135,46 @@ with create_tab:
                 st.rerun()
             else:
                 try:
-                    generated_prompt = build_colouring_prompt(
-                        idea,
-                        age_profile=age_profile,
-                        style_name=style_name,
-                        target=target,
-                        extra_instructions=extra,
+                    with st.spinner("Planning the alternatives…"):
+                        briefs = build_variation_briefs(
+                            idea,
+                            int(variants),
+                            provider_id=studio_provider_id,
+                            api_key=api_key,
+                        )
+                    variant_prompts = [
+                        build_colouring_prompt(
+                            idea,
+                            age_profile=age_profile,
+                            style_name=style_name,
+                            target=target,
+                            extra_instructions=extra,
+                            variation_brief=brief,
+                        )
+                        for brief in briefs
+                    ]
+                    size = (
+                        studio_provider.portrait_size
+                        if target == "A4 page"
+                        else studio_provider.square_size
                     )
-                    size = studio_provider.portrait_size if target == "A4 page" else studio_provider.square_size
                     nonce = int(st.session_state.get("generation_nonce", 0))
                     seed_source = f"{idea}|{style_name}|{target}|{nonce}"
-                    random_seed = int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16)
+                    random_seed = int(
+                        hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16
+                    )
                     with st.spinner(f"Drawing {int(variants)} doodle(s)..."):
                         artworks = generate_with_provider(
                             provider_id=studio_provider_id,
                             api_key=api_key,
-                            prompt=generated_prompt,
-                            variants=int(variants),
+                            prompts=variant_prompts,
                             model=model,
                             size=size,
                             quality=quality,
                             random_seed=random_seed,
                         )
+                    for artwork, brief in zip(artworks, briefs):
+                        artwork.metadata["brief"] = brief
                     st.session_state.candidates = artworks
                     first = artworks[0]
                     _set_current_artwork(
@@ -1080,12 +1188,25 @@ with create_tab:
                             "generation": first.metadata,
                         },
                     )
-                    st.success("Your doodles are ready. Choose one, then prepare it for print.")
+                    st.success(
+                        "Your doodles are ready. Choose one, then prepare it for print."
+                    )
                 except GeneratorError as exc:
-                    if exc.code in {"missing_key", "authentication", "permission", "billing", "verification"}:
-                        st.session_state.connection_error = _provider_connection_message(exc)
+                    if exc.code in {
+                        "missing_key",
+                        "authentication",
+                        "permission",
+                        "billing",
+                        "verification",
+                    }:
+                        st.session_state.connection_error = (
+                            _provider_connection_message(exc)
+                        )
                         st.session_state.connect_return = "studio"
-                        st.session_state.connect_replace = exc.code in {"authentication", "permission"}
+                        st.session_state.connect_replace = exc.code in {
+                            "authentication",
+                            "permission",
+                        }
                         st.session_state.provider_choice = studio_provider_id
                         st.session_state.screen = "connect"
                         st.rerun()
@@ -1099,8 +1220,14 @@ with create_tab:
             for index, candidate in enumerate(st.session_state.candidates):
                 with gallery[index % 2]:
                     st.image(candidate.image_bytes, use_container_width=True)
-                    if st.button("Use this doodle", key=f"candidate_{index}", use_container_width=True):
-                        concept = st.session_state.current_metadata.get("concept", "Generated colouring picture")
+                    if st.button(
+                        "Use this doodle",
+                        key=f"candidate_{index}",
+                        use_container_width=True,
+                    ):
+                        concept = st.session_state.current_metadata.get(
+                            "concept", "Generated colouring picture"
+                        )
                         _set_current_artwork(
                             candidate.image_bytes,
                             title=concept,
@@ -1113,6 +1240,14 @@ with create_tab:
                             },
                         )
                         st.rerun()
+            if len(st.session_state.candidates) > 1:
+                with st.expander("How the alternatives differ"):
+                    for index, candidate in enumerate(
+                        st.session_state.candidates, start=1
+                    ):
+                        st.markdown(f"**Alternative {index}**")
+                        st.caption(candidate.metadata.get("brief", "—"))
+
             prompt_value = st.session_state.current_metadata.get("prompt")
             if prompt_value:
                 with st.expander("Exact generation prompt"):
@@ -1140,7 +1275,9 @@ with create_tab:
         with left:
             st.image(str(demos[demo_name]), use_container_width=True)
         with right:
-            st.write("Use an original built-in drawing to test the complete print workflow without an API key.")
+            st.write(
+                "Use an original built-in drawing to test the complete print workflow without an API key."
+            )
             if st.button("Use demo artwork", type="primary", use_container_width=True):
                 _set_current_artwork(
                     demos[demo_name].read_bytes(),
@@ -1151,7 +1288,10 @@ with create_tab:
 
     if st.session_state.current_raw:
         st.divider()
-        st.markdown('<div class="step-label">Step 2 - Prepare clean line art</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="step-label">Step 2 - Prepare clean line art</div>',
+            unsafe_allow_html=True,
+        )
         st.subheader(st.session_state.current_title or "Selected artwork")
 
         controls_1, controls_2, controls_3 = st.columns(3)
@@ -1163,10 +1303,16 @@ with create_tab:
                 value=215,
                 help="Higher values retain more faint grey marks as black.",
             )
-            auto_invert = st.checkbox("Correct a dark background automatically", value=True)
+            auto_invert = st.checkbox(
+                "Correct a dark background automatically", value=True
+            )
         with controls_2:
-            thicken_pixels = st.slider("Thicken lines", min_value=0, max_value=3, value=0)
-            despeckle_label = st.selectbox("Remove tiny specks", ["Off", "Light", "Stronger"])
+            thicken_pixels = st.slider(
+                "Thicken lines", min_value=0, max_value=3, value=0
+            )
+            despeckle_label = st.selectbox(
+                "Remove tiny specks", ["Off", "Light", "Stronger"]
+            )
             despeckle_size = {"Off": 0, "Light": 3, "Stronger": 5}[despeckle_label]
         with controls_3:
             crop_whitespace = st.checkbox("Crop excess white space", value=True)
@@ -1204,7 +1350,9 @@ with create_tab:
         metric_2.metric("Processed height", f"{metrics['height_px']:,} px")
         metric_3.metric("Black ink coverage", f"{metrics['ink_percent']:.2f}%")
         if metrics["ink_percent"] > 35:
-            st.warning("This picture contains a large amount of solid black. Lower the threshold or choose a simpler source.")
+            st.warning(
+                "This picture contains a large amount of solid black. Lower the threshold or choose a simpler source."
+            )
         elif metrics["ink_percent"] < 0.4:
             st.warning("Very little line work remains. Raise the threshold.")
 
@@ -1238,7 +1386,10 @@ with create_tab:
                 st.success("Saved to Doodle.")
 
         st.divider()
-        st.markdown('<div class="step-label">Step 3 - Define the physical layout</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="step-label">Step 3 - Define the physical layout</div>',
+            unsafe_allow_html=True,
+        )
         layout_type = st.radio(
             "Output format",
             ["A4 colouring page", "A4 circle sheet", "Custom-size page"],
@@ -1259,7 +1410,9 @@ with create_tab:
             with c2:
                 margin_mm = st.number_input("Page margin (mm)", 5.0, 40.0, 12.0, 0.5)
             with c3:
-                caption_size = st.number_input("Caption size (pt)", 7.0, 36.0, 17.0, 0.5)
+                caption_size = st.number_input(
+                    "Caption size (pt)", 7.0, 36.0, 17.0, 0.5
+                )
             caption = st.text_input("Optional caption", value="")
             page_w, page_h = _orientation_dimensions(orientation)
             pdf_config = FullPageConfig(
@@ -1288,21 +1441,29 @@ with create_tab:
                     help="Use the paper-template diameter specified by the badge press, which may exceed the finished face.",
                 )
             with row_1[2]:
-                safe = st.number_input("Safe artwork diameter (mm)", 5.0, 180.0, 50.0, 0.1)
+                safe = st.number_input(
+                    "Safe artwork diameter (mm)", 5.0, 180.0, 50.0, 0.1
+                )
             with row_1[3]:
                 copies = st.number_input("Copies (0 = fill sheet)", 0, 100, 0, 1)
 
             row_2 = st.columns(4)
             with row_2[0]:
-                sheet_margin = st.number_input("Outer margin (mm)", 0.0, 40.0, 10.0, 0.5)
+                sheet_margin = st.number_input(
+                    "Outer margin (mm)", 0.0, 40.0, 10.0, 0.5
+                )
             with row_2[1]:
                 gap = st.number_input("Gap between cuts (mm)", 0.0, 30.0, 5.0, 0.5)
             with row_2[2]:
                 apply_calibration = st.checkbox("Apply saved calibration", value=False)
             with row_2[3]:
-                circle_caption_size = st.number_input("Badge caption size (pt)", 5.0, 16.0, 7.5, 0.5)
+                circle_caption_size = st.number_input(
+                    "Badge caption size (pt)", 5.0, 16.0, 7.5, 0.5
+                )
 
-            circle_caption = st.text_input("Optional text inside every circle", value="")
+            circle_caption = st.text_input(
+                "Optional text inside every circle", value=""
+            )
             guide_1, guide_2, guide_3 = st.columns(3)
             with guide_1:
                 show_cut = st.checkbox("Show cut line", value=True)
@@ -1324,13 +1485,15 @@ with create_tab:
                 show_finished_guide=show_finished,
                 show_safe_guide=show_safe,
             )
-            active_calibration = calibration_profile if apply_calibration else CalibrationProfile()
+            active_calibration = (
+                calibration_profile if apply_calibration else CalibrationProfile()
+            )
             try:
                 plan = compute_circle_sheet_plan(pdf_config, active_calibration)
                 st.markdown(
                     f'<div class="geometry-box"><strong>{plan.capacity}</strong> circles fit on the sheet '
-                    f'({plan.columns} columns x {plan.rows} rows). '
-                    f'This export will contain <strong>{len(plan.placements)}</strong>.</div>',
+                    f"({plan.columns} columns x {plan.rows} rows). "
+                    f"This export will contain <strong>{len(plan.placements)}</strong>.</div>",
                     unsafe_allow_html=True,
                 )
                 summary = (
@@ -1341,18 +1504,28 @@ with create_tab:
                 st.error(str(exc))
                 summary = "Invalid circle layout"
             pdf_kind = "circle"
-            filename = f"{_slug(st.session_state.current_title)}-{finished:g}mm-circles.pdf"
+            filename = (
+                f"{_slug(st.session_state.current_title)}-{finished:g}mm-circles.pdf"
+            )
 
         else:
             custom_1, custom_2, custom_3 = st.columns(3)
             with custom_1:
-                custom_w = st.number_input("PDF page width (mm)", 20.0, 500.0, 100.0, 0.1)
+                custom_w = st.number_input(
+                    "PDF page width (mm)", 20.0, 500.0, 100.0, 0.1
+                )
             with custom_2:
-                custom_h = st.number_input("PDF page height (mm)", 20.0, 500.0, 100.0, 0.1)
+                custom_h = st.number_input(
+                    "PDF page height (mm)", 20.0, 500.0, 100.0, 0.1
+                )
             with custom_3:
-                custom_margin = st.number_input("Inner margin (mm)", 0.0, 80.0, 5.0, 0.5)
+                custom_margin = st.number_input(
+                    "Inner margin (mm)", 0.0, 80.0, 5.0, 0.5
+                )
             custom_caption = st.text_input("Optional caption on custom page", value="")
-            custom_caption_size = st.number_input("Custom caption size (pt)", 5.0, 30.0, 11.0, 0.5)
+            custom_caption_size = st.number_input(
+                "Custom caption size (pt)", 5.0, 30.0, 11.0, 0.5
+            )
             pdf_config = CustomPageConfig(
                 page_width_mm=float(custom_w),
                 page_height_mm=float(custom_h),
@@ -1366,14 +1539,18 @@ with create_tab:
             filename = f"{_slug(st.session_state.current_title)}-{custom_w:g}x{custom_h:g}mm.pdf"
 
         if pdf_config is not None and pdf_kind:
-            current_pdf_signature = _build_signature(processed, pdf_kind, pdf_config, active_calibration)
+            current_pdf_signature = _build_signature(
+                processed, pdf_kind, pdf_config, active_calibration
+            )
 
         if st.button("Build print-ready PDF", type="primary", use_container_width=True):
             try:
                 if pdf_kind == "full":
                     pdf_bytes = create_full_page_pdf(processed, pdf_config)
                 elif pdf_kind == "circle":
-                    pdf_bytes, actual_count = create_circle_sheet_pdf(processed, pdf_config, active_calibration)
+                    pdf_bytes, actual_count = create_circle_sheet_pdf(
+                        processed, pdf_config, active_calibration
+                    )
                     summary += f"; exported {actual_count}"
                 elif pdf_kind == "custom":
                     pdf_bytes = create_custom_page_pdf(processed, pdf_config)
@@ -1386,15 +1563,21 @@ with create_tab:
             except ValueError as exc:
                 st.error(str(exc))
 
-        if st.session_state.pdf_bytes and st.session_state.pdf_signature == current_pdf_signature:
+        if (
+            st.session_state.pdf_bytes
+            and st.session_state.pdf_signature == current_pdf_signature
+        ):
             st.subheader("Print preview")
             try:
-                st.image(_cached_preview(st.session_state.pdf_bytes), use_container_width=True)
+                st.image(
+                    _cached_preview(st.session_state.pdf_bytes),
+                    use_container_width=True,
+                )
             except RuntimeError as exc:
                 st.info(str(exc))
             st.markdown(
                 f'<div class="geometry-box"><strong>Geometry:</strong> '
-                f'{st.session_state.pdf_summary}</div>',
+                f"{st.session_state.pdf_summary}</div>",
                 unsafe_allow_html=True,
             )
             st.download_button(
@@ -1405,9 +1588,13 @@ with create_tab:
                 type="primary",
                 use_container_width=True,
             )
-            st.info("Print using Actual size or 100%. Disable Fit to page, Shrink and Scale to printable area.")
+            st.info(
+                "Print using Actual size or 100%. Disable Fit to page, Shrink and Scale to printable area."
+            )
         elif st.session_state.pdf_bytes:
-            st.warning("The artwork or layout settings have changed since this PDF was built. Build it again before printing.")
+            st.warning(
+                "The artwork or layout settings have changed since this PDF was built. Build it again before printing."
+            )
 
     else:
         st.info("Generate, upload or choose a demo picture to begin.")
@@ -1431,7 +1618,9 @@ with library_tab:
                     st.markdown(f"**{item.get('title', 'Untitled artwork')}**")
                     created = item.get("created_at", "")
                     try:
-                        readable = datetime.fromisoformat(created).strftime("%d %b %Y, %H:%M")
+                        readable = datetime.fromisoformat(created).strftime(
+                            "%d %b %Y, %H:%M"
+                        )
                     except ValueError:
                         readable = created
                     st.caption(readable)
@@ -1439,16 +1628,25 @@ with library_tab:
                     st.caption(f"Source: {source}")
                     use_col, delete_col = st.columns(2)
                     with use_col:
-                        if st.button("Use", key=f"load_{item['id']}", use_container_width=True):
+                        if st.button(
+                            "Use", key=f"load_{item['id']}", use_container_width=True
+                        ):
                             artwork = load_library_image(item["id"], prefer_raw=False)
                             _set_current_artwork(
                                 artwork,
                                 title=item.get("title", "Library artwork"),
-                                metadata={"source": "Library", "library_id": item["id"]},
+                                metadata={
+                                    "source": "Library",
+                                    "library_id": item["id"],
+                                },
                             )
                             st.success("Loaded. Open Create to lay it out.")
                     with delete_col:
-                        if st.button("Delete", key=f"delete_{item['id']}", use_container_width=True):
+                        if st.button(
+                            "Delete",
+                            key=f"delete_{item['id']}",
+                            use_container_width=True,
+                        ):
                             delete_library_item(item["id"])
                             st.rerun()
 
@@ -1479,11 +1677,27 @@ with calibration_tab:
 
     measure_1, measure_2 = st.columns(2)
     with measure_1:
-        measured_x = st.number_input("Measured horizontal line (mm)", 50.0, 150.0, 100.0, 0.1)
-        offset_x = st.number_input("Optional horizontal offset (mm)", -20.0, 20.0, calibration_profile.x_offset_mm, 0.1)
+        measured_x = st.number_input(
+            "Measured horizontal line (mm)", 50.0, 150.0, 100.0, 0.1
+        )
+        offset_x = st.number_input(
+            "Optional horizontal offset (mm)",
+            -20.0,
+            20.0,
+            calibration_profile.x_offset_mm,
+            0.1,
+        )
     with measure_2:
-        measured_y = st.number_input("Measured vertical line (mm)", 50.0, 150.0, 100.0, 0.1)
-        offset_y = st.number_input("Optional vertical offset (mm)", -20.0, 20.0, calibration_profile.y_offset_mm, 0.1)
+        measured_y = st.number_input(
+            "Measured vertical line (mm)", 50.0, 150.0, 100.0, 0.1
+        )
+        offset_y = st.number_input(
+            "Optional vertical offset (mm)",
+            -20.0,
+            20.0,
+            calibration_profile.y_offset_mm,
+            0.1,
+        )
 
     proposed = profile_from_measurements(
         float(measured_x),
@@ -1492,12 +1706,16 @@ with calibration_tab:
         y_offset_mm=float(offset_y),
     )
     result_1, result_2 = st.columns(2)
-    result_1.metric("Proposed horizontal compensation", f"{proposed.x_scale * 100:.3f}%")
+    result_1.metric(
+        "Proposed horizontal compensation", f"{proposed.x_scale * 100:.3f}%"
+    )
     result_2.metric("Proposed vertical compensation", f"{proposed.y_scale * 100:.3f}%")
 
     save_cal_col, reset_cal_col = st.columns(2)
     with save_cal_col:
-        if st.button("Save calibration profile", type="primary", use_container_width=True):
+        if st.button(
+            "Save calibration profile", type="primary", use_container_width=True
+        ):
             updated = load_settings()
             updated["calibration"] = proposed.to_dict()
             save_settings(updated)
