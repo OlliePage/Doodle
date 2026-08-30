@@ -38,6 +38,7 @@ from colouring_factory.models import (
     CircleSheetConfig,
     CustomPageConfig,
     FullPageConfig,
+    GeneratedArtwork,
     ProcessingOptions,
 )
 from colouring_factory.pdf_export import (
@@ -360,6 +361,10 @@ def _start_new_doodle() -> None:
     st.session_state.connection_error = None
     st.session_state.quick_mode = "ai"
     st.session_state.generation_nonce = 0
+    # A chain left behind points the change box at the previous picture, so a
+    # refinement quietly edits a doodle that is no longer on screen.
+    st.session_state.doodle_versions = ()
+    st.session_state.current_version = 0
     st.rerun()
 
 
@@ -1451,6 +1456,16 @@ def _quick_generate() -> None:
                 "concept": idea,
             },
         )
+        # A chain left over from an earlier picture would otherwise still be
+        # what the change box and badge redraw act on.
+        sample = GeneratedArtwork(
+            image_bytes=raw,
+            prompt=idea,
+            provider="Built-in sample",
+            model=demo_name,
+            metadata={"sample": demo_name, "concept": idea},
+        )
+        _start_version_chain(sample)
         st.session_state.candidates = []
     else:
         provider_id = _active_provider_id()
@@ -1709,12 +1724,20 @@ def _render_first_result() -> None:
         unsafe_allow_html=True,
     )
     _render_top_bar(where="result")
+
+    processed = st.session_state.get("quick_processed")
+    if not processed:
+        # Reaching here with nothing prepared is a routing mistake rather than
+        # a user error, so say so plainly instead of dying on a None.
+        st.error("That doodle is not ready yet. Draw it again.")
+        return
+
     st.markdown(
         '<div class="happy-title">Your Doodle is ready</div>', unsafe_allow_html=True
     )
     safe_title = html.escape(str(st.session_state.get("current_title", "")))
     st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
-    _render_doodle_with_colours(st.session_state.quick_processed, key_prefix="result")
+    _render_doodle_with_colours(processed, key_prefix="result")
     _render_alternatives_picker()
 
     again_col, love_col, print_col = st.columns([1, 1, 1.35])
@@ -1744,7 +1767,7 @@ def _render_first_result() -> None:
             "Save to your doodles", width="stretch", icon=":material/favorite:"
         ):
             save_library_item(
-                processed_image=st.session_state.quick_processed,
+                processed_image=processed,
                 raw_image=st.session_state.current_raw,
                 title=st.session_state.current_title or "Doodle",
                 metadata=st.session_state.current_metadata,

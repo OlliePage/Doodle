@@ -239,3 +239,54 @@ def test_the_result_screen_carries_the_same_control() -> None:
 
     assert not at.exception
     assert _change_box(at) is not None
+
+
+def test_a_new_doodle_leaves_no_version_chain_behind() -> None:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = ARTWORK
+    at.session_state["quick_processed"] = ARTWORK
+    at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+    at.session_state["doodle_versions"] = history.start(_art("original"))
+    at.session_state["current_version"] = 0
+    at.run()
+
+    for button in at.button:
+        if button.label == "New doodle":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("New doodle button not found")
+
+    assert at.session_state["doodle_versions"] == ()
+    assert at.session_state["current_version"] == 0
+
+
+def test_a_demo_doodle_starts_its_own_version_chain() -> None:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "generate"
+    at.session_state["quick_mode"] = "demo"
+    at.session_state["generation_idea"] = "a blue dinosaur"
+    at.session_state["doodle_versions"] = history.start(_art("earlier"))
+    at.run()
+
+    chain = at.session_state["doodle_versions"]
+    assert len(chain) == 1
+    assert chain[0].artwork.image_bytes == at.session_state["current_raw"]
+
+
+def test_the_result_screen_survives_unprepared_outputs() -> None:
+    """Reaching the result screen without preparing outputs must not crash.
+
+    _render_first_result hands quick_processed straight to sha256, so a None
+    raises TypeError and the whole page dies rather than showing anything.
+    """
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = ARTWORK
+    at.session_state["quick_processed"] = None
+    at.session_state["quick_pdf"] = None
+    at.run()
+
+    assert not at.exception
