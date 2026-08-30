@@ -181,12 +181,14 @@ def test_fresh_app_opens_on_minimal_doodle_homepage(monkeypatch, tmp_path) -> No
     assert kwargs["key"] == "home_prompt"
     assert kwargs["placeholder"] == "What shall we draw?"
     assert kwargs["label_visibility"] == "collapsed"
-    assert callable(kwargs["on_change"])
+    # No on_change: it fires when the box loses focus, which sent a half-typed
+    # prompt to the next screen. Submission goes through the form instead.
+    assert "on_change" not in kwargs
 
     # Submitting an idea must leave the homepage. Which screen it goes to
     # depends on whether a provider key is present, so assert only that it moved.
     fake.session_state["home_prompt"] = "A bear flying a kite"
-    kwargs["on_change"]()
+    module._submit_home_prompt()
     assert fake.session_state["screen"] != "home"
     assert fake.session_state["generation_idea"] == "A bear flying a kite"
 

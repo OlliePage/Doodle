@@ -20,7 +20,7 @@ def test_the_prompt_bar_hint_lives_outside_the_input() -> None:
 
     # Streamlit's own hint and clear button are right-aligned inside the input
     # and collide with each other and the pill's rounded edge, so both are
-    # hidden and replaced with a line below the bar.
+    # hidden and replaced with a Draw it button below the bar.
     assert '[data-testid="InputInstructions"]' in app_source
-    assert "Press Enter to draw" in app_source
-    assert "home-hint" in app_source
+    assert '"Draw it"' in app_source
+    assert "stFormSubmitButton" in app_source

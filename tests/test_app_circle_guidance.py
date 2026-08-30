@@ -102,7 +102,7 @@ def test_impossible_diameters_are_explained_rather_than_dumped() -> None:
     assert any("diameter boxes" in caption for caption in _captions(at))
 
 
-def test_the_homepage_shows_one_prompt_bar_and_a_hint() -> None:
+def test_the_homepage_shows_one_prompt_bar_and_a_button() -> None:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
 
@@ -110,8 +110,8 @@ def test_the_homepage_shows_one_prompt_bar_and_a_hint() -> None:
     assert at.session_state["screen"] == "home"
     assert len(at.text_input) == 1
     body = " ".join(block.value for block in at.markdown)
-    assert "Press Enter to draw" in body
     assert "doodle-logo--hero" in body
+    assert [button.label for button in at.button] == ["Draw it"]
 
 
 def _all_rendered(at: AppTest) -> str:
@@ -128,6 +128,7 @@ def test_the_build_badge_survives_every_screen() -> None:
     assert "doodle-build" in _all_rendered(home)
 
     home.text_input[0].set_value("A bear flying a kite").run()
+    home.button[0].click().run()
     assert home.session_state["screen"] == "connect"
     assert "doodle-build" in _all_rendered(home)
 
@@ -138,6 +139,7 @@ def test_an_idea_with_no_key_routes_to_the_connection_screen() -> None:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
     at.text_input[0].set_value("A bear flying a kite").run()
+    at.button[0].click().run()
 
     assert not at.exception
     assert at.session_state["screen"] == "connect"

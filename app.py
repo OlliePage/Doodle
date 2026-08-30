@@ -386,16 +386,18 @@ def _render_homepage() -> None:
           div[data-testid="stTextInput"] input::placeholder {color: #858a91; opacity: 1;}
           /* Streamlit right-aligns its "Press Enter to apply" hint and clear
              button inside the input, where this 62px pill leaves no room, so
-             they overlap each other and the rounded edge. Hidden here and
-             replaced with .home-hint below the bar, which cannot collide. */
+             they overlap each other and the rounded edge. Hidden here; the
+             Draw it button below the bar cannot collide with anything. */
           div[data-testid="stTextInput"] [data-testid="InputInstructions"],
           div[data-testid="stTextInput"] button {display: none !important;}
-          .home-hint {
-            text-align: center;
-            color: #858a91;
-            font-size: .85rem;
-            margin: .85rem auto 0;
-            letter-spacing: .01em;
+          div[data-testid="stFormSubmitButton"] {
+            width: min(100%, 730px);
+            margin: .95rem auto 0;
+          }
+          div[data-testid="stFormSubmitButton"] button {
+            border-radius: 999px;
+            min-height: 48px;
+            font-size: 1rem;
           }
           @media (max-width: 640px) {
             .block-container, [data-testid="stMainBlockContainer"] {
@@ -410,16 +412,23 @@ def _render_homepage() -> None:
         unsafe_allow_html=True,
     )
     st.markdown(_doodle_logo("hero", centred=True), unsafe_allow_html=True)
-    st.text_input(
-        "Describe a picture to colour",
-        key="home_prompt",
-        placeholder="What shall we draw?",
-        label_visibility="collapsed",
-        on_change=_submit_home_prompt,
-    )
-    st.markdown(
-        '<div class="home-hint">Press Enter to draw</div>', unsafe_allow_html=True
-    )
+    # A form, not on_change: a bare text input commits when it loses focus as
+    # well as on Enter, so clicking away from a half-typed prompt jumped
+    # straight to the next screen. A form commits only on Enter or the button.
+    with st.form("home_prompt_form", border=False, clear_on_submit=False):
+        st.text_input(
+            "Describe a picture to colour",
+            key="home_prompt",
+            placeholder="What shall we draw?",
+            label_visibility="collapsed",
+        )
+        home_submitted = st.form_submit_button(
+            "Draw it", type="primary", width="stretch"
+        )
+    if home_submitted:
+        _submit_home_prompt()
+        if st.session_state.screen != "home":
+            st.rerun()
     if st.session_state.get("home_error"):
         st.error(st.session_state.home_error)
 
