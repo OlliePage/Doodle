@@ -47,6 +47,14 @@ def _layout(name: str) -> AppTest:
     raise AssertionError("Output format control not found")
 
 
+def _upload() -> AppTest:
+    at = _studio()
+    for radio in at.radio:
+        if radio.label == "Artwork source":
+            return radio.set_value("Upload artwork").run()
+    raise AssertionError("Artwork source control not found")
+
+
 def _result() -> AppTest:
     at = AppTest.from_file(APP, default_timeout=120)
     at.session_state["screen"] = "result"
@@ -73,6 +81,23 @@ def _connect() -> AppTest:
     return at
 
 
+def _library() -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "library"
+    at.session_state["library_return"] = "home"
+    at.run()
+    return at
+
+
+def _generate() -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "a blue dinosaur"
+    at.session_state["quick_mode"] = "demo"
+    at.run()
+    return at
+
+
 def _every_screen() -> list[AppTest]:
     """All six screens. A guard that skips one lets a defect through it."""
 
@@ -83,6 +108,9 @@ def _every_screen() -> list[AppTest]:
         _studio(),
         _layout("A4 circle sheet"),
         _layout("Custom-size page"),
+        _upload(),
+        _library(),
+        _generate(),
     ]
 
 
@@ -100,9 +128,24 @@ def _all_labels(at: AppTest) -> list[str]:
         at.checkbox,
         at.slider,
         at.segmented_control,
+        at.get("file_uploader"),
+        at.get("toggle"),
+        at.get("multiselect"),
     ):
         labels.extend(widget.label for widget in group)
     return [label for label in labels if label]
+
+
+def test_uploader_and_toggle_labels_are_checked() -> None:
+    """The label sweep must see every widget family a screen can hold.
+
+    On 2026-08-30 _all_labels iterated eleven families and missed
+    file_uploader, toggle and multiselect, so an uploader's label was
+    subject to neither the glyph rule nor the sentence-case rule.
+    """
+
+    labels = _all_labels(_upload())
+    assert any("upload" in label.lower() for label in labels)
 
 
 def test_no_control_uses_a_typed_glyph_as_an_icon() -> None:

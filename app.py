@@ -2115,9 +2115,10 @@ with create_tab:
 
     elif source_mode == "Upload artwork":
         uploaded = st.file_uploader(
-            "Upload PNG, JPG or WebP artwork",
+            "Upload a picture",
             type=["png", "jpg", "jpeg", "webp"],
             accept_multiple_files=False,
+            help="PNG, JPG or WebP.",
         )
         upload_title = st.text_input("Artwork title", value="My colouring picture")
         if uploaded and st.button("Use uploaded artwork", type="primary"):
