@@ -830,8 +830,18 @@ def _quick_generate() -> None:
             },
         )
 
+    # Take the tuned defaults rather than repeating them. A copied number here
+    # was quietly undoing the threshold set everywhere else, on the very first
+    # picture a new user sees.
+    quick_defaults = ProcessingOptions(despeckle_size=3)
     processed = _cached_process(
-        st.session_state.current_raw, 215, True, True, 5.0, 3, 0
+        st.session_state.current_raw,
+        quick_defaults.threshold,
+        quick_defaults.auto_invert,
+        quick_defaults.crop_whitespace,
+        quick_defaults.padding_percent,
+        quick_defaults.despeckle_size,
+        quick_defaults.thicken_pixels,
     )
     config = FullPageConfig(
         page_width_mm=210.0,
