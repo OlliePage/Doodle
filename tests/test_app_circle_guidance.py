@@ -182,7 +182,8 @@ def test_the_applied_margin_makes_the_badges_fit() -> None:
 def test_gemini_users_are_not_given_recrafts_instructions() -> None:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
-    at.text_input[0].set_value("A bear flying a kite").run()
+    at.text_input[0].set_value("A bear flying a kite")
+    at.button[0].click().run()
     assert at.session_state["screen"] == "connect"
 
     at.radio[0].set_value("Google Gemini").run()
