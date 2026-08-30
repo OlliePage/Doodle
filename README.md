@@ -80,16 +80,30 @@ Desktop and mobile visual previews are included in the `samples/` folder.
 
 ## AI generation
 
-Enter your OpenAI API key in the collapsed **Settings** sidebar or set it before launch:
+Doodle can draw with any of three providers. The first time you enter an idea it opens a connection screen with a link to the right page for creating a key, so you never have to hunt for it.
+
+| Provider | Environment variable | Where to get a key |
+|---|---|---|
+| Google Gemini | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
+| OpenAI | `OPENAI_API_KEY` | https://platform.openai.com/settings/organization/api-keys |
+| Recraft | `RECRAFT_API_TOKEN` | https://app.recraft.ai/profile/api |
+
+Google Gemini has a free allowance, so it is the cheapest way to start. OpenAI and Recraft both require billing before they will generate anything.
+
+A key can come from three places, checked in this order: one typed into the current session, then the environment variable above, then a key you asked Doodle to remember. Remembered keys are written to `~/.doodle/credentials.json` with owner-only file permissions. They are never written into artwork, PDFs or the saved-doodle library. Demo and upload modes need no key at all.
+
+You can also set a key before launch:
 
 ```bash
-export OPENAI_API_KEY="your-key-here"
+export GEMINI_API_KEY="your-key-here"
 ./run.command
 ```
 
-The key is held in the running app session and is not written to the saved-doodle library. Demo and upload modes work without an API key.
-
 AI artwork is probabilistic: the same words can produce a different illustration. Print geometry remains deterministic.
+
+### Alternatives
+
+When you ask for more than one alternative, Doodle first asks the provider's text model to plan that many different scenes, varying the moment in the story, the camera framing, the setting and the mood. Recraft has no text model, so it falls back to Doodle's own variation rules. Either way the drawing style, age profile and composition rules stay identical between alternatives, so what differs is the interpretation rather than the drawing conventions. The studio shows the plan under **How the alternatives differ**.
 
 ## Badge dimensions
 
@@ -102,6 +116,10 @@ A nominal 58 mm badge can involve three distinct measurements:
 Do not assume the paper cut is 58 mm. Use the template supplied with the badge press.
 
 With a 58 mm cut, 10 mm A4 margins and 5 mm gaps, the default grid holds twelve circles: three columns by four rows.
+
+The circle sheet shows a live preview of one badge with all three diameters drawn: a solid line where the paper is cut, a dashed line for the visible face, and a dotted line for the safe area. It appears as soon as you change a setting, before any PDF is built.
+
+By default the whole picture is fitted inside the safe circle, so nothing is cut off. This makes the artwork about 71 per cent of the safe diameter, because a square that fits inside a circle is narrower than the circle itself. Choose **Fill the circle** if you would rather the picture were larger and accept losing its corners.
 
 ## Printing at scale
 
@@ -156,16 +174,21 @@ The tests cover, among other things:
 ```text
 app.py                         Doodle interface
 colouring_factory/
+  badge_preview.py            One badge rendered with its three boundaries
   calibration.py              Printer compensation
+  credentials.py              Provider keys stored on this computer
   demo.py                     Built-in artwork catalogue
-  generators.py               AI image provider
+  generators.py               AI image providers
+  guidance.py                 What each failure means and how to fix it
   image_processing.py         Black-and-white clean-up
   layouts.py                  Millimetre geometry and grids
   models.py                   Typed configuration objects
   pdf_export.py               PDF creation
   preview.py                  PDF-to-PNG preview
   prompts.py                  Colouring-art prompt factory
+  providers.py                The image providers Doodle can use
   storage.py                  Saved doodles and settings
+  variations.py               Turning one idea into distinct scenes
 assets/                       Original demo line art
 samples/                      Ready-made outputs
 scripts/                      Sample-generation utility

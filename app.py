@@ -354,8 +354,19 @@ def _render_homepage() -> None:
             caret-color: var(--doodle-primary);
           }
           div[data-testid="stTextInput"] input::placeholder {color: #858a91; opacity: 1;}
+          /* Streamlit right-aligns its "Press Enter to apply" hint and clear
+             button inside the input, where this 62px pill leaves no room, so
+             they overlap each other and the rounded edge. Hidden here and
+             replaced with .home-hint below the bar, which cannot collide. */
           div[data-testid="stTextInput"] [data-testid="InputInstructions"],
           div[data-testid="stTextInput"] button {display: none !important;}
+          .home-hint {
+            text-align: center;
+            color: #858a91;
+            font-size: .85rem;
+            margin: .85rem auto 0;
+            letter-spacing: .01em;
+          }
           @media (max-width: 640px) {
             .block-container, [data-testid="stMainBlockContainer"] {
               padding: max(2.5rem, env(safe-area-inset-top)) 1rem max(4rem, env(safe-area-inset-bottom)) !important;
@@ -375,6 +386,9 @@ def _render_homepage() -> None:
         placeholder="What shall we draw?",
         label_visibility="collapsed",
         on_change=_submit_home_prompt,
+    )
+    st.markdown(
+        '<div class="home-hint">Press Enter to draw</div>', unsafe_allow_html=True
     )
     if st.session_state.get("home_error"):
         st.error(st.session_state.home_error)
