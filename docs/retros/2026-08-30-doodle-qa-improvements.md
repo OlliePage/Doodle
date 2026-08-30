@@ -1,8 +1,8 @@
 # Retro: the Doodle QA pass
 
 Date: 2026-08-30
-Pull request: [#4](https://github.com/OlliePage/Doodle/pull/4), merged into `main` as `00194b9`
-Tests: 23 before, 127 after
+Pull requests: [#4](https://github.com/OlliePage/Doodle/pull/4) then [#8](https://github.com/OlliePage/Doodle/pull/8), both merged
+Tests: 23 before, 151 after
 
 ## What was asked for
 
@@ -75,6 +75,49 @@ what a user would notice.
 **A stale branch was noticed late.** Three of Ollie's own pull requests landed on `main`
 during the session. Checking `origin/main` before opening the PR, rather than after
 GitHub reported a conflict, would have been cheaper.
+
+## What the review found afterwards, and the lesson repeated
+
+An adversarial review of #4 finished after that pull request had already merged, and
+raised eight findings. Seven were real; the eighth flagged the variation planner sending
+`input` as a plain string where the image call sends a block list, which the Interactions
+API spec allows in both forms.
+
+The worst of them undid the paragraph above. The one-click "Set the margin to N mm"
+button — the recovery path for a badge sheet that holds nothing, added in this very
+session — **crashed the app when clicked**. Assigning to a widget's session-state key
+from the script body is refused once that widget has been instantiated, which it always
+has by the time a click is handled. The fix is an `on_click` callback, which runs before
+the rerun while the key is still free.
+
+The test asserted the button existed and never clicked it. That is the same class of
+mistake as the guidance panel above, made a second time, in the same session, after
+writing the paragraph warning about it. Knowing the lesson and applying it are separate
+acts. The rule that would have caught it is mechanical rather than thoughtful: in
+`AppTest`, every `assert ... button` is followed by `button.click().run()` and an
+assertion about the effect.
+
+Two further findings were geometry errors that the existing tests were structurally
+unable to see. With a caption, "Fit the whole picture" still clipped the corners while
+the interface promised nothing was lost, because the rectangle was solved against the
+caption-reduced box but clipped to the full safe ellipse — shifting a smaller box upward
+swings its lower corners further out, reaching radius 51.97 against a 50.00 clip on a
+100pt circle. And the suggested margin was computed from the nominal cut diameter while
+the layout uses the calibrated one, so with printer compensation applied the offered fix
+changed nothing.
+
+Both were found by an auditor computing the numbers rather than reading the intent. The
+tests checked corners against the ellipse for the uncaptioned case only, and checked the
+margin calculation with calibration left at its default. A test that exercises only the
+default configuration cannot see a bug that lives in the interaction between two
+non-default settings.
+
+**Two pull requests crossed and turned `main` red.** #7 wrapped the homepage prompt in a
+form so a half-typed idea stops jumping onward, and updated every test that typed into
+the box. #8 was already open and added one more such test, written against the old
+behaviour, merging second. Neither was wrong; nothing reconciled them. A green suite on a
+branch says nothing once the base has moved, and ordinary merge-conflict detection cannot
+catch two files that are individually consistent but jointly stale.
 
 ## Things found while merging
 
