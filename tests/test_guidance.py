@@ -82,6 +82,20 @@ def test_the_suggested_margin_is_a_whole_half_millimetre() -> None:
     assert (suggested * 2.0) == int(suggested * 2.0)
 
 
+def test_the_refinement_failures_have_guidance() -> None:
+    for code in ("edit_unsupported", "edit_failed"):
+        entry = guidance_for(code)
+        assert entry.title.strip()
+        assert entry.fix.strip()
+        assert entry.control.strip()
+
+
+def test_a_failed_refinement_reassures_that_nothing_was_lost() -> None:
+    # A failed edit costs an image charge; the user should not also fear that
+    # the picture they had is gone.
+    assert "unchanged" in guidance_for("edit_failed").fix.lower()
+
+
 def test_ink_warnings_have_guidance() -> None:
     assert guidance_for("too_much_ink").control
     assert guidance_for("too_little_ink").control
@@ -100,9 +114,7 @@ def test_the_suggested_margin_accounts_for_calibration() -> None:
     suggested = largest_margin_that_fits(config, stretched)
     assert suggested is not None
 
-    relaxed = CircleSheetConfig(
-        cut_diameter_mm=190.0, margin_mm=suggested, gap_mm=5.0
-    )
+    relaxed = CircleSheetConfig(cut_diameter_mm=190.0, margin_mm=suggested, gap_mm=5.0)
     assert compute_circle_sheet_plan(relaxed, stretched).capacity >= 1
 
 
@@ -117,6 +129,11 @@ def test_calibration_makes_the_suggestion_no_larger() -> None:
 
 
 def test_a_badge_only_too_large_once_calibrated_is_reported_as_such() -> None:
-    config = CircleSheetConfig(cut_diameter_mm=208.0, finished_diameter_mm=200.0, safe_diameter_mm=180.0)
+    config = CircleSheetConfig(
+        cut_diameter_mm=208.0, finished_diameter_mm=200.0, safe_diameter_mm=180.0
+    )
     assert largest_margin_that_fits(config) is not None
-    assert largest_margin_that_fits(config, CalibrationProfile(x_scale=1.05, y_scale=1.05)) is None
+    assert (
+        largest_margin_that_fits(config, CalibrationProfile(x_scale=1.05, y_scale=1.05))
+        is None
+    )

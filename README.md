@@ -105,6 +105,16 @@ AI artwork is probabilistic: the same words can produce a different illustration
 
 When you ask for more than one alternative, Doodle first asks the provider's text model to plan that many different scenes, varying the moment in the story, the camera framing, the setting and the mood. Recraft has no text model, so it falls back to Doodle's own variation rules. Either way the drawing style, age profile and composition rules stay identical between alternatives, so what differs is the interpretation rather than the drawing conventions. The studio shows the plan under **How the alternatives differ**.
 
+### Changing a picture
+
+Beneath any generated picture is a **Make a change** box. Describe what you want different — "give the dinosaur a party hat", "move the fire engine away from the edge" — and Doodle changes that picture rather than drawing a new one from your original words.
+
+Every version is kept in a strip beneath the picture, captioned with what you asked for. Going back to an earlier version does not delete the ones after it, so exploring an idea and changing your mind costs nothing but the drawing itself.
+
+Two things to expect. The whole picture is redrawn each time, so parts you did not ask about may shift a little; this is how all three providers work without a brush mask, and is not a fault. And each change costs one image generation, so the version count is shown beside the box.
+
+Refining works on generated pictures. Uploaded and demo artwork can be laid out and printed but not changed, because Doodle does not know which model drew them.
+
 ## Badge dimensions
 
 A nominal 58 mm badge can involve three distinct measurements:
@@ -180,6 +190,7 @@ colouring_factory/
   demo.py                     Built-in artwork catalogue
   generators.py               AI image providers
   guidance.py                 What each failure means and how to fix it
+  history.py                  The chain of versions behind a refined picture
   image_processing.py         Black-and-white clean-up
   layouts.py                  Millimetre geometry and grids
   models.py                   Typed configuration objects

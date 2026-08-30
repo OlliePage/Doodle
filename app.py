@@ -22,7 +22,9 @@ from colouring_factory.generators import (
     GeneratorError,
     check_provider_connection,
     generate_with_provider,
+    refine_with_provider,
 )
+from colouring_factory import history
 from colouring_factory.guidance import guidance_for
 from colouring_factory.version import build_label
 from colouring_factory.image_processing import analyse_line_art, normalise_line_art
@@ -50,7 +52,11 @@ from colouring_factory.providers import (
     get_provider,
     provider_id_from_label,
 )
-from colouring_factory.prompts import STYLE_PRESETS, build_colouring_prompt
+from colouring_factory.prompts import (
+    STYLE_PRESETS,
+    build_colouring_prompt,
+    build_refinement_prompt,
+)
 from colouring_factory.variations import build_variation_briefs
 from colouring_factory.storage import (
     data_root,
@@ -269,6 +275,8 @@ def _initialise_state() -> None:
         "pending_provider": "",
         "quick_mode": "ai",
         "generation_nonce": 0,
+        "doodle_versions": (),
+        "current_version": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -508,6 +516,109 @@ def _build_signature(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
     return digest.hexdigest()
+
+
+def _start_version_chain(artwork) -> None:
+    st.session_state.doodle_versions = history.start(artwork)
+    st.session_state.current_version = 0
+
+
+def _render_refine_controls(*, key_prefix: str) -> None:
+    """The refine box and the version strip beneath a picture."""
+
+    chain = st.session_state.get("doodle_versions", ())
+    if not chain:
+        return
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+    current = int(st.session_state.get("current_version", 0))
+
+    if len(chain) > 1:
+        st.caption(f"{len(chain)} versions drawn in this chain")
+        strip = st.columns(min(len(chain), 6))
+        for index, version in enumerate(chain):
+            with strip[index % len(strip)]:
+                st.image(version.artwork.image_bytes, width="stretch")
+                label = version.instruction or "Original"
+                if index == current:
+                    st.caption(f"**{label}** — showing")
+                else:
+                    st.caption(label)
+                    if st.button(
+                        "Go back to this",
+                        key=f"{key_prefix}_pick_{index}",
+                        width="stretch",
+                        icon=":material/history:",
+                    ):
+                        st.session_state.current_version = index
+                        _set_current_artwork(
+                            version.artwork.image_bytes,
+                            title=st.session_state.current_title,
+                            metadata=st.session_state.current_metadata,
+                        )
+                        st.rerun()
+
+    with st.form(f"{key_prefix}_refine", clear_on_submit=True):
+        instruction = st.text_input(
+            "Make a change",
+            placeholder="Give the dinosaur a party hat",
+            label_visibility="collapsed",
+        )
+        submitted = st.form_submit_button(
+            "Change it", type="primary", width="stretch", icon=":material/edit:"
+        )
+
+    st.caption(
+        "The whole picture is redrawn, so parts you did not ask about may shift "
+        "a little. Each change costs one generation."
+    )
+
+    if not submitted:
+        return
+    if not instruction.strip():
+        _show_guidance("missing_prompt")
+        return
+    if not api_key:
+        _show_guidance("missing_key")
+        return
+
+    base = chain[current]
+    settings = load_settings()
+    model = str(settings.get(f"{provider_id}_model", spec.default_model))
+    if model not in spec.models:
+        model = spec.default_model
+
+    try:
+        prompt = build_refinement_prompt(instruction)
+        with st.spinner("Making that change…"):
+            artwork = refine_with_provider(
+                provider_id=provider_id,
+                api_key=api_key,
+                image_bytes=base.artwork.image_bytes,
+                prompt=prompt,
+                model=model,
+                size=spec.portrait_size,
+            )
+    except GeneratorError as exc:
+        # The chain is untouched, so a failed change costs nothing but the call.
+        _show_guidance(exc.code, detail=str(exc))
+        return
+    except ValueError as exc:
+        _show_guidance("missing_prompt", detail=str(exc))
+        return
+
+    st.session_state.doodle_versions = history.append(
+        chain, artwork, instruction, parent=current
+    )
+    st.session_state.current_version = len(st.session_state.doodle_versions) - 1
+    _set_current_artwork(
+        artwork.image_bytes,
+        title=st.session_state.current_title,
+        metadata={**st.session_state.current_metadata, "instruction": instruction},
+    )
+    st.rerun()
 
 
 def _apply_sheet_margin(value_mm: float) -> None:
@@ -876,6 +987,7 @@ def _quick_generate() -> None:
                 "generation": art.metadata,
             },
         )
+        _start_version_chain(art)
 
     # Take the tuned defaults rather than repeating them. A copied number here
     # was quietly undoing the threshold set everywhere else, on the very first
@@ -1023,28 +1135,11 @@ def _render_first_result() -> None:
 
     st.caption("Open the PDF and print at Actual size / 100%. Disable Fit to page.")
 
-    with st.form("quick_change_form", clear_on_submit=True):
-        change_col, apply_col = st.columns([4, 1])
-        with change_col:
-            change = st.text_input(
-                "Make a change",
-                placeholder="Make the dinosaur wear a party hat…",
-                label_visibility="collapsed",
-            )
-        with apply_col:
-            change_clicked = st.form_submit_button("Apply", width="stretch")
-    if change_clicked:
-        if change.strip():
-            st.session_state.generation_idea = f"{st.session_state.current_title}. Change it like this: {change.strip()}"
-            st.session_state.generation_nonce = 0
-            st.session_state.quick_mode = "ai"
-            api_key, _source = _provider_key()
-            st.session_state.connect_return = "generate"
-            st.session_state.connect_replace = False
-            st.session_state.screen = "generate" if api_key else "connect"
-            st.rerun()
-        else:
-            st.warning("Describe the change first.")
+    # This box used to rewrite the original idea and draw a new picture from
+    # scratch. Since alternatives started coming back genuinely different, that
+    # no longer returned anything like what was on screen; it now changes the
+    # picture itself.
+    _render_refine_controls(key_prefix="result")
 
     with st.expander("Other sizes & advanced options"):
         st.caption(
@@ -1313,6 +1408,7 @@ with create_tab:
                             "generation": first.metadata,
                         },
                     )
+                    _start_version_chain(first)
                     st.success(
                         "Your doodles are ready. Choose one, then prepare it for print."
                     )
@@ -1364,6 +1460,9 @@ with create_tab:
                                 "generation": candidate.metadata,
                             },
                         )
+                        # Picking a different alternative abandons the previous
+                        # chain rather than grafting onto it.
+                        _start_version_chain(candidate)
                         st.rerun()
             if len(st.session_state.candidates) > 1:
                 with st.expander("How the alternatives differ"):
@@ -1468,6 +1567,8 @@ with create_tab:
         with image_right:
             st.caption("Print-cleaned")
             st.image(processed, width="stretch")
+
+        _render_refine_controls(key_prefix="studio")
 
         metrics = analyse_line_art(processed)
         metric_1, metric_2, metric_3 = st.columns(3)

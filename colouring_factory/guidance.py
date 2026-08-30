@@ -172,6 +172,22 @@ _ENTRIES: dict[str, Guidance] = {
         fix="Reduce the inner margin, or increase the page size.",
         control="the layout form in Step 3",
     ),
+    "edit_unsupported": Guidance(
+        title="This provider cannot change a picture",
+        cause="The chosen provider can draw a new picture but not modify an existing one.",
+        fix="Switch provider, or draw a new picture with the change described in the idea.",
+        control=_SETTINGS,
+        action_label="Choose a provider",
+    ),
+    "edit_failed": Guidance(
+        title="The change could not be made",
+        cause="The provider accepted the request but returned no changed picture.",
+        fix=(
+            "Try describing the change in fewer, plainer words. The picture you had "
+            "is unchanged."
+        ),
+        control="Make a change, beneath the picture",
+    ),
     "unknown": Guidance(
         title="Something went wrong",
         cause="Doodle did not recognise this failure.",
