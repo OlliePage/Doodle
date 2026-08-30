@@ -263,6 +263,8 @@ def _initialise_state() -> None:
         "pdf_summary": "",
         "pdf_signature": "",
         "library_notice": "",
+        "library_return": "home",
+        "pending_delete": "",
         "quick_processed": None,
         "quick_pdf": None,
         "quick_saved": False,
@@ -407,6 +409,25 @@ def _render_homepage() -> None:
             min-height: 48px;
             font-size: 1rem;
           }
+          /* The route to saved doodles keeps the pill's width so the column
+             stays aligned, but none of its weight: drawing is what this page
+             is for. */
+          div[data-testid="stButton"] {
+            width: min(100%, 730px);
+            margin: .55rem auto 0;
+          }
+          div[data-testid="stButton"] button {
+            border-radius: 999px;
+            min-height: 44px;
+            border-color: transparent;
+            background: transparent;
+            color: #5f6368;
+          }
+          div[data-testid="stButton"] button:hover {
+            background: #f4f5f7;
+            color: #202124;
+            border-color: transparent;
+          }
           @media (max-width: 640px) {
             .block-container, [data-testid="stMainBlockContainer"] {
               padding: max(2.5rem, env(safe-area-inset-top)) 1rem max(4rem, env(safe-area-inset-bottom)) !important;
@@ -439,6 +460,19 @@ def _render_homepage() -> None:
             st.rerun()
     if st.session_state.get("home_error"):
         st.error(st.session_state.home_error)
+
+    # Offered only once there is something to open, so a first-time homepage
+    # stays a single idea box and one button.
+    saved_count = _saved_doodle_count()
+    if saved_count:
+        if st.button(
+            f"Your saved doodles ({saved_count})",
+            width="stretch",
+            icon=":material/collections_bookmark:",
+        ):
+            st.session_state.library_return = "home"
+            st.session_state.screen = "library"
+            st.rerun()
 
 
 @st.cache_data(show_spinner=False)
@@ -521,6 +555,119 @@ def _build_signature(
 def _start_version_chain(artwork) -> None:
     st.session_state.doodle_versions = history.start(artwork)
     st.session_state.current_version = 0
+
+
+def _saved_doodle_count() -> int:
+    return len(list_library_items())
+
+
+def _render_library_grid() -> None:
+    """The grid of saved doodles, shared by the Saved screen and the Studio tab.
+
+    Loading a doodle always ends up in Doodle Studio, because laying a picture
+    out and printing it is the only reason to reopen one.
+    """
+
+    items = list_library_items()
+    if not items:
+        st.info(
+            "You have no saved doodles yet. Draw a picture, then press Save to your doodles."
+        )
+        return
+
+    columns = st.columns(3)
+    for index, item in enumerate(items):
+        with columns[index % 3]:
+            with st.container(border=True):
+                st.image(item["processed_path"], width="stretch")
+                st.markdown(f"**{item.get('title', 'Untitled doodle')}**")
+                created = item.get("created_at", "")
+                try:
+                    readable = datetime.fromisoformat(created).strftime(
+                        "%d %b %Y, %H:%M"
+                    )
+                except ValueError:
+                    readable = created
+                st.caption(readable)
+                source = item.get("metadata", {}).get("source", "Unknown source")
+                st.caption(f"Source: {source}")
+
+                if st.session_state.get("pending_delete") == item["id"]:
+                    # Deleting a saved doodle removes the only copy, so the
+                    # second click is the one that does it.
+                    st.warning("Delete this doodle? This cannot be undone.")
+                    confirm_col, cancel_col = st.columns(2)
+                    with confirm_col:
+                        if st.button(
+                            "Delete for good",
+                            key=f"confirm_delete_{item['id']}",
+                            width="stretch",
+                            icon=":material/delete_forever:",
+                        ):
+                            delete_library_item(item["id"])
+                            st.session_state.pending_delete = ""
+                            st.rerun()
+                    with cancel_col:
+                        if st.button(
+                            "Keep it",
+                            key=f"cancel_delete_{item['id']}",
+                            width="stretch",
+                        ):
+                            st.session_state.pending_delete = ""
+                            st.rerun()
+                    continue
+
+                use_col, delete_col = st.columns(2)
+                with use_col:
+                    if st.button(
+                        "Open",
+                        key=f"load_{item['id']}",
+                        width="stretch",
+                        icon=":material/open_in_new:",
+                    ):
+                        _set_current_artwork(
+                            load_library_image(item["id"], prefer_raw=False),
+                            title=item.get("title", "Saved doodle"),
+                            metadata={
+                                "source": "Saved doodles",
+                                "library_id": item["id"],
+                            },
+                        )
+                        st.session_state.library_notice = (
+                            f"{item.get('title', 'Your doodle')} is open. "
+                            "Lay it out below, then build the PDF."
+                        )
+                        st.session_state.screen = "studio"
+                        st.rerun()
+                with delete_col:
+                    if st.button(
+                        "Delete",
+                        key=f"delete_{item['id']}",
+                        width="stretch",
+                        icon=":material/delete:",
+                    ):
+                        st.session_state.pending_delete = item["id"]
+                        st.rerun()
+
+
+def _render_library_screen() -> None:
+    st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
+    st.header("Saved doodles")
+    st.caption(f"Kept on this computer, in {data_root()}.")
+
+    _render_library_grid()
+
+    st.divider()
+    back_col, new_col = st.columns(2)
+    with back_col:
+        target = str(st.session_state.get("library_return", "home"))
+        label = "Back to your doodle" if target == "result" else "Back"
+        if st.button(label, width="stretch", icon=":material/arrow_back:"):
+            st.session_state.screen = target if target != "library" else "home"
+            st.rerun()
+    with new_col:
+        if st.button("New doodle", width="stretch", icon=":material/add:"):
+            _start_new_doodle()
 
 
 def _render_refine_controls(*, key_prefix: str) -> None:
@@ -1117,11 +1264,19 @@ def _render_first_result() -> None:
             st.rerun()
     with love_col:
         already_saved = bool(st.session_state.get("quick_saved"))
-        if st.button(
-            "Saved" if already_saved else "Save to your doodles",
-            width="stretch",
-            icon=":material/check:" if already_saved else ":material/favorite:",
-            disabled=already_saved,
+        if already_saved:
+            # A dead "Saved" button left the doodle apparently nowhere. The
+            # button that replaces it is the route to where it went.
+            if st.button(
+                "See your saved doodles",
+                width="stretch",
+                icon=":material/collections_bookmark:",
+            ):
+                st.session_state.library_return = "result"
+                st.session_state.screen = "library"
+                st.rerun()
+        elif st.button(
+            "Save to your doodles", width="stretch", icon=":material/favorite:"
         ):
             save_library_item(
                 processed_image=st.session_state.quick_processed,
@@ -1140,6 +1295,9 @@ def _render_first_result() -> None:
             type="primary",
             width="stretch",
         )
+
+    if st.session_state.get("quick_saved"):
+        st.success("Saved to your doodles, on this computer.", icon=":material/check:")
 
     st.caption("Open the PDF and print at Actual size / 100%. Disable Fit to page.")
 
@@ -1190,6 +1348,9 @@ if st.session_state.screen == "generate":
     st.stop()
 if st.session_state.screen == "result":
     _render_first_result()
+    st.stop()
+if st.session_state.screen == "library":
+    _render_library_screen()
     st.stop()
 
 settings = load_settings()
@@ -1295,10 +1456,15 @@ with st.sidebar:
     st.caption(f"Local data: {data_root()}")
 
 create_tab, library_tab, calibration_tab, guide_tab = st.tabs(
-    ["Create", "Saved", "Print scale", "About"]
+    ["Create", "Saved doodles", "Print scale", "About"]
 )
 
 with create_tab:
+    # Opening a saved doodle lands here, so the confirmation belongs here too.
+    if st.session_state.library_notice:
+        st.success(st.session_state.library_notice, icon=":material/check:")
+        st.session_state.library_notice = ""
+
     st.markdown(
         '<div class="step-label">Step 1 · Choose the artwork source</div>',
         unsafe_allow_html=True,
@@ -1614,8 +1780,10 @@ with create_tab:
                 label_visibility="collapsed",
                 placeholder="Name for this doodle",
             )
-            if st.button("Save to your doodles", width="stretch", icon=":material/favorite:"):
-                item_id = save_library_item(
+            if st.button(
+                "Save to your doodles", width="stretch", icon=":material/favorite:"
+            ):
+                save_library_item(
                     processed_image=processed,
                     raw_image=st.session_state.current_raw,
                     title=save_title,
@@ -1624,8 +1792,10 @@ with create_tab:
                         "processing": asdict(processing_options),
                     },
                 )
-                st.session_state.library_notice = f"Saved as {item_id}."
-                st.success("Saved to Doodle.")
+                st.success(
+                    "Saved. You will find it under Saved doodles.",
+                    icon=":material/check:",
+                )
 
         st.divider()
         st.markdown(
@@ -1911,52 +2081,8 @@ with create_tab:
 
 with library_tab:
     st.header("Saved doodles")
-    st.caption("Saved artwork stays on this computer.")
-    if st.session_state.library_notice:
-        st.success(st.session_state.library_notice)
-        st.session_state.library_notice = ""
-
-    library_items = list_library_items()
-    if not library_items:
-        st.info("You have no saved doodles yet. Draw or upload a picture in Create, then save it.")
-    else:
-        library_columns = st.columns(3)
-        for index, item in enumerate(library_items):
-            with library_columns[index % 3]:
-                with st.container(border=True):
-                    st.image(item["processed_path"], width="stretch")
-                    st.markdown(f"**{item.get('title', 'Untitled artwork')}**")
-                    created = item.get("created_at", "")
-                    try:
-                        readable = datetime.fromisoformat(created).strftime(
-                            "%d %b %Y, %H:%M"
-                        )
-                    except ValueError:
-                        readable = created
-                    st.caption(readable)
-                    source = item.get("metadata", {}).get("source", "Unknown source")
-                    st.caption(f"Source: {source}")
-                    use_col, delete_col = st.columns(2)
-                    with use_col:
-                        if st.button("Use", key=f"load_{item['id']}", width="stretch"):
-                            artwork = load_library_image(item["id"], prefer_raw=False)
-                            _set_current_artwork(
-                                artwork,
-                                title=item.get("title", "Saved doodle"),
-                                metadata={
-                                    "source": "Library",
-                                    "library_id": item["id"],
-                                },
-                            )
-                            st.success("Loaded. Open Create to lay it out.")
-                    with delete_col:
-                        if st.button(
-                            "Delete",
-                            key=f"delete_{item['id']}",
-                            width="stretch",
-                        ):
-                            delete_library_item(item["id"])
-                            st.rerun()
+    st.caption(f"Kept on this computer, in {data_root()}.")
+    _render_library_grid()
 
 with calibration_tab:
     st.header("Print scale")

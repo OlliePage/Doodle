@@ -62,3 +62,18 @@ Prefer Streamlit's own elements. `st.container(border=True)` for grouping,
 `st.segmented_control` for a compact either/or. Injected CSS is limited to the
 homepage, where the defect being fixed lives inside Streamlit's own input chrome
 and no native API reaches it.
+
+## Routes
+
+Saved doodles are reachable from wherever a doodle exists, never only from
+inside Doodle Studio. Saving used to end at a disabled `Saved` button with no
+route onward, so the library it wrote to was effectively invisible. The rules:
+
+- The result screen's save button becomes the route to what it just saved.
+- The homepage offers `Your saved doodles (n)` once there is at least one, and
+  stays a single idea box before that.
+- Opening a saved doodle always lands in Doodle Studio's Create tab, with a
+  confirmation naming the doodle, because laying it out is the reason to reopen
+  one.
+
+Deleting a saved doodle asks first. It removes the only copy.
