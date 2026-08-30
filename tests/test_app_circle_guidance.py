@@ -144,3 +144,47 @@ def test_an_idea_with_no_key_routes_to_the_connection_screen() -> None:
     assert at.session_state["generation_idea"] == "A bear flying a kite"
     assert at.radio[0].options == ["OpenAI", "Google Gemini", "Recraft"]
     assert any("API keys" in button.label for button in at.get("link_button"))
+
+
+def test_clicking_the_margin_fix_actually_applies_it() -> None:
+    # The earlier test asserted only that the button existed. Clicking it raised
+    # StreamlitAPIException, because assigning to a widget's session-state key
+    # from the script body is refused once the widget has been instantiated.
+    at = _circle_sheet()
+    _number(at, "Paper cut diameter (mm)").set_value(190.0).run()
+    _number(at, "Outer margin (mm)").set_value(40.0).run()
+
+    fixes = [button for button in at.button if "margin" in button.label.lower()]
+    assert fixes, "no one-click margin fix was offered"
+
+    suggested = float(fixes[0].label.split()[-2])
+    fixes[0].click().run()
+
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert _number(at, "Outer margin (mm)").value == suggested
+
+
+def test_the_applied_margin_makes_the_badges_fit() -> None:
+    # A fix that applies cleanly but still does not fit would be worse than none.
+    at = _circle_sheet()
+    _number(at, "Paper cut diameter (mm)").set_value(190.0).run()
+    _number(at, "Outer margin (mm)").set_value(40.0).run()
+
+    fixes = [button for button in at.button if "margin" in button.label.lower()]
+    fixes[0].click().run()
+
+    assert not at.exception
+    assert not any("No badges fit" in error.value for error in at.error)
+
+
+def test_gemini_users_are_not_given_recrafts_instructions() -> None:
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.run()
+    at.text_input[0].set_value("A bear flying a kite").run()
+    assert at.session_state["screen"] == "connect"
+
+    at.radio[0].set_value("Google Gemini").run()
+    captions = " ".join(caption.value for caption in at.caption)
+    assert "AI Studio" in captions
+    assert "Recraft" not in captions
+    assert any("billing" in button.label.lower() for button in at.get("link_button"))

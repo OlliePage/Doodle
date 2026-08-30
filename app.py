@@ -501,6 +501,28 @@ def _build_signature(
     return digest.hexdigest()
 
 
+def _apply_sheet_margin(value_mm: float) -> None:
+    """Set the outer-margin widget's value.
+
+    Assigning to a widget's session-state key from the script body raises, because
+    the widget has already been instantiated by the time the click is handled. A
+    callback runs before the rerun, while the key is still free.
+    """
+
+    st.session_state.circle_margin_mm = float(value_mm)
+
+
+def _offer_margin_fix(suggested_mm: float) -> None:
+    st.button(
+        f"Set the margin to {suggested_mm:g} mm",
+        width="stretch",
+        icon=":material/straighten:",
+        key=f"apply_margin_{suggested_mm:g}",
+        on_click=_apply_sheet_margin,
+        args=(suggested_mm,),
+    )
+
+
 def _show_guidance(code: str, *, detail: str = "", **context) -> None:
     """Explain a failure and name the control that owns the fix.
 
@@ -629,20 +651,12 @@ def _render_connection_setup() -> None:
         )
     with link_b:
         st.link_button(
-            "Open API billing ↗" if provider_id == "openai" else "Open API pricing ↗",
+            spec.billing_button_label,
             spec.billing_url,
             width="stretch",
         )
 
-    if provider_id == "openai":
-        st.caption(
-            "On the OpenAI page, create a new secret key, name it Doodle, copy it while it is visible, "
-            "then return here. ChatGPT and API billing are separate."
-        )
-    else:
-        st.caption(
-            "Add API units in Recraft, open Profile → API, generate a token, copy it, then return here."
-        )
+    st.caption(spec.setup_hint)
 
     connection_error = st.session_state.get("connection_error")
     if connection_error and str(connection_error.get("provider", "")).lower() in {
@@ -928,6 +942,16 @@ def _render_generating_screen() -> None:
                 if source == "this Mac":
                     delete_provider_key(provider_id)
             st.session_state.screen = "connect"
+        st.rerun()
+    except ValueError as exc:
+        # Undecodable image bytes, or artwork the layout cannot place. Without
+        # this the user sees a traceback and the screen stays on "generate", so
+        # every rerun fires another paid generation.
+        st.session_state.home_error = (
+            f"That picture could not be prepared for printing: {exc}"
+        )
+        st.session_state.home_prompt = st.session_state.generation_idea
+        st.session_state.screen = "home"
         st.rerun()
     st.rerun()
 
@@ -1243,7 +1267,14 @@ with create_tab:
                         if target == "A4 page"
                         else studio_provider.square_size
                     )
-                    nonce = int(st.session_state.get("generation_nonce", 0))
+                    # Advance before deriving the seed. Recraft is the only
+                    # provider given a seed, and holding it fixed returned the
+                    # identical set of pictures every time the same idea was
+                    # submitted twice, with no control to break the tie.
+                    st.session_state.generation_nonce = (
+                        int(st.session_state.get("generation_nonce", 0)) + 1
+                    )
+                    nonce = int(st.session_state.generation_nonce)
                     seed_source = f"{idea}|{style_name}|{target}|{nonce}"
                     random_seed = int(
                         hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16
@@ -1605,18 +1636,12 @@ with create_tab:
                 # A sheet that holds nothing is reported as a zero-capacity plan
                 # rather than raised as an error, so it needs explaining here.
                 if not plan.placements:
-                    suggested = largest_margin_that_fits(pdf_config)
+                    suggested = largest_margin_that_fits(pdf_config, active_calibration)
                     if suggested is None:
                         _show_guidance("badge_too_large")
                     else:
                         _show_guidance("no_circles_fit", suggested_margin_mm=suggested)
-                        if st.button(
-                            f"Set the margin to {suggested:g} mm",
-                            width="stretch",
-                            icon=":material/straighten:",
-                        ):
-                            st.session_state.circle_margin_mm = suggested
-                            st.rerun()
+                        _offer_margin_fix(suggested)
                     summary = "No badges fit this sheet"
 
                 badge_col, legend_col = st.columns([1, 1])
@@ -1656,7 +1681,7 @@ with create_tab:
                 if "diameter" in str(exc).lower():
                     _show_guidance("invalid_circle_geometry", detail=str(exc))
                 else:
-                    suggested = largest_margin_that_fits(pdf_config)
+                    suggested = largest_margin_that_fits(pdf_config, active_calibration)
                     if suggested is None:
                         _show_guidance("badge_too_large", detail=str(exc))
                     else:
@@ -1665,13 +1690,7 @@ with create_tab:
                             detail=str(exc),
                             suggested_margin_mm=suggested,
                         )
-                        if st.button(
-                            f"Set the margin to {suggested:g} mm",
-                            width="stretch",
-                            icon=":material/straighten:",
-                        ):
-                            st.session_state.circle_margin_mm = suggested
-                            st.rerun()
+                        _offer_margin_fix(suggested)
                 summary = "Invalid circle layout"
             pdf_kind = "circle"
             filename = (
