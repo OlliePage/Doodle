@@ -61,6 +61,11 @@ from colouring_factory.storage import (
     save_settings,
 )
 
+# Low quality renders fine detail such as a hat brim in pale grey that the
+# black/white pass then breaks into a dotted line. Medium produces fewer of
+# those strokes in the first place.
+DEFAULT_QUALITY = "medium"
+
 
 st.set_page_config(
     page_title="Doodle",
@@ -796,7 +801,9 @@ def _quick_generate() -> None:
         model = str(settings.get(f"{provider_id}_model", spec.default_model))
         if model not in spec.models:
             model = spec.default_model
-        quality = str(settings.get("openai_quality", "low"))
+        # Medium rather than low: low quality renders more fine detail as pale
+        # grey that the black/white pass then breaks up.
+        quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
         nonce = int(st.session_state.get("generation_nonce", 0))
         random_seed = int(
             hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
@@ -1078,11 +1085,11 @@ with st.sidebar:
         list(studio_provider.models),
         index=list(studio_provider.models).index(saved_model),
     )
-    quality = "low"
+    quality = DEFAULT_QUALITY
     if studio_provider_id == "openai":
-        saved_quality = str(settings.get("openai_quality", "low"))
+        saved_quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
         if saved_quality not in {"low", "medium", "high"}:
-            saved_quality = "low"
+            saved_quality = DEFAULT_QUALITY
         quality = st.select_slider(
             "Generation quality",
             options=["low", "medium", "high"],
@@ -1344,7 +1351,7 @@ with create_tab:
                 "Black/white threshold",
                 min_value=80,
                 max_value=250,
-                value=215,
+                value=240,
                 help="Higher values retain more faint grey marks as black.",
             )
             auto_invert = st.checkbox(

@@ -34,12 +34,14 @@ class CalibrationProfile:
 
 @dataclass(frozen=True)
 class ProcessingOptions:
-    threshold: int = 215
+    threshold: int = 240
     auto_invert: bool = True
     crop_whitespace: bool = True
     padding_percent: float = 5.0
     despeckle_size: int = 0
-    thicken_pixels: int = 1
+    # Thickening blobs fine detail: at 1 the eye whites in a generated face
+    # fill in and eyelashes merge. The interface has always defaulted to 0.
+    thicken_pixels: int = 0
 
 
 @dataclass(frozen=True)

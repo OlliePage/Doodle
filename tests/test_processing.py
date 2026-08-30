@@ -33,3 +33,40 @@ def test_metrics_report_ink() -> None:
     metrics = analyse_line_art(output)
     assert metrics["width_px"] > 0
     assert metrics["ink_percent"] > 0
+
+
+def _faded_stroke_image() -> bytes:
+    """A drawing containing both solid black and a pale stroke.
+
+    gpt-image renders fine detail such as a hat brim in pale grey that trails
+    off. The solid bar matters: with black and white both already present,
+    autocontrast has no range left to stretch and cannot rescue the pale
+    stroke, so the threshold alone decides whether it survives.
+    """
+
+    image = Image.new("RGB", (300, 120), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((10, 10, 290, 30), fill=(0, 0, 0))
+    draw.line((10, 80, 290, 80), fill=(230, 230, 230), width=4)
+    stream = BytesIO()
+    image.save(stream, format="PNG")
+    return stream.getvalue()
+
+
+def _stroke_survives(threshold: int) -> bool:
+    output = normalise_line_art(
+        _faded_stroke_image(),
+        ProcessingOptions(threshold=threshold, crop_whitespace=False, thicken_pixels=0),
+    )
+    with Image.open(BytesIO(output)) as image:
+        row = image.convert("L").crop((0, 78, 300, 82)).tobytes()
+    return any(value < 128 for value in row)
+
+
+def test_default_threshold_keeps_pale_strokes() -> None:
+    assert _stroke_survives(ProcessingOptions().threshold)
+
+
+def test_old_default_threshold_erased_pale_strokes() -> None:
+    # Guards the fix: 215 is what produced the broken outlines Ollie reported.
+    assert not _stroke_survives(215)
