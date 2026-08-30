@@ -30,10 +30,81 @@ def launcher():
     return module
 
 
+def _git(cwd: Path, *arguments: str) -> None:
+    subprocess.run(["git", *arguments], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture
+def checkout(tmp_path, launcher, monkeypatch):
+    """A real clone one commit behind its origin, for the update step to act on.
+
+    The question the launcher asks git is the part that broke, and no test of
+    the decision function can see it, so this drives the real thing.
+    """
+
+    origin = tmp_path / "origin.git"
+    work = tmp_path / "work"
+    _git(tmp_path, "init", "--bare", "--initial-branch=main", str(origin))
+    _git(tmp_path, "clone", str(origin), str(work))
+    _git(work, "config", "user.email", "test@example.com")
+    _git(work, "config", "user.name", "Test")
+
+    (work / "app.py").write_text("first\n")
+    _git(work, "add", "app.py")
+    _git(work, "commit", "-m", "first")
+    (work / "app.py").write_text("second\n")
+    _git(work, "commit", "-am", "second")
+    _git(work, "push", "origin", "main")
+    _git(work, "reset", "--hard", "HEAD~1")
+
+    monkeypatch.setattr(launcher, "REPO", work)
+    return work
+
+
+def _head(work: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _origin_head(work: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "origin/main"], cwd=work, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_a_folder_git_has_never_heard_of_does_not_block_the_pull(
+    launcher, checkout
+) -> None:
+    """The reported failure: every launch refused to update, forever.
+
+    A checkout carrying .claude and .agents, neither tracked nor ignored, was
+    counted as uncommitted work, so `make doodle` said "you have uncommitted
+    changes" on a repository where nothing had been edited.
+    """
+
+    (checkout / ".agents").mkdir()
+    (checkout / ".agents" / "notes.md").write_text("not mine to lose\n")
+
+    launcher.update_checkout()
+
+    assert _head(checkout) == _origin_head(checkout), "the update never happened"
+    assert (checkout / ".agents" / "notes.md").exists(), "the untracked file survived"
+
+
+def test_a_real_edit_still_stops_the_pull(launcher, checkout) -> None:
+    (checkout / "app.py").write_text("mine, unfinished\n")
+
+    launcher.update_checkout()
+
+    assert _head(checkout) != _origin_head(checkout), "it pulled over an edit"
+    assert (checkout / "app.py").read_text() == "mine, unfinished\n"
+
+
 def test_uncommitted_work_is_never_pulled_over(launcher) -> None:
     action, message = launcher.update_plan("main", dirty=True, behind=3)
     assert action == "skip-dirty"
-    assert "uncommitted" in message
+    assert "tracked files" in message
 
 
 def test_a_branch_is_left_alone(launcher) -> None:

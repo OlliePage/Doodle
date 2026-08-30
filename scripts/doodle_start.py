@@ -79,7 +79,7 @@ def update_plan(branch: str, dirty: bool, behind: int) -> tuple[str, str]:
     if dirty:
         return (
             "skip-dirty",
-            "You have uncommitted changes, so nothing was pulled. Commit or "
+            "You have edits to tracked files, so nothing was pulled. Commit or "
             "set them aside first if you want the latest code.",
         )
     if branch != "main":
@@ -100,7 +100,11 @@ def update_checkout() -> None:
         return
 
     branch = capture(["git", "rev-parse", "--abbrev-ref", "HEAD"]) or "unknown"
-    dirty = bool(capture(["git", "status", "--porcelain"]))
+    # Untracked files are excluded deliberately. A folder git has never heard
+    # of cannot be lost to a fast-forward, and counting them stopped the pull
+    # for good on a checkout carrying .claude and .agents: every launch said
+    # "you have uncommitted changes" about files nobody had edited.
+    changes = capture(["git", "status", "--porcelain", "--untracked-files=no"])
     if subprocess.run(
         ["git", "fetch", "origin", "--quiet"], cwd=REPO, check=False
     ).returncode:
@@ -110,8 +114,11 @@ def update_checkout() -> None:
     behind_text = capture(["git", "rev-list", "--count", "HEAD..origin/main"])
     behind = int(behind_text) if behind_text.isdigit() else 0
 
-    action, message = update_plan(branch, dirty, behind)
+    action, message = update_plan(branch, bool(changes), behind)
     detail(message)
+    if action == "skip-dirty":
+        for line in changes.splitlines():
+            detail(f"  {line}")
     if action != "pull":
         return
 
