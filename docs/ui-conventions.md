@@ -77,3 +77,16 @@ route onward, so the library it wrote to was effectively invisible. The rules:
   one.
 
 Deleting a saved doodle asks first. It removes the only copy.
+
+## Printing
+
+Every PDF Doodle builds exists to be printed at an exact millimetre size, so
+the button beside one opens the browser's print dialogue rather than saving a
+file. The bytes are handed to the page, loaded into a hidden frame and printed
+from there, which is the only route a web page has to a print dialogue.
+
+Downloading remains available under "Nothing happened when I pressed print",
+for the browsers that refuse. Wherever printing is offered, the instruction to
+set Scale to 100% and turn off Fit to page goes with it: the browser's own
+default rescales a PDF, which is exactly the distortion the Print scale page
+exists to correct.
