@@ -34,7 +34,7 @@ class CalibrationProfile:
 
 @dataclass(frozen=True)
 class ProcessingOptions:
-    threshold: int = 215
+    threshold: int = 240
     auto_invert: bool = True
     crop_whitespace: bool = True
     padding_percent: float = 5.0
