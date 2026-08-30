@@ -509,14 +509,18 @@ def openai_input_fidelity(closeness: float) -> str:
 
 
 def openai_supports_input_fidelity(model: str) -> bool:
-    """Whether this model will accept being told how closely to follow the input.
+    """Whether this model can be told how closely to follow the input picture.
 
-    Only the gpt-image-1 family takes it, and not the mini. The live API is the
-    authority and it contradicts the SDK's own docstring, which claims
-    "gpt-image-1.5 and later": asking gpt-image-2 for it answers "The model
-    'gpt-image-2' does not support the 'input_fidelity' parameter" and returns
-    no picture, which is what reached a user pressing Colour it in for me on
-    2026-08-30.
+    Nothing has replaced this argument and nothing is lost by leaving it out.
+    OpenAI's image generation guide instructs: "For gpt-image-2, omit this
+    parameter; the API doesn't allow changing it because the model processes
+    every image input at high fidelity automatically." Sending it anyway
+    answers "The model 'gpt-image-2' does not support the 'input_fidelity'
+    parameter" and returns no picture, which is what reached a user pressing
+    Colour it in for me on 2026-08-30.
+
+    The gpt-image-1 family, where the setting is adjustable and defaults to
+    low, still has to be asked for high. The mini does not take it at all.
     """
 
     name = str(model).strip().lower()

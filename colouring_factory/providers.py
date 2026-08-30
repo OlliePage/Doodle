@@ -26,8 +26,10 @@ class ProviderSpec:
     billing_button_label: str = "Open API pricing"
     supports_edit: bool = False
     # One scale, 1.0 meaning "stay as close to the original as possible".
-    # OpenAI's input_fidelity runs the same way and Recraft's strength runs
-    # backwards, so each adapter translates rather than storing raw values.
+    # Recraft's strength runs backwards and OpenAI's input_fidelity is two
+    # words, so each adapter translates rather than storing raw values.
+    # gpt-image-2 ignores this because it always works at high fidelity, which
+    # is the end of the scale Doodle asks for anyway.
     edit_closeness: float = 0.85
 
 
