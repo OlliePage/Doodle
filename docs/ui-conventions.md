@@ -106,3 +106,13 @@ the bottom of one and inside a tab on another.
 `Draw this idea again` redraws the same idea; `New doodle` returns to an empty
 homepage. The two used to read `Draw another` and `New doodle`, which describe
 each other.
+
+## Colour is for the screen only
+
+`Colour it in for me` draws a coloured copy of the doodle to look at while
+colouring the printed one. It never touches the PDF: the file that prints is
+always the line art, because a colouring page a child cannot colour is not one.
+
+The coloured copy is kept for as long as the picture is unchanged, so looking
+at it again is free. Changing the picture, or choosing a different alternative,
+asks again, because the copy no longer matches what is on screen.
