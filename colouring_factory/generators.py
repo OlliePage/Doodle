@@ -497,6 +497,17 @@ def generate_with_provider(
     )
 
 
+def openai_input_fidelity(closeness: float) -> str:
+    """Translate the stored closeness into the two settings OpenAI accepts.
+
+    Every other provider takes a number here, so Doodle stores one. OpenAI
+    takes a choice of two words, and rejects anything else outright: sending
+    0.85 returns "Supported values are: 'high' and 'low'" and no picture.
+    """
+
+    return "high" if float(closeness) >= 0.5 else "low"
+
+
 def refine_with_openai(
     *,
     api_key: str,
@@ -532,8 +543,8 @@ def refine_with_openai(
         "image": ("doodle.png", BytesIO(image_bytes), "image/png"),
         "prompt": instruction,
         "size": size,
-        # Runs the same way as closeness: higher stays nearer the original.
-        "input_fidelity": closeness,
+        "quality": quality,
+        "input_fidelity": openai_input_fidelity(closeness),
     }
     if mask_bytes:
         request_kwargs["mask"] = ("mask.png", BytesIO(mask_bytes), "image/png")

@@ -124,8 +124,10 @@ def test_openai_asks_to_stay_faithful_to_the_original(monkeypatch) -> None:
         closeness=0.85,
     )
 
-    # input_fidelity runs the same way as closeness, so it passes straight through.
-    assert calls[0]["input_fidelity"] == pytest.approx(0.85)
+    # OpenAI rejects a number here. This assertion once required the float the
+    # rest of Doodle stores, which is how a 400 reached a user pressing Change
+    # it on 2026-08-30.
+    assert calls[0]["input_fidelity"] == "high"
     assert calls[0]["prompt"] == "give the bear a hat"
 
 
@@ -192,3 +194,13 @@ def test_the_multipart_body_round_trips_binary_unchanged() -> None:
     assert content_type.startswith("multipart/form-data; boundary=")
     boundary = content_type.split("boundary=")[1]
     assert body.endswith(f"--{boundary}--\r\n".encode())
+
+
+def test_openai_is_only_ever_sent_a_word_it_accepts() -> None:
+    for closeness in (0.0, 0.2, 0.49, 0.5, 0.85, 1.0):
+        assert generators.openai_input_fidelity(closeness) in {"high", "low"}
+
+    # Closeness runs from 0 to 1, so the halfway point decides which of the two
+    # settings a given number means.
+    assert generators.openai_input_fidelity(0.85) == "high"
+    assert generators.openai_input_fidelity(0.2) == "low"
