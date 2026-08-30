@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import uuid
 from collections.abc import Sequence
+from io import BytesIO
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -10,6 +12,40 @@ from urllib.request import Request, urlopen
 from .models import GeneratedArtwork
 
 GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
+RECRAFT_EDIT_ENDPOINT = "https://external.api.recraft.ai/v1/images/imageToImage"
+
+
+def _multipart_body(
+    fields: dict[str, str], files: dict[str, tuple[str, bytes, str]]
+) -> tuple[bytes, str]:
+    """Encode a multipart/form-data body without adding a dependency."""
+
+    boundary = f"----doodle{uuid.uuid4().hex}"
+    parts: list[bytes] = []
+
+    for name, value in fields.items():
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+        parts.append(f"{value}\r\n".encode())
+
+    for name, (filename, payload, content_type) in files.items():
+        parts.append(f"--{boundary}\r\n".encode())
+        parts.append(
+            f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode()
+        )
+        parts.append(f"Content-Type: {content_type}\r\n\r\n".encode())
+        parts.append(payload)
+        parts.append(b"\r\n")
+
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def _check_instruction(prompt: str) -> str:
+    instruction = prompt.strip()
+    if not instruction:
+        raise ValueError("Describe the change you would like.")
+    return instruction
 
 
 class GeneratorError(RuntimeError):
@@ -458,6 +494,286 @@ def generate_with_provider(
         )
     raise GeneratorError(
         f"Unsupported image provider: {provider_id}", code="unsupported_provider"
+    )
+
+
+def refine_with_openai(
+    *,
+    api_key: str,
+    image_bytes: bytes,
+    prompt: str,
+    model: str = "gpt-image-2",
+    size: str = "1024x1536",
+    quality: str = "medium",
+    closeness: float = 0.85,
+    mask_bytes: bytes | None = None,
+) -> GeneratedArtwork:
+    """Change an existing picture with the OpenAI image edit endpoint."""
+
+    instruction = _check_instruction(prompt)
+    if not api_key.strip():
+        raise GeneratorError(
+            "Connect OpenAI with an API key before changing artwork.",
+            provider="OpenAI",
+            code="missing_key",
+        )
+
+    try:
+        from openai import OpenAI
+    except ImportError as exc:  # pragma: no cover - incomplete installation only.
+        raise GeneratorError(
+            "The OpenAI Python package is not installed. Run pip install -r requirements.txt.",
+            provider="OpenAI",
+            code="edit_failed",
+        ) from exc
+
+    request_kwargs: dict[str, Any] = {
+        "model": model,
+        "image": ("doodle.png", BytesIO(image_bytes), "image/png"),
+        "prompt": instruction,
+        "size": size,
+        # Runs the same way as closeness: higher stays nearer the original.
+        "input_fidelity": closeness,
+    }
+    if mask_bytes:
+        request_kwargs["mask"] = ("mask.png", BytesIO(mask_bytes), "image/png")
+
+    try:
+        client = OpenAI(api_key=api_key.strip(), timeout=240.0, max_retries=2)
+        result = client.images.edit(**request_kwargs)
+        if not result.data:
+            raise GeneratorError(
+                "OpenAI returned no changed image.",
+                provider="OpenAI",
+                code="edit_failed",
+            )
+        payload = _read_image_payload(result.data[0])
+    except GeneratorError:
+        raise
+    except Exception as exc:
+        raise _normalise_error("OpenAI", exc) from exc
+
+    return GeneratedArtwork(
+        image_bytes=payload,
+        prompt=instruction,
+        provider="OpenAI",
+        model=model,
+        metadata={"instruction": instruction, "size": size, "quality": quality},
+    )
+
+
+def refine_with_google(
+    *,
+    api_key: str,
+    image_bytes: bytes,
+    prompt: str,
+    model: str = "gemini-3.1-flash-image",
+    size: str = "3:4",
+) -> GeneratedArtwork:
+    """Change an existing picture with the Gemini Interactions API.
+
+    The same endpoint and models as generation; the input becomes a text block
+    followed by the picture rather than a text block alone.
+    """
+
+    instruction = _check_instruction(prompt)
+    if not api_key.strip():
+        raise GeneratorError(
+            "Connect Google Gemini with an API key before changing artwork.",
+            provider="Google Gemini",
+            code="missing_key",
+        )
+
+    body = {
+        "model": model,
+        "input": [
+            {"type": "text", "text": instruction},
+            {
+                "type": "image",
+                "mime_type": "image/png",
+                "data": base64.b64encode(image_bytes).decode("ascii"),
+            },
+        ],
+        "response_format": {
+            "type": "image",
+            "mime_type": "image/png",
+            "aspect_ratio": size,
+            "image_size": "2K",
+        },
+    }
+    request = Request(
+        GOOGLE_ENDPOINT,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "x-goog-api-key": api_key.strip(),
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=240) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")
+        except OSError:
+            detail = ""
+        raise _normalise_error(
+            "Google Gemini", exc, status_code=exc.code, details=detail
+        ) from exc
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise _normalise_error("Google Gemini", exc) from exc
+
+    encoded = _google_image_block(payload)
+    if not encoded:
+        raise GeneratorError(
+            "Google Gemini returned no changed image. It may have declined the instruction.",
+            provider="Google Gemini",
+            code="content",
+        )
+
+    return GeneratedArtwork(
+        image_bytes=_read_image_payload({"b64_json": encoded}),
+        prompt=instruction,
+        provider="Google Gemini",
+        model=model,
+        metadata={"instruction": instruction, "size": size},
+    )
+
+
+def refine_with_recraft(
+    *,
+    api_key: str,
+    image_bytes: bytes,
+    prompt: str,
+    model: str = "recraftv4_1",
+    closeness: float = 0.85,
+    random_seed: int | None = None,
+) -> GeneratedArtwork:
+    """Change an existing picture with Recraft's image-to-image endpoint."""
+
+    instruction = _check_instruction(prompt)
+    if not api_key.strip():
+        raise GeneratorError(
+            "Connect Recraft with an API token before changing artwork.",
+            provider="Recraft",
+            code="missing_key",
+        )
+
+    # Recraft's strength is the difference from the original, the inverse of
+    # closeness: its own documentation calls 0 "almost identical".
+    strength = round(max(0.0, min(1.0, 1.0 - closeness)), 3)
+    fields = {
+        "prompt": instruction,
+        "strength": str(strength),
+        "model": model,
+        "n": "1",
+        "response_format": "b64_json",
+    }
+    if random_seed is not None:
+        fields["random_seed"] = str(int(random_seed))
+
+    payload_bytes, content_type = _multipart_body(
+        fields, {"image": ("doodle.png", image_bytes, "image/png")}
+    )
+    request = Request(
+        RECRAFT_EDIT_ENDPOINT,
+        data=payload_bytes,
+        headers={
+            "Authorization": f"Bearer {api_key.strip()}",
+            "Content-Type": content_type,
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=240) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")
+        except OSError:
+            detail = ""
+        raise _normalise_error(
+            "Recraft", exc, status_code=exc.code, details=detail
+        ) from exc
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise _normalise_error("Recraft", exc) from exc
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not data:
+        raise GeneratorError(
+            "Recraft returned no changed image.",
+            provider="Recraft",
+            code="edit_failed",
+        )
+
+    return GeneratedArtwork(
+        image_bytes=_read_image_payload(data[0]),
+        prompt=instruction,
+        provider="Recraft",
+        model=model,
+        metadata={"instruction": instruction, "strength": strength},
+    )
+
+
+def refine_with_provider(
+    *,
+    provider_id: str,
+    api_key: str,
+    image_bytes: bytes,
+    prompt: str,
+    model: str,
+    size: str,
+    quality: str = "medium",
+    mask_bytes: bytes | None = None,
+    random_seed: int | None = None,
+) -> GeneratedArtwork:
+    # Imported here so providers.py never imports this module and the
+    # dependency between them stays one-way.
+    from .providers import PROVIDERS, get_provider
+
+    provider = provider_id.strip().lower()
+    if provider not in PROVIDERS:
+        raise GeneratorError(
+            f"Unsupported image provider: {provider_id}", code="unsupported_provider"
+        )
+
+    spec = get_provider(provider)
+    if not spec.supports_edit:
+        raise GeneratorError(
+            f"{spec.label} cannot change an existing picture.",
+            provider=spec.label,
+            code="edit_unsupported",
+        )
+
+    if provider == "openai":
+        return refine_with_openai(
+            api_key=api_key,
+            image_bytes=image_bytes,
+            prompt=prompt,
+            model=model,
+            size=size,
+            quality=quality,
+            closeness=spec.edit_closeness,
+            mask_bytes=mask_bytes,
+        )
+    if provider == "google":
+        return refine_with_google(
+            api_key=api_key,
+            image_bytes=image_bytes,
+            prompt=prompt,
+            model=model,
+            size=size,
+        )
+    return refine_with_recraft(
+        api_key=api_key,
+        image_bytes=image_bytes,
+        prompt=prompt,
+        model=model,
+        closeness=spec.edit_closeness,
+        random_seed=random_seed,
     )
 
 
