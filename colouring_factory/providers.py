@@ -24,6 +24,11 @@ class ProviderSpec:
     # two-way if/else silently gave Gemini users Recraft's instructions.
     setup_hint: str = ""
     billing_button_label: str = "Open API pricing ↗"
+    supports_edit: bool = False
+    # One scale, 1.0 meaning "stay as close to the original as possible".
+    # OpenAI's input_fidelity runs the same way and Recraft's strength runs
+    # backwards, so each adapter translates rather than storing raw values.
+    edit_closeness: float = 0.85
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -49,6 +54,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
             "so a ChatGPT subscription does not pay for this."
         ),
         billing_button_label="Open API billing ↗",
+        supports_edit=True,
     ),
     "google": ProviderSpec(
         id="google",
@@ -76,6 +82,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
             "card."
         ),
         billing_button_label="Open usage and billing ↗",
+        supports_edit=True,
     ),
     "recraft": ProviderSpec(
         id="recraft",
@@ -98,6 +105,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
             "copy it and return here. Recraft will not issue a token on a zero balance."
         ),
         billing_button_label="Open API pricing ↗",
+        supports_edit=True,
     ),
 }
 

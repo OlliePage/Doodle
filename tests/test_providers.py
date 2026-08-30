@@ -64,6 +64,31 @@ def test_openai_has_a_text_model_and_no_seed() -> None:
     assert PROVIDERS["openai"].supports_seed is False
 
 
+def test_every_provider_declares_whether_it_can_edit() -> None:
+    for provider_id, spec in PROVIDERS.items():
+        assert isinstance(spec.supports_edit, bool)
+        assert 0.0 <= spec.edit_closeness <= 1.0, provider_id
+
+
+def test_all_three_providers_can_edit_today() -> None:
+    assert {p for p, s in PROVIDERS.items() if s.supports_edit} == {
+        "openai",
+        "google",
+        "recraft",
+    }
+
+
+def test_closeness_is_stored_on_one_scale_where_high_means_close() -> None:
+    # OpenAI's input_fidelity and Recraft's strength run in opposite directions.
+    # Storing raw vendor values would let 0.9 be copied between them and mean
+    # the opposite. This field always means "stay close"; adapters translate.
+    for spec in PROVIDERS.values():
+        if spec.supports_edit:
+            assert spec.edit_closeness >= 0.5, (
+                f"{spec.id} would drift; refinement should stay close by default"
+            )
+
+
 def test_every_provider_has_its_own_setup_instructions() -> None:
     # A two-way if/else in the interface silently gave Gemini users Recraft's
     # instructions, so the copy now lives with the provider it describes.
