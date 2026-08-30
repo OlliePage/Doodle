@@ -508,6 +508,23 @@ def openai_input_fidelity(closeness: float) -> str:
     return "high" if float(closeness) >= 0.5 else "low"
 
 
+def openai_supports_input_fidelity(model: str) -> bool:
+    """Whether this model will accept being told how closely to follow the input.
+
+    Only the gpt-image-1 family takes it, and not the mini. The live API is the
+    authority and it contradicts the SDK's own docstring, which claims
+    "gpt-image-1.5 and later": asking gpt-image-2 for it answers "The model
+    'gpt-image-2' does not support the 'input_fidelity' parameter" and returns
+    no picture, which is what reached a user pressing Colour it in for me on
+    2026-08-30.
+    """
+
+    name = str(model).strip().lower()
+    if "mini" in name:
+        return False
+    return name.startswith("gpt-image-1")
+
+
 def refine_with_openai(
     *,
     api_key: str,
@@ -544,8 +561,9 @@ def refine_with_openai(
         "prompt": instruction,
         "size": size,
         "quality": quality,
-        "input_fidelity": openai_input_fidelity(closeness),
     }
+    if openai_supports_input_fidelity(model):
+        request_kwargs["input_fidelity"] = openai_input_fidelity(closeness)
     if mask_bytes:
         request_kwargs["mask"] = ("mask.png", BytesIO(mask_bytes), "image/png")
 
