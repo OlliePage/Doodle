@@ -41,12 +41,24 @@ The application keeps two jobs separate:
 4. Run:
 
 ```bash
-./run.command
+make doodle
 ```
 
-The first launch creates a private `.venv`, installs the dependencies and opens Doodle in your browser. Later launches use the same command.
+That is the whole startup sequence in one command. It pulls new code when the
+checkout is clean and on `main` and leaves it alone otherwise, creates the
+private `.venv` and installs anything missing, says which drawing services have
+a key, stops an app left running on port 8501 after asking, and opens Doodle.
 
-You can also double-click `run.command`. macOS may require **Control-click → Open** on the first launch.
+Stopping an old app matters more than it sounds. Streamlit re-reads `app.py` on
+every click but keeps the files it imported at startup, so an app left running
+through an update calls new code from old modules and fails on functions that
+are sitting right there in the file.
+
+Two more targets: `make check` runs every check and reports without launching,
+and `make stop` stops an app running in a terminal you have since closed.
+
+`./run.command` still works and can be double-clicked; macOS may require
+**Control-click → Open** on the first launch.
 
 ## Windows
 
@@ -163,6 +175,12 @@ export DOODLE_DATA_DIR="/your/chosen/folder"
 For compatibility, an existing `~/.colouring_factory` library is retained when no `~/.doodle` folder exists.
 
 ## Run the tests
+
+```bash
+make test
+```
+
+Or by hand:
 
 ```bash
 source .venv/bin/activate
