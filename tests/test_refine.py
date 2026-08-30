@@ -119,14 +119,15 @@ def test_openai_asks_to_stay_faithful_to_the_original(monkeypatch) -> None:
         api_key="sk-test",
         image_bytes=ORIGINAL,
         prompt="give the bear a hat",
-        model="gpt-image-2",
+        model="gpt-image-1",
         size="1024x1536",
         closeness=0.85,
     )
 
     # OpenAI rejects a number here. This assertion once required the float the
     # rest of Doodle stores, which is how a 400 reached a user pressing Change
-    # it on 2026-08-30.
+    # it on 2026-08-30. The model has to be one that accepts the argument at
+    # all; tests/test_openai_wire.py covers which ones do.
     assert calls[0]["input_fidelity"] == "high"
     assert calls[0]["prompt"] == "give the bear a hat"
 
