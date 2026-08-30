@@ -12,6 +12,7 @@ import streamlit as st
 from colouring_factory.calibration import profile_from_measurements
 from colouring_factory.demo import list_demo_artwork
 from colouring_factory.generators import GeneratorError, generate_with_openai
+from colouring_factory.version import build_label
 from colouring_factory.image_processing import analyse_line_art, normalise_line_art
 from colouring_factory.layouts import compute_circle_sheet_plan
 from colouring_factory.models import (
@@ -150,6 +151,29 @@ st.markdown(
     </style>
     """,
     unsafe_allow_html=True,
+)
+
+# Rendered here rather than at the end of the script: three st.stop() calls
+# below mean the end is often never reached. Fixed positioning makes the
+# element's place in the document irrelevant to where it appears.
+st.html(
+    f"""
+    <style>
+      .doodle-build {{
+        position: fixed;
+        right: .75rem;
+        bottom: .5rem;
+        z-index: 1000;
+        font-size: .7rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--doodle-muted, #676b70);
+        opacity: .7;
+        pointer-events: none;
+        user-select: none;
+      }}
+    </style>
+    <div class="doodle-build">{build_label()}</div>
+    """
 )
 
 
