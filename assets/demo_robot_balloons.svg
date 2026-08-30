@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <rect width="1200" height="1200" fill="white"/>
+  <g fill="white" stroke="black" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <!-- balloon strings -->
+    <path d="M385 490 Q255 295 290 170"/>
+    <path d="M420 495 Q430 280 475 155"/>
+    <path d="M470 500 Q590 300 640 185"/>
+    <path d="M525 508 Q720 355 790 210"/>
+    <!-- balloons -->
+    <ellipse cx="270" cy="150" rx="94" ry="120"/>
+    <path d="M270 270 L246 302 L294 302 Z"/>
+    <ellipse cx="477" cy="135" rx="98" ry="125"/>
+    <path d="M477 260 L451 294 L503 294 Z"/>
+    <ellipse cx="655" cy="163" rx="92" ry="118"/>
+    <path d="M655 281 L632 313 L678 313 Z"/>
+    <ellipse cx="815" cy="205" rx="86" ry="110"/>
+    <path d="M815 315 L793 346 L837 346 Z"/>
+    <!-- robot antenna -->
+    <path d="M600 355 L600 290"/>
+    <circle cx="600" cy="260" r="30"/>
+    <!-- head -->
+    <rect x="350" y="345" width="500" height="310" rx="95"/>
+    <circle cx="475" cy="480" r="48"/>
+    <circle cx="725" cy="480" r="48"/>
+    <circle cx="475" cy="480" r="16" fill="black"/>
+    <circle cx="725" cy="480" r="16" fill="black"/>
+    <path d="M495 565 Q600 635 705 565"/>
+    <circle cx="390" cy="555" r="28"/>
+    <circle cx="810" cy="555" r="28"/>
+    <!-- ears -->
+    <rect x="285" y="430" width="72" height="140" rx="25"/>
+    <rect x="843" y="430" width="72" height="140" rx="25"/>
+    <!-- body -->
+    <rect x="405" y="655" width="390" height="310" rx="65"/>
+    <rect x="485" y="720" width="230" height="135" rx="25"/>
+    <circle cx="535" cy="785" r="18"/>
+    <circle cx="600" cy="785" r="18"/>
+    <circle cx="665" cy="785" r="18"/>
+    <!-- arms -->
+    <path d="M405 730 Q310 715 282 620"/>
+    <circle cx="278" cy="595" r="42"/>
+    <path d="M795 730 Q905 720 930 625"/>
+    <circle cx="936" cy="600" r="42"/>
+    <!-- legs -->
+    <path d="M500 965 L500 1060 L430 1060"/>
+    <path d="M700 965 L700 1060 L770 1060"/>
+    <!-- floor -->
+    <path d="M180 1080 Q600 1035 1020 1080"/>
+  </g>
+</svg>

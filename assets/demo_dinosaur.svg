@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <rect width="1200" height="1200" fill="white"/>
+  <g fill="white" stroke="black" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <!-- dinosaur body and tail -->
+    <ellipse cx="515" cy="650" rx="285" ry="210"/>
+    <path d="M285 640 C145 595 112 500 175 430 C210 532 300 522 365 545"/>
+    <!-- neck and head -->
+    <path d="M650 560 C650 415 692 300 805 270 C928 238 1012 320 997 414 C984 493 884 524 774 492 C744 530 720 565 710 610"/>
+    <ellipse cx="825" cy="358" rx="185" ry="132"/>
+    <!-- legs -->
+    <path d="M360 790 L335 945 Q335 990 390 990 L470 990 Q490 990 480 955 L458 825"/>
+    <path d="M575 825 L580 950 Q580 990 628 990 L713 990 Q742 990 723 952 L690 790"/>
+    <!-- spikes -->
+    <path d="M355 478 L405 390 L456 474 L515 372 L566 474 L629 382 L662 495"/>
+    <!-- face -->
+    <circle cx="862" cy="335" r="14" fill="black"/>
+    <path d="M900 399 Q846 448 784 407"/>
+    <circle cx="946" cy="370" r="9" fill="black"/>
+    <!-- arm holding watering can -->
+    <path d="M661 618 Q740 635 755 713"/>
+    <path d="M750 705 L843 675 L902 760 L824 821 L742 780 Z"/>
+    <path d="M851 690 Q914 634 949 695 Q962 734 906 758"/>
+    <path d="M899 756 L1004 731 L1027 765 L925 804"/>
+    <path d="M1006 785 C1020 815 1030 846 1031 876" stroke-dasharray="2 35"/>
+    <!-- ground and flower -->
+    <path d="M126 1001 Q300 965 470 1000 Q650 1030 820 1000 Q1000 970 1084 1000"/>
+    <path d="M1014 920 L1014 1000"/>
+    <circle cx="1014" cy="895" r="27"/>
+    <circle cx="976" cy="903" r="27"/>
+    <circle cx="1050" cy="904" r="27"/>
+    <circle cx="994" cy="866" r="27"/>
+    <circle cx="1034" cy="866" r="27"/>
+    <circle cx="1014" cy="886" r="16" fill="black"/>
+    <path d="M1014 950 Q965 925 945 958"/>
+    <path d="M1014 968 Q1057 938 1081 963"/>
+    <!-- body spots -->
+    <circle cx="435" cy="610" r="50"/>
+    <circle cx="555" cy="720" r="42"/>
+    <circle cx="330" cy="700" r="35"/>
+  </g>
+</svg>

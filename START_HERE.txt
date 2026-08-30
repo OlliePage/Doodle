@@ -1,0 +1,21 @@
+DOODLE - START HERE
+
+macOS
+1. Unzip this folder.
+2. Open Terminal.
+3. Type: cd 
+4. Drag this folder into Terminal and press Return.
+5. Run: ./run.command
+
+If macOS says permission denied, run:
+chmod +x run.command
+./run.command
+
+Windows
+Double-click run_windows.bat.
+
+Doodle opens on a deliberately simple page: type a picture idea into the search bar and press Return.
+
+No API key is required for the built-in demos or uploaded artwork. For AI generation, enter your OpenAI API key in the Settings sidebar after opening the studio.
+
+Print PDFs at Actual size / 100% and disable Fit to page. See README.md for badge dimensions and printer calibration.

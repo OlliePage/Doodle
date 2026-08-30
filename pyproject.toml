@@ -1,0 +1,10 @@
+[project]
+name = "doodle-mvp"
+version = "0.2.0"
+description = "Minimal AI colouring app with deterministic print layouts"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <rect width="1200" height="1200" fill="white"/>
+  <g fill="white" stroke="black" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <!-- stars and moon -->
+    <path d="M165 250 L182 300 L235 300 L193 331 L210 382 L165 351 L120 382 L137 331 L95 300 L148 300 Z"/>
+    <path d="M1002 208 L1014 244 L1052 244 L1021 266 L1033 302 L1002 280 L971 302 L983 266 L952 244 L990 244 Z"/>
+    <circle cx="962" cy="900" r="110"/>
+    <circle cx="930" cy="865" r="22"/>
+    <circle cx="1002" cy="925" r="30"/>
+    <!-- backpack -->
+    <rect x="245" y="520" width="190" height="350" rx="70"/>
+    <!-- body suit -->
+    <path d="M405 590 Q600 500 795 590 L850 850 Q777 940 600 940 Q423 940 350 850 Z"/>
+    <rect x="505" y="700" width="190" height="125" rx="25"/>
+    <circle cx="555" cy="760" r="18"/>
+    <circle cx="650" cy="760" r="18"/>
+    <!-- legs -->
+    <path d="M480 910 L460 1030 Q455 1060 505 1060 L570 1060 L585 935"/>
+    <path d="M615 935 L632 1060 L700 1060 Q748 1060 740 1027 L718 910"/>
+    <!-- arms and gloves -->
+    <path d="M385 630 Q268 640 232 742 Q220 790 267 805 Q310 818 337 760 L402 705"/>
+    <circle cx="246" cy="786" r="50"/>
+    <path d="M805 625 Q925 655 944 760"/>
+    <circle cx="947" cy="788" r="52"/>
+    <path d="M922 775 L963 738"/>
+    <path d="M938 790 L984 765"/>
+    <!-- helmet -->
+    <circle cx="600" cy="430" r="270"/>
+    <circle cx="600" cy="430" r="215"/>
+    <!-- bear face -->
+    <circle cx="467" cy="292" r="72"/>
+    <circle cx="733" cy="292" r="72"/>
+    <ellipse cx="600" cy="440" rx="175" ry="155"/>
+    <circle cx="540" cy="405" r="15" fill="black"/>
+    <circle cx="660" cy="405" r="15" fill="black"/>
+    <ellipse cx="600" cy="468" rx="56" ry="42"/>
+    <ellipse cx="600" cy="455" rx="22" ry="16" fill="black"/>
+    <path d="M600 472 L600 492"/>
+    <path d="M600 492 Q548 540 512 493"/>
+    <path d="M600 492 Q652 540 688 493"/>
+    <!-- helmet shine -->
+    <path d="M425 255 Q365 330 370 430"/>
+    <!-- flag -->
+    <path d="M850 418 L850 640"/>
+    <path d="M850 430 L1035 475 L850 535 Z"/>
+    <circle cx="930" cy="482" r="28"/>
+  </g>
+</svg>
