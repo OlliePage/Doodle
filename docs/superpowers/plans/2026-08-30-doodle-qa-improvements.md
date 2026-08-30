@@ -1,6 +1,6 @@
 # Doodle QA Improvements Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix five reported usability failures in Doodle — provider lock-in with unexplained API key setup, errors that name a problem without a route to the fix, a colliding homepage prompt bar, near-identical picture variations, and badge artwork silently clipped at the corners.
 
@@ -103,7 +103,7 @@ The uncommitted work in `~/Developer/edits to doodle` already implements this. I
   - `generators.generate_with_provider(*, provider_id, api_key, prompt, variants, model, size, quality="low", random_seed=None) -> list[GeneratedArtwork]`
   - `generators.check_provider_connection(provider_id, api_key) -> dict[str, Any]`
 
-- [ ] **Step 1: Copy the four files in**
+- [x] **Step 1: Copy the four files in**
 
 ```bash
 SRC="/Users/olliepage/Developer/edits to doodle"
@@ -113,13 +113,13 @@ cp "$SRC/generators.py" colouring_factory/generators.py
 cp "$SRC/app.py" app.py
 ```
 
-- [ ] **Step 2: Run the suite to see exactly the two expected failures**
+- [x] **Step 2: Run the suite to see exactly the two expected failures**
 
 Run: `.venv/bin/python -m pytest`
 
 Expected: `2 failed, 21 passed`. The failures must be exactly `tests/test_app_smoke.py::test_fresh_app_opens_on_minimal_doodle_homepage` (`KeyError: 'studio_open'`) and `tests/test_branding.py::test_doodle_brand_and_minimal_homepage_are_present` (assertion on the literal `_doodle_logo("hero")`). Any other failure means the copy is wrong — stop and re-check.
 
-- [ ] **Step 3: Rewrite the branding test to assert behaviour**
+- [x] **Step 3: Rewrite the branding test to assert behaviour**
 
 These two tests broke during a rename without catching a real bug, which is the definition of a change-detector. They are rewritten to assert what a user would notice, not which identifiers the code happens to use.
 
@@ -139,7 +139,7 @@ def test_homepage_is_branded_and_minimal() -> None:
     assert 'st.title("Colouring Factory")' not in app_source
 ```
 
-- [ ] **Step 4: Rewrite the homepage smoke test to assert behaviour**
+- [x] **Step 4: Rewrite the homepage smoke test to assert behaviour**
 
 In `tests/test_app_smoke.py`, replace the body of `test_fresh_app_opens_on_minimal_doodle_homepage` from the `assert fake.session_state["studio_open"] is False` line to the end of the function with:
 
@@ -162,12 +162,12 @@ In `tests/test_app_smoke.py`, replace the body of `test_fresh_app_opens_on_minim
     assert fake.session_state["generation_idea"] == "A bear flying a kite"
 ```
 
-- [ ] **Step 5: Run both rewritten tests**
+- [x] **Step 5: Run both rewritten tests**
 
 Run: `.venv/bin/python -m pytest tests/test_branding.py tests/test_app_smoke.py -v`
 Expected: PASS.
 
-- [ ] **Step 6: Write the provider registry test**
+- [x] **Step 6: Write the provider registry test**
 
 Create `tests/test_providers.py`:
 
@@ -213,7 +213,7 @@ def test_label_round_trips_to_its_own_id() -> None:
         assert provider_id_from_label(spec.label) == provider_id
 ```
 
-- [ ] **Step 7: Write the credentials test**
+- [x] **Step 7: Write the credentials test**
 
 Create `tests/test_credentials.py`:
 
@@ -301,17 +301,17 @@ def test_masking_never_reveals_the_middle_of_a_key() -> None:
     assert mask_key("") == ""
 ```
 
-- [ ] **Step 8: Run the two new test files**
+- [x] **Step 8: Run the two new test files**
 
 Run: `.venv/bin/python -m pytest tests/test_providers.py tests/test_credentials.py -v`
 Expected: PASS. If `test_masking_never_reveals_the_middle_of_a_key` fails, read `mask_key` and correct the expected strings to match its actual first-four / last-four behaviour rather than changing the implementation.
 
-- [ ] **Step 9: Run the whole suite**
+- [x] **Step 9: Run the whole suite**
 
 Run: `.venv/bin/python -m pytest`
 Expected: all pass, no failures.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add colouring_factory/providers.py colouring_factory/credentials.py colouring_factory/generators.py app.py tests/test_providers.py tests/test_credentials.py tests/test_branding.py tests/test_app_smoke.py
@@ -353,7 +353,7 @@ Google is the only one of the three with a free tier, so it is the answer to "I 
   - `generators.generate_with_google(*, api_key, prompt, variants=1, model="gemini-3.1-flash-image", size="3:4") -> list[GeneratedArtwork]`
   - `generators.GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"`
 
-- [ ] **Step 1: Write the failing registry test for the two new fields**
+- [x] **Step 1: Write the failing registry test for the two new fields**
 
 Append to `tests/test_providers.py`:
 
@@ -383,12 +383,12 @@ def test_openai_has_a_text_model_and_no_seed() -> None:
     assert PROVIDERS["openai"].supports_seed is False
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_providers.py -v`
 Expected: FAIL with `AttributeError: 'ProviderSpec' object has no attribute 'text_model'` and `KeyError: 'google'`.
 
-- [ ] **Step 3: Add the fields and the Google entry**
+- [x] **Step 3: Add the fields and the Google entry**
 
 In `colouring_factory/providers.py`, add two fields to the end of `ProviderSpec`:
 
@@ -419,12 +419,12 @@ Set them on the existing entries — `text_model="gpt-5-mini", supports_seed=Fal
     ),
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_providers.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing Google generator test**
+- [x] **Step 5: Write the failing Google generator test**
 
 Create `tests/test_generators_google.py`. The Google call is made with `urllib.request.urlopen`, so the test replaces that name inside the `generators` module — no network traffic occurs.
 
@@ -520,12 +520,12 @@ def test_google_explains_a_reply_with_no_image(monkeypatch) -> None:
     assert "no image" in str(caught.value).lower()
 ```
 
-- [ ] **Step 6: Run to verify it fails**
+- [x] **Step 6: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_generators_google.py -v`
 Expected: FAIL with `ImportError: cannot import name 'generate_with_google'`.
 
-- [ ] **Step 7: Implement the Google generator**
+- [x] **Step 7: Implement the Google generator**
 
 In `colouring_factory/generators.py`, add the endpoint constant near the top:
 
@@ -624,12 +624,12 @@ def generate_with_google(
     return images
 ```
 
-- [ ] **Step 8: Run to verify it passes**
+- [x] **Step 8: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_generators_google.py -v`
 Expected: PASS.
 
-- [ ] **Step 9: Route Google through the dispatcher and the connection check**
+- [x] **Step 9: Route Google through the dispatcher and the connection check**
 
 In `generate_with_provider`, add before the final `raise`:
 
@@ -664,7 +664,7 @@ Google authenticates with `x-goog-api-key` rather than a bearer token, so build 
     request = Request(endpoint, headers=headers, method="GET")
 ```
 
-- [ ] **Step 10: Write the connection-check test**
+- [x] **Step 10: Write the connection-check test**
 
 Append to `tests/test_generators_google.py`:
 
@@ -701,12 +701,12 @@ def test_openai_connection_check_still_uses_a_bearer_token(monkeypatch) -> None:
     assert captured["headers"]["Authorization"] == "Bearer sk-test"
 ```
 
-- [ ] **Step 11: Run the full suite**
+- [x] **Step 11: Run the full suite**
 
 Run: `.venv/bin/python -m pytest`
 Expected: all pass.
 
-- [ ] **Step 12: Add the Google key to the example environment file**
+- [x] **Step 12: Add the Google key to the example environment file**
 
 In `.env.example`, below the existing OpenAI line:
 
@@ -718,7 +718,7 @@ GEMINI_API_KEY=your_key_here
 RECRAFT_API_TOKEN=your_token_here
 ```
 
-- [ ] **Step 13: Commit**
+- [x] **Step 13: Commit**
 
 ```bash
 git add colouring_factory/providers.py colouring_factory/generators.py tests/test_providers.py tests/test_generators_google.py .env.example
@@ -754,7 +754,7 @@ Build the fallback first, because it has no network dependency and the text-mode
   - `variations.VARIATION_AXES: dict[str, tuple[str, ...]]` with keys `"moment"`, `"framing"`, `"setting"`, `"mood"`
   - `variations.axis_briefs(concept: str, count: int) -> tuple[str, ...]`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_variations.py`:
 
@@ -814,12 +814,12 @@ def test_a_count_outside_one_to_four_is_refused() -> None:
         axis_briefs("a bear", 5)
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_variations.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'colouring_factory.variations'`.
 
-- [ ] **Step 3: Implement the axes**
+- [x] **Step 3: Implement the axes**
 
 Create `colouring_factory/variations.py`:
 
@@ -887,12 +887,12 @@ def axis_briefs(concept: str, count: int) -> tuple[str, ...]:
     return tuple(briefs)
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_variations.py -v`
 Expected: PASS. If `test_axis_briefs_are_all_different` fails, the strides collide for that offset — change the `strides` tuple so no two indices produce the same four-tuple, and re-run.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add colouring_factory/variations.py tests/test_variations.py
@@ -922,7 +922,7 @@ reshuffle the ones already on screen."
   - `variations.written_briefs(concept, count, *, provider_id, api_key) -> tuple[str, ...]` — raises `GeneratorError` on any failure
   - `variations.build_variation_briefs(concept, count, *, provider_id, api_key) -> tuple[str, ...]` — never raises for provider reasons; falls back to `axis_briefs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_variations.py`:
 
@@ -1034,12 +1034,12 @@ def test_one_alternative_needs_no_text_call(monkeypatch) -> None:
 
 Add the missing import at the top of the file: `from colouring_factory.generators import GeneratorError`.
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_variations.py -v`
 Expected: FAIL with `ImportError: cannot import name 'written_briefs'`.
 
-- [ ] **Step 3: Implement brief writing**
+- [x] **Step 3: Implement brief writing**
 
 Add to `colouring_factory/variations.py`. Note the imports go at the top of the file, and `urlopen` is imported by name so tests can replace it.
 
@@ -1181,17 +1181,17 @@ def build_variation_briefs(
         return axis_briefs(concept, count)
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_variations.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Run: `.venv/bin/python -m pytest`
 Expected: all pass. A circular-import error between `variations` and `generators` means `generators` has grown an import of `variations` — it must not; the dependency runs one way only.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add colouring_factory/variations.py tests/test_variations.py
@@ -1227,7 +1227,7 @@ The generators currently take one prompt plus a variant count and invent the dif
   - `generators.generate_with_provider(*, provider_id, api_key, prompts: Sequence[str], model, size, quality="low", random_seed=None) -> list[GeneratedArtwork]`
   - The same `prompts: Sequence[str]` signature on `generate_with_openai`, `generate_with_recraft` and `generate_with_google`. `_variant_prompt` is deleted.
 
-- [ ] **Step 1: Write the failing prompt test**
+- [x] **Step 1: Write the failing prompt test**
 
 Append to `tests/test_prompts.py`:
 
@@ -1255,12 +1255,12 @@ def test_the_round_badge_rule_asks_for_a_circular_composition() -> None:
     assert "corner" in lowered
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_prompts.py -v`
 Expected: FAIL with `TypeError: build_colouring_prompt() got an unexpected keyword argument 'variation_brief'`.
 
-- [ ] **Step 3: Add the parameter and strengthen the badge rule**
+- [x] **Step 3: Add the parameter and strengthen the badge rule**
 
 In `colouring_factory/prompts.py`, change the signature to add `variation_brief: str = ""` as the last parameter, and replace the scene line so a brief takes precedence:
 
@@ -1281,12 +1281,12 @@ Replace `TARGET_RULES["Round badge"]` with:
     ),
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_prompts.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing generator-interface test**
+- [x] **Step 5: Write the failing generator-interface test**
 
 Create `tests/test_generator_prompts.py`:
 
@@ -1340,12 +1340,12 @@ def test_the_old_variant_helper_is_gone() -> None:
     assert not hasattr(generators, "_variant_prompt")
 ```
 
-- [ ] **Step 6: Run to verify it fails**
+- [x] **Step 6: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_generator_prompts.py -v`
 Expected: FAIL with `TypeError: generate_with_provider() got an unexpected keyword argument 'prompts'`.
 
-- [ ] **Step 7: Change the generator interface**
+- [x] **Step 7: Change the generator interface**
 
 In `colouring_factory/generators.py`:
 
@@ -1362,12 +1362,12 @@ Add `from collections.abc import Sequence` to the imports.
 
 In `generate_with_provider`, replace `prompt: str` and `variants: int` with `prompts: Sequence[str]` and pass `prompts=prompts` to each branch.
 
-- [ ] **Step 8: Run to verify it passes**
+- [x] **Step 8: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_generator_prompts.py tests/test_generators_google.py -v`
 Expected: PASS. The Task 2 Google tests call `generate_with_google(prompt=...)`; update those calls to `prompts=[...]` and the `variants=3` case to three prompts.
 
-- [ ] **Step 9: Wire it into the studio generation form**
+- [x] **Step 9: Wire it into the studio generation form**
 
 In `app.py`, inside the `Generate with AI` branch, replace the block that builds one prompt and calls the generator with:
 
@@ -1426,12 +1426,12 @@ and record the brief when generating, by adding `"brief": brief` to each artwork
                         artwork.metadata["brief"] = brief
 ```
 
-- [ ] **Step 10: Run the full suite**
+- [x] **Step 10: Run the full suite**
 
 Run: `.venv/bin/python -m pytest`
 Expected: all pass.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add colouring_factory/prompts.py colouring_factory/generators.py app.py tests/test_prompts.py tests/test_generator_prompts.py tests/test_generators_google.py
@@ -1468,7 +1468,7 @@ Artwork is scaled to fill the square that bounds the safe circle and then clippe
   - `layouts.fit_inscribed(source_width, source_height, centre_x, centre_y, ellipse_width, ellipse_height) -> tuple[float, float, float, float]` returning `(x, y, width, height)`, matching `fit_contain`'s convention
   - `models.CircleSheetConfig.fit_mode: str = "inscribe"`
 
-- [ ] **Step 1: Write the failing geometry test**
+- [x] **Step 1: Write the failing geometry test**
 
 Create `tests/test_badge_fit.py`:
 
@@ -1540,12 +1540,12 @@ def test_a_zero_sized_ellipse_is_refused() -> None:
         fit_inscribed(100, 100, 0.0, 0.0, 0.0, 58.0)
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_badge_fit.py -v`
 Expected: FAIL with `ImportError: cannot import name 'fit_inscribed'`.
 
-- [ ] **Step 3: Implement the geometry**
+- [x] **Step 3: Implement the geometry**
 
 Add to `colouring_factory/layouts.py`:
 
@@ -1581,12 +1581,12 @@ def fit_inscribed(
     return centre_x - (width / 2.0), centre_y - (height / 2.0), width, height
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_badge_fit.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Add the fit mode to the configuration**
+- [x] **Step 5: Add the fit mode to the configuration**
 
 In `colouring_factory/models.py`, add to `CircleSheetConfig` after `show_safe_guide`:
 
@@ -1594,7 +1594,7 @@ In `colouring_factory/models.py`, add to `CircleSheetConfig` after `show_safe_gu
     fit_mode: str = "inscribe"
 ```
 
-- [ ] **Step 6: Write the failing export test**
+- [x] **Step 6: Write the failing export test**
 
 Add these imports to the top of `tests/test_badge_fit.py`, beside the existing ones:
 
@@ -1656,12 +1656,12 @@ def test_fill_mode_reproduces_the_previous_geometry() -> None:
     assert pdf_bytes.startswith(b"%PDF")
 ```
 
-- [ ] **Step 7: Run to verify it fails**
+- [x] **Step 7: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_badge_fit.py -v`
 Expected: FAIL on `test_inscribed_artwork_is_smaller_than_filled_artwork`, because both modes currently draw the same size.
 
-- [ ] **Step 8: Honour the fit mode in the export**
+- [x] **Step 8: Honour the fit mode in the export**
 
 In `colouring_factory/pdf_export.py`, import `fit_inscribed` alongside `fit_contain`, and add a helper above `create_circle_sheet_pdf`:
 
@@ -1702,17 +1702,17 @@ def _place_badge_art(
 
 Replace both `_draw_image_contain(...)` calls inside `create_circle_sheet_pdf` with `_place_badge_art(...)`, passing `config.fit_mode`. In the captioned branch, the artwork's vertical centre moves up by half the caption height, so pass `centre_y + (caption_h / 2.0)` and `box_height=art_h`. Keep the ellipse clip in both modes as a safety net.
 
-- [ ] **Step 9: Run to verify it passes**
+- [x] **Step 9: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_badge_fit.py -v`
 Expected: PASS.
 
-- [ ] **Step 10: Run the full suite**
+- [x] **Step 10: Run the full suite**
 
 Run: `.venv/bin/python -m pytest`
 Expected: all pass, including the existing `tests/test_circle_render.py` and `tests/test_pdfs.py`. If an existing circle test asserts a drawn size, it was asserting the old fill geometry — update it to construct its config with `fit_mode="fill"` so it keeps testing what it meant to test.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add colouring_factory/layouts.py colouring_factory/models.py colouring_factory/pdf_export.py tests/test_badge_fit.py
@@ -1743,7 +1743,7 @@ You cannot currently see a badge until after the PDF is built. The preview is pr
 - Consumes: `pdf_export.create_circle_sheet_pdf`, `preview.render_pdf_preview`, `models.CircleSheetConfig`, `models.CalibrationProfile`.
 - Produces: `badge_preview.render_badge_preview(image_bytes, config, calibration=None, dpi=200) -> bytes` returning PNG bytes.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_badge_preview.py`:
 
@@ -1808,12 +1808,12 @@ def test_a_calibration_profile_is_accepted() -> None:
     assert png.startswith(b"\x89PNG")
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_badge_preview.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'colouring_factory.badge_preview'`.
 
-- [ ] **Step 3: Implement the preview**
+- [x] **Step 3: Implement the preview**
 
 Create `colouring_factory/badge_preview.py`:
 
@@ -1862,12 +1862,12 @@ def render_badge_preview(
     return render_pdf_preview(pdf_bytes, dpi=dpi)
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_badge_preview.py -v`
 Expected: PASS. If `create_circle_sheet_pdf` raises "No circles fit", the surround margin leaves too little room — the page is the diameter plus twice the margin, so check `compute_circle_sheet_plan` is not also subtracting the margin twice.
 
-- [ ] **Step 5: Show the preview in the studio**
+- [x] **Step 5: Show the preview in the studio**
 
 In `app.py`, add the import `from colouring_factory.badge_preview import render_badge_preview`, add a cached wrapper beside the other `@st.cache_data` helpers:
 
@@ -1922,12 +1922,12 @@ Add a fit-mode control to the guides row so filling stays reachable:
 
 and pass `fit_mode="inscribe" if fit_choice == "Fit the whole picture" else "fill"` into `CircleSheetConfig`.
 
-- [ ] **Step 6: Run the full suite**
+- [x] **Step 6: Run the full suite**
 
 Run: `.venv/bin/python -m pytest`
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add colouring_factory/badge_preview.py tests/test_badge_preview.py app.py
@@ -1964,7 +1964,7 @@ Errors currently print the problem and stop. Each one gains a cause, a fix, the 
   - `guidance.GUIDANCE_CODES: frozenset[str]`
   - `layouts.largest_margin_that_fits(config) -> float | None`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_guidance.py`:
 
@@ -2036,12 +2036,12 @@ def test_ink_warnings_have_guidance() -> None:
     assert guidance_for("too_little_ink").control
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_guidance.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'colouring_factory.guidance'`.
 
-- [ ] **Step 3: Implement the margin calculation**
+- [x] **Step 3: Implement the margin calculation**
 
 Add to `colouring_factory/layouts.py`:
 
@@ -2061,7 +2061,7 @@ def largest_margin_that_fits(config: CircleSheetConfig) -> float | None:
     return max(0.0, math.floor(usable * 2.0) / 2.0)
 ```
 
-- [ ] **Step 4: Implement the guidance map**
+- [x] **Step 4: Implement the guidance map**
 
 Create `colouring_factory/guidance.py`:
 
@@ -2228,12 +2228,12 @@ def guidance_for(code: str, **context: Any) -> Guidance:
     return entry
 ```
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_guidance.py -v`
 Expected: PASS. If `test_every_generator_error_code_has_guidance` lists a missing code, add an entry for it rather than loosening the test — that test exists precisely to catch a new failure mode shipping without an explanation.
 
-- [ ] **Step 6: Render one guidance panel in the app**
+- [x] **Step 6: Render one guidance panel in the app**
 
 In `app.py`, add `from colouring_factory.guidance import guidance_for` and `from colouring_factory.layouts import largest_margin_that_fits` to the imports, and add a shared renderer beside the other helpers:
 
@@ -2289,12 +2289,12 @@ Wrap the PDF build so a failure explains itself:
                 _show_guidance("pdf_failed", detail=str(exc))
 ```
 
-- [ ] **Step 7: Run the full suite**
+- [x] **Step 7: Run the full suite**
 
 Run: `.venv/bin/python -m pytest`
 Expected: all pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add colouring_factory/guidance.py colouring_factory/layouts.py app.py tests/test_guidance.py
@@ -2326,7 +2326,7 @@ entry, so a new failure mode cannot ship unexplained."
 - Consumes: nothing.
 - Produces: nothing consumed by later tasks.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_branding.py`:
 
@@ -2342,12 +2342,12 @@ def test_the_prompt_bar_hint_lives_outside_the_input() -> None:
     assert "home-hint" in app_source
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_branding.py -v`
 Expected: FAIL on `"Press Enter to draw"`.
 
-- [ ] **Step 3: Add the hint below the bar**
+- [x] **Step 3: Add the hint below the bar**
 
 In `_render_homepage` in `app.py`, add to the homepage `<style>` block:
 
@@ -2367,12 +2367,12 @@ and immediately after the `st.text_input(...)` call, before the error display:
     st.markdown('<div class="home-hint">Press Enter to draw</div>', unsafe_allow_html=True)
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `.venv/bin/python -m pytest tests/test_branding.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Update the README**
+- [x] **Step 5: Update the README**
 
 Replace the `## AI generation` section with:
 
@@ -2428,18 +2428,18 @@ Add to the repository structure listing, in alphabetical position:
   variations.py               Turning one idea into distinct scenes
 ```
 
-- [ ] **Step 6: Run the full suite**
+- [x] **Step 6: Run the full suite**
 
 Run: `.venv/bin/python -m pytest`
 Expected: all pass.
 
-- [ ] **Step 7: Launch the app and check it by hand**
+- [x] **Step 7: Launch the app and check it by hand**
 
 Run: `.venv/bin/streamlit run app.py`
 
 Confirm, with no key configured: the homepage shows the wordmark, one prompt bar with no overlapping icons, and the hint below it. Entering an idea opens the connection screen naming all three providers. Then with a key: an idea draws a picture; asking for three alternatives in the studio produces three visibly different scenes; choosing "A4 circle sheet" shows the badge preview with three rings before any PDF is built.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app.py README.md tests/test_branding.py
@@ -2458,10 +2458,45 @@ what the badge preview's three rings mean."
 
 ---
 
+## What changed during execution
+
+Three things the plan did not anticipate, recorded so the next person is not
+surprised by the difference between this document and the commits.
+
+**Task 10 was added.** The `developing-with-streamlit` skill loaded after the plan
+was written and flagged `use_container_width` as deprecated. All 37 call sites in
+`app.py` were converted to `width="stretch"` as a separate mechanical commit,
+verified against the installed signatures rather than the test suite, whose fake
+Streamlit ignores keyword arguments.
+
+**Two real bugs were found by running the app, not by the unit tests.**
+
+The first: sizing the badge preview page from the nominal diameter put the fit
+test on a floating-point boundary, so a calibrated 58 mm badge came out roughly
+seven femtometres wider than its own page and no circles fitted at all. The page
+now clears the scaled diameter plus the centring offset, with a tenth of a
+millimetre of slack.
+
+The second, and the more instructive: the layout guidance was wired to the
+exception path, but `compute_circle_sheet_plan` returns a zero-capacity plan
+rather than raising when nothing fits. The most likely failure in practice — a
+badge too large for its margin — showed "0 circles fit" with no explanation and
+no way forward. The unit tests could not catch this, because they exercised
+`largest_margin_that_fits` and `guidance_for` in isolation and never the wiring
+between them.
+
+**A third test layer was added because of that.** `tests/test_app_circle_guidance.py`
+drives the app through Streamlit's own `AppTest` runner, which executes the real
+script with the real runtime and can tell whether a control rendered and what it
+said. The hand-written fake Streamlit in `tests/test_app_smoke.py` cannot: it
+returns `None` for any command it does not implement, so a missing panel looks
+identical to a rendered one. Prefer `AppTest` for anything that asserts what the
+user sees.
+
 ## Verification before the PR leaves draft
 
-- [ ] `.venv/bin/python -m pytest` — full suite green, with the actual output pasted into the PR
-- [ ] The app launches and the manual checks in Task 9 Step 7 all pass
-- [ ] `git log --oneline main..HEAD` shows one commit per task, none bundling unrelated work
-- [ ] The spec's "Out of scope" list has not been quietly implemented
-- [ ] `gh pr ready` once the above hold
+- [x] `.venv/bin/python -m pytest` — full suite green, with the actual output pasted into the PR
+- [x] The app launches and the manual checks in Task 9 Step 7 all pass
+- [x] `git log --oneline main..HEAD` shows one commit per task, none bundling unrelated work
+- [x] The spec's "Out of scope" list has not been quietly implemented
+- [x] `gh pr ready` once the above hold
