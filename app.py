@@ -23,8 +23,11 @@ from colouring_factory.generators import (
     check_provider_connection,
     generate_with_provider,
 )
+from colouring_factory.guidance import guidance_for
 from colouring_factory.image_processing import analyse_line_art, normalise_line_art
-from colouring_factory.layouts import compute_circle_sheet_plan
+from colouring_factory.layouts import (
+    compute_circle_sheet_plan,
+)
 from colouring_factory.models import (
     CalibrationProfile,
     CircleSheetConfig,
@@ -452,6 +455,20 @@ def _build_signature(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
     return digest.hexdigest()
+
+
+def _show_guidance(code: str, *, detail: str = "", **context) -> None:
+    """Explain a failure and name the control that owns the fix.
+
+    Streamlit cannot reliably scroll to a widget, so the panel names the
+    responsible setting rather than pretending to navigate to it.
+    """
+
+    entry = guidance_for(code, **context)
+    st.error(f"**{entry.title}** — {detail or entry.cause}")
+    with st.container(border=True):
+        st.markdown(entry.fix)
+        st.caption(f"Where: {entry.control}")
 
 
 def _provider_connection_message(error: GeneratorError) -> dict[str, object]:
@@ -1222,9 +1239,9 @@ with create_tab:
                         st.session_state.provider_choice = studio_provider_id
                         st.session_state.screen = "connect"
                         st.rerun()
-                    st.error(str(exc))
+                    _show_guidance(exc.code, detail=str(exc))
                 except ValueError as exc:
-                    st.error(str(exc))
+                    _show_guidance("missing_prompt", detail=str(exc))
 
         if st.session_state.candidates:
             st.subheader("Choose a doodle")
@@ -1362,11 +1379,19 @@ with create_tab:
         metric_2.metric("Processed height", f"{metrics['height_px']:,} px")
         metric_3.metric("Black ink coverage", f"{metrics['ink_percent']:.2f}%")
         if metrics["ink_percent"] > 35:
-            st.warning(
-                "This picture contains a large amount of solid black. Lower the threshold or choose a simpler source."
+            _show_guidance(
+                "too_much_ink",
+                detail=(
+                    f"{metrics['ink_percent']:.1f}% of this picture is solid black."
+                ),
             )
         elif metrics["ink_percent"] < 0.4:
-            st.warning("Very little line work remains. Raise the threshold.")
+            _show_guidance(
+                "too_little_ink",
+                detail=(
+                    f"Only {metrics['ink_percent']:.2f}% of this picture is black line work."
+                ),
+            )
 
         png_col, save_col = st.columns([1, 1])
         with png_col:
@@ -1462,7 +1487,7 @@ with create_tab:
             row_2 = st.columns(4)
             with row_2[0]:
                 sheet_margin = st.number_input(
-                    "Outer margin (mm)", 0.0, 40.0, 10.0, 0.5
+                    "Outer margin (mm)", 0.0, 40.0, 10.0, 0.5, key="circle_margin_mm"
                 )
             with row_2[1]:
                 gap = st.number_input("Gap between cuts (mm)", 0.0, 30.0, 5.0, 0.5)
@@ -1555,7 +1580,25 @@ with create_tab:
                                 "cut away. Switch to Fit the whole picture to keep them."
                             )
             except ValueError as exc:
-                st.error(str(exc))
+                if "diameter" in str(exc).lower():
+                    _show_guidance("invalid_circle_geometry", detail=str(exc))
+                else:
+                    suggested = largest_margin_that_fits(pdf_config)
+                    if suggested is None:
+                        _show_guidance("badge_too_large", detail=str(exc))
+                    else:
+                        _show_guidance(
+                            "no_circles_fit",
+                            detail=str(exc),
+                            suggested_margin_mm=suggested,
+                        )
+                        if st.button(
+                            f"Set the margin to {suggested:g} mm",
+                            width="stretch",
+                            icon=":material/straighten:",
+                        ):
+                            st.session_state.circle_margin_mm = suggested
+                            st.rerun()
                 summary = "Invalid circle layout"
             pdf_kind = "circle"
             filename = (
@@ -1615,7 +1658,7 @@ with create_tab:
                 st.session_state.pdf_summary = summary
                 st.session_state.pdf_signature = current_pdf_signature
             except ValueError as exc:
-                st.error(str(exc))
+                _show_guidance("pdf_failed", detail=str(exc))
 
         if (
             st.session_state.pdf_bytes

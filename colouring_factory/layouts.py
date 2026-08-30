@@ -41,6 +41,21 @@ def fit_contain(
     return x, y, width, height
 
 
+def largest_margin_that_fits(config: CircleSheetConfig) -> float | None:
+    """The largest half-millimetre margin leaving room for at least one circle.
+
+    Returns None when the badge itself is as wide as the page, where no margin
+    can help and the diameter has to change instead.
+    """
+
+    smallest_page = min(config.page_width_mm, config.page_height_mm)
+    if config.cut_diameter_mm >= smallest_page:
+        return None
+
+    usable = (smallest_page - config.cut_diameter_mm) / 2.0
+    return max(0.0, math.floor(usable * 2.0) / 2.0)
+
+
 def fit_inscribed(
     source_width: float,
     source_height: float,
