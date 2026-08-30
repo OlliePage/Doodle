@@ -87,3 +87,36 @@ def test_ink_warnings_have_guidance() -> None:
     assert guidance_for("too_little_ink").control
     assert guidance_for("too_much_ink").action_label
     assert guidance_for("too_little_ink").action_label
+
+
+def test_the_suggested_margin_accounts_for_calibration() -> None:
+    # Measuring the nominal diameter suggested a margin the calibrated layout
+    # still could not fit, so taking the offered fix changed nothing.
+    stretched = CalibrationProfile(x_scale=1.02, y_scale=1.02)
+    config = CircleSheetConfig(cut_diameter_mm=190.0, margin_mm=40.0, gap_mm=5.0)
+
+    assert compute_circle_sheet_plan(config, stretched).capacity == 0
+
+    suggested = largest_margin_that_fits(config, stretched)
+    assert suggested is not None
+
+    relaxed = CircleSheetConfig(
+        cut_diameter_mm=190.0, margin_mm=suggested, gap_mm=5.0
+    )
+    assert compute_circle_sheet_plan(relaxed, stretched).capacity >= 1
+
+
+def test_calibration_makes_the_suggestion_no_larger() -> None:
+    config = CircleSheetConfig(cut_diameter_mm=190.0, margin_mm=40.0)
+    plain = largest_margin_that_fits(config)
+    stretched = largest_margin_that_fits(
+        config, CalibrationProfile(x_scale=1.02, y_scale=1.02)
+    )
+    assert plain is not None and stretched is not None
+    assert stretched <= plain
+
+
+def test_a_badge_only_too_large_once_calibrated_is_reported_as_such() -> None:
+    config = CircleSheetConfig(cut_diameter_mm=208.0, finished_diameter_mm=200.0, safe_diameter_mm=180.0)
+    assert largest_margin_that_fits(config) is not None
+    assert largest_margin_that_fits(config, CalibrationProfile(x_scale=1.05, y_scale=1.05)) is None

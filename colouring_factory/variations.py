@@ -106,6 +106,10 @@ def _extract_json_array(text: str) -> list[str]:
 
 
 def _google_text(model: str, api_key: str, instruction: str) -> str:
+    # A plain string rather than the block list used for image generation. The
+    # Interactions API types `input` as "Content or array(Content) or
+    # array(Step) or string", so both forms are valid; the string is the
+    # documented shape for a plain text request.
     request = Request(
         GOOGLE_ENDPOINT,
         data=json.dumps({"model": model, "input": instruction}).encode("utf-8"),

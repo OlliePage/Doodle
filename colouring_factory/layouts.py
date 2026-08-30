@@ -41,18 +41,32 @@ def fit_contain(
     return x, y, width, height
 
 
-def largest_margin_that_fits(config: CircleSheetConfig) -> float | None:
+def largest_margin_that_fits(
+    config: CircleSheetConfig,
+    calibration: CalibrationProfile | None = None,
+) -> float | None:
     """The largest half-millimetre margin leaving room for at least one circle.
+
+    Takes the same calibration the layout will use. Measuring the nominal
+    diameter instead would suggest a margin that still does not fit whenever
+    printer compensation is applied, so the offered fix would change nothing.
 
     Returns None when the badge itself is as wide as the page, where no margin
     can help and the diameter has to change instead.
     """
 
+    calibration = calibration or CalibrationProfile()
+    # The grid is laid out from the scaled diameter, and the wider of the two
+    # axes is what actually has to fit on the shorter side of the page.
+    scaled_diameter = config.cut_diameter_mm * max(
+        calibration.x_scale, calibration.y_scale
+    )
+
     smallest_page = min(config.page_width_mm, config.page_height_mm)
-    if config.cut_diameter_mm >= smallest_page:
+    if scaled_diameter >= smallest_page:
         return None
 
-    usable = (smallest_page - config.cut_diameter_mm) / 2.0
+    usable = (smallest_page - scaled_diameter) / 2.0
     return max(0.0, math.floor(usable * 2.0) / 2.0)
 
 
@@ -63,13 +77,23 @@ def fit_inscribed(
     centre_y: float,
     ellipse_width: float,
     ellipse_height: float,
+    offset_y: float = 0.0,
 ) -> tuple[float, float, float, float]:
     """Largest rectangle of the source's aspect ratio fitting wholly inside the ellipse.
 
     Scaling a rectangle to the ellipse's bounding box leaves its corners outside
     the ellipse, so anything drawn there is clipped away. Solving the ellipse
-    equation for the corner instead guarantees nothing is lost: for half-extents
-    (a, b) and aspect ratio r = w/h, w = 2ar / sqrt(r^2 + (a/b)^2).
+    equation for the worst corner instead guarantees nothing is lost.
+
+    `offset_y` shifts the rectangle's centre away from the ellipse's, which a
+    caption requires: the artwork moves up to clear the text, and its lower
+    corners then swing further from the centre. Solving against the shifted
+    corner is what keeps them inside. With half-extents (a, b), aspect ratio
+    r = w/h and shift d, the binding corner is (w/2, |d| + h/2), giving
+
+        (r·h / 2a)² + ((|d| + h/2) / b)² = 1
+
+    a quadratic in h. At d = 0 it reduces to w = 2abr / sqrt(r²b² + a²).
     """
 
     if source_width <= 0 or source_height <= 0:
@@ -80,11 +104,26 @@ def fit_inscribed(
     semi_x = ellipse_width / 2.0
     semi_y = ellipse_height / 2.0
     ratio = source_width / source_height
+    shift = abs(offset_y)
 
-    width = (2.0 * semi_x * ratio) / math.sqrt((ratio**2) + ((semi_x / semi_y) ** 2))
-    height = width / ratio
+    if shift >= semi_y:
+        raise ValueError("The offset places the artwork outside the ellipse.")
 
-    return centre_x - (width / 2.0), centre_y - (height / 2.0), width, height
+    quadratic_a = ((ratio / (2.0 * semi_x)) ** 2) + (1.0 / (4.0 * (semi_y**2)))
+    quadratic_b = shift / (semi_y**2)
+    quadratic_c = ((shift**2) / (semi_y**2)) - 1.0
+
+    discriminant = (quadratic_b**2) - (4.0 * quadratic_a * quadratic_c)
+    height = (-quadratic_b + math.sqrt(discriminant)) / (2.0 * quadratic_a)
+    width = height * ratio
+
+    rectangle_centre_y = centre_y + offset_y
+    return (
+        centre_x - (width / 2.0),
+        rectangle_centre_y - (height / 2.0),
+        width,
+        height,
+    )
 
 
 def validate_circle_config(config: CircleSheetConfig) -> None:
