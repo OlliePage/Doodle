@@ -125,7 +125,8 @@ def save_settings(settings: dict[str, Any]) -> None:
 # answers every time. Read through here so a settings file written by an older
 # version, or edited by hand, still yields something the app can draw with.
 QUICK_ALTERNATIVE_CHOICES = (1, 2, 3, 4)
-QUICK_AGE_CHOICES = ("2-3 years", "4-5 years")
+QUICK_AGE_CHOICES = ("2-3 years", "4-5 years", "6-9 years", "Grown-up")
+GROWN_UP_LEVEL = "Grown-up"
 QUICK_STYLE_CHOICES = (
     "Toddler bold",
     "Preschool detailed",
@@ -152,4 +153,15 @@ def quick_drawing_options(settings: dict[str, Any] | None = None) -> dict[str, A
     if style not in QUICK_STYLE_CHOICES:
         style = QUICK_STYLE_CHOICES[0]
 
-    return {"alternatives": alternatives, "age_profile": age_profile, "style": style}
+    # A grown-up drawing for themselves has nothing to pair with, so the answer
+    # is no whatever the settings file says.
+    pair_grown_up = bool(settings.get("quick_pair_grown_up", False)) and (
+        age_profile != GROWN_UP_LEVEL
+    )
+
+    return {
+        "alternatives": alternatives,
+        "age_profile": age_profile,
+        "style": style,
+        "pair_grown_up": pair_grown_up,
+    }

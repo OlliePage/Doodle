@@ -28,24 +28,24 @@ closed. The grown-up level relaxes only the ban on pattern and fine detail.
 
 ## Tasks
 
-- [ ] 1. `prompts.py`: a `DetailLevel` record and the four levels, replacing
+- [x] 1. `prompts.py`: a `DetailLevel` record and the four levels, replacing
   `AGE_RULES`. The prompt's audience line, region guidance, line weight and
   texture rule all come from the level. `build_refinement_prompt` uses the
   same table so a change to a grown-up sheet stays a grown-up sheet.
-- [ ] 2. `storage.py`: four choices, and a remembered `quick_pair_grown_up`
+- [x] 2. `storage.py`: four choices, and a remembered `quick_pair_grown_up`
   flag. An unrecognised level still falls back to the toddler one.
-- [ ] 3. Homepage: the level control gains the two new rungs, and a tick
+- [x] 3. Homepage: the level control gains the two new rungs, and a tick
   reading "Also draw one for me, at grown-up detail" inside the same popover,
   hidden when the chosen level is already Grown-up. The settings line says
   "2-3 years + grown-up" when the pair is on.
-- [ ] 4. Generation: with the pair on, one scene is drawn twice, at the chosen
+- [x] 4. Generation: with the pair on, one scene is drawn twice, at the chosen
   level and at Grown-up, and the alternatives count is not used, so the cost is
   exactly two pictures. The grown-up sheet is cleaned more gently, because the
   despeckle pass that tidies a toddler drawing eats fine pattern work.
-- [ ] 5. Result screen: the grown-up sheet appears below the child's with its
+- [x] 5. Result screen: the grown-up sheet appears below the child's with its
   own print button and download fallback. Every existing control keeps acting
   on the child's sheet.
-- [ ] 6. Tests: the four levels produce different prompts; a grown-up prompt
+- [x] 6. Tests: the four levels produce different prompts; a grown-up prompt
   permits pattern and never calls its reader a young child, while still
   forbidding grey and shading; ticking the box draws two sheets from one scene
   and leaves the child's PDF untouched; without it nothing changes.

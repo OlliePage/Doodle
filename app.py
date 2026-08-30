@@ -61,6 +61,7 @@ from colouring_factory.prompts import (
 )
 from colouring_factory.variations import build_variation_briefs
 from colouring_factory.storage import (
+    GROWN_UP_LEVEL,
     QUICK_AGE_CHOICES,
     QUICK_ALTERNATIVE_CHOICES,
     QUICK_STYLE_CHOICES,
@@ -274,6 +275,9 @@ def _initialise_state() -> None:
         "quick_processed": None,
         "quick_pdf": None,
         "quick_saved": False,
+        "pair_raw": None,
+        "pair_processed": None,
+        "pair_pdf": None,
         "colour_previews": {},
         "showing_colours": False,
         "session_provider_keys": {},
@@ -349,6 +353,9 @@ def _start_new_doodle() -> None:
     st.session_state.quick_processed = None
     st.session_state.quick_pdf = None
     st.session_state.quick_saved = False
+    st.session_state.pair_raw = None
+    st.session_state.pair_processed = None
+    st.session_state.pair_pdf = None
     st.session_state.showing_colours = False
     st.session_state.connection_error = None
     st.session_state.quick_mode = "ai"
@@ -788,6 +795,10 @@ def _render_home_options() -> None:
     shown_style = st.session_state.get("home_style") or options["style"]
     plural = "" if int(shown_alternatives) == 1 else "s"
 
+    pairing = bool(st.session_state.get("home_pair_grown_up", options["pair_grown_up"]))
+    pairing = pairing and shown_age != GROWN_UP_LEVEL
+    age_label = f"{shown_age} + grown-up" if pairing else str(shown_age)
+
     with st.container(
         key="doodle-home-settings",
         horizontal=True,
@@ -803,13 +814,30 @@ def _render_home_options() -> None:
                 key="home_alternatives",
                 help="Each one is drawn separately, from its own reading of your idea, and costs one generation.",
             )
-        with st.popover(str(shown_age), type="tertiary"):
+        with st.popover(age_label, type="tertiary"):
             age_profile = st.segmented_control(
                 "Who it is for",
                 list(QUICK_AGE_CHOICES),
                 default=options["age_profile"],
                 key="home_age_profile",
+                help="Grown-up draws the intricate kind of page an adult colours to unwind.",
             )
+            # Offered only where it means something. Asking a grown-up sheet to
+            # be paired with a grown-up sheet would draw the same thing twice.
+            if (age_profile or options["age_profile"]) != GROWN_UP_LEVEL:
+                pair_grown_up = st.checkbox(
+                    "Also draw one for me, at grown-up detail",
+                    value=options["pair_grown_up"],
+                    key="home_pair_grown_up",
+                    help=(
+                        "Draws your idea twice from one description of the scene: "
+                        "the sheet above for the children and an intricate one for "
+                        "you, so you can all colour the same picture. Two pictures, "
+                        "whatever How many to draw says."
+                    ),
+                )
+            else:
+                pair_grown_up = False
         with st.popover(str(shown_style).lower(), type="tertiary"):
             style = st.selectbox(
                 "Drawing style",
@@ -824,6 +852,7 @@ def _render_home_options() -> None:
         "quick_alternatives": int(alternatives or options["alternatives"]),
         "quick_age_profile": str(age_profile or options["age_profile"]),
         "quick_style": str(style or options["style"]),
+        "quick_pair_grown_up": bool(pair_grown_up),
     }
     if any(settings.get(key) != value for key, value in chosen.items()):
         save_settings({**settings, **chosen})
@@ -1436,27 +1465,36 @@ def _quick_generate() -> None:
 
         settings = load_settings()
         options = quick_drawing_options(settings)
-        wanted = int(options["alternatives"])
+        pairing = bool(options["pair_grown_up"])
+        wanted = 1 if pairing else int(options["alternatives"])
 
         # One alternative needs no plan: the brief exists to pull several
-        # drawings of one idea apart from each other.
+        # drawings of one idea apart from each other. A pair is the opposite
+        # errand, one scene drawn twice, so it never asks for briefs either.
         briefs = [""]
         if wanted > 1:
             briefs = build_variation_briefs(
                 idea, wanted, provider_id=provider_id, api_key=api_key
             )
 
-        prompts = [
-            build_colouring_prompt(
+        def _prompt_for(level: str, brief: str) -> str:
+            return build_colouring_prompt(
                 idea,
-                age_profile=str(options["age_profile"]),
+                age_profile=level,
                 style_name=str(options["style"]),
                 target="A4 page",
                 extra_instructions="One clear subject or action, generous white space, no caption or text.",
                 variation_brief=brief,
             )
-            for brief in briefs
-        ]
+
+        levels = [str(options["age_profile"])] * len(briefs)
+        prompts = [_prompt_for(level, brief) for level, brief in zip(levels, briefs)]
+        if pairing:
+            # The same words describe the scene both times, so the two sheets
+            # show the same picture and only the drawing rules differ.
+            levels.append(GROWN_UP_LEVEL)
+            briefs.append(briefs[0])
+            prompts.append(_prompt_for(GROWN_UP_LEVEL, briefs[0]))
         model = str(settings.get(f"{provider_id}_model", spec.default_model))
         if model not in spec.models:
             model = spec.default_model
@@ -1476,12 +1514,18 @@ def _quick_generate() -> None:
             quality=quality,
             random_seed=random_seed,
         )
-        for artwork, brief in zip(artworks, briefs):
+        for artwork, brief, level in zip(artworks, briefs, levels):
             artwork.metadata["brief"] = brief
-        st.session_state.candidates = artworks if len(artworks) > 1 else []
-        _adopt_artwork(artworks[0], idea)
+            artwork.metadata["detail_level"] = level
+
+        grown_up = artworks[-1] if pairing else None
+        for_children = artworks[:-1] if pairing else artworks
+        st.session_state.candidates = for_children if len(for_children) > 1 else []
+        _adopt_artwork(for_children[0], idea)
+        st.session_state.pair_raw = grown_up.image_bytes if grown_up else None
 
     _prepare_quick_outputs()
+    _prepare_pair_outputs()
     st.session_state.screen = "result"
 
 
@@ -1512,6 +1556,80 @@ def _prepare_quick_outputs() -> None:
     st.session_state.quick_processed = processed
     st.session_state.quick_pdf = create_full_page_pdf(processed, config)
     st.session_state.quick_saved = False
+
+
+A4_SHEET = FullPageConfig(
+    page_width_mm=210.0,
+    page_height_mm=297.0,
+    margin_mm=12.0,
+    caption="",
+    caption_font_size_pt=17.0,
+    caption_area_mm=27.0,
+)
+
+
+def _prepare_pair_outputs() -> None:
+    """Clean the grown-up sheet, gently, and build its A4 PDF.
+
+    The despeckle pass that tidies stray pixels out of a toddler drawing eats
+    the fine pattern work a grown-up sheet exists for, and thickening lines
+    closes its smallest regions up altogether. Both are turned down here.
+    """
+
+    raw = st.session_state.get("pair_raw")
+    if not raw:
+        st.session_state.pair_processed = None
+        st.session_state.pair_pdf = None
+        return
+
+    fine = ProcessingOptions(despeckle_size=1, thicken_pixels=0)
+    processed = _cached_process(
+        raw,
+        fine.threshold,
+        fine.auto_invert,
+        fine.crop_whitespace,
+        fine.padding_percent,
+        fine.despeckle_size,
+        fine.thicken_pixels,
+    )
+    st.session_state.pair_processed = processed
+    st.session_state.pair_pdf = create_full_page_pdf(processed, A4_SHEET)
+
+
+def _render_grown_up_sheet() -> None:
+    """The matching intricate sheet, when one was drawn.
+
+    Everything above it acts on the children's sheet, which is the one being
+    changed, coloured in and saved. This is the second print, and it is left
+    exactly as it was drawn.
+    """
+
+    pdf_bytes = st.session_state.get("pair_pdf")
+    processed = st.session_state.get("pair_processed")
+    if not pdf_bytes or not processed:
+        return
+
+    with st.container(border=True):
+        st.markdown("**Your sheet**")
+        st.caption(
+            "The same scene drawn for a grown-up, so you can colour along with "
+            "them. Print both and share the pencils."
+        )
+        st.image(processed, width="stretch")
+        if st.button(
+            "Print your sheet",
+            type="primary",
+            width="stretch",
+            icon=":material/print:",
+            key="print_grown_up",
+        ):
+            _send_to_printer(pdf_bytes)
+        _render_print_help(
+            pdf_bytes,
+            file_name=f"{_slug(st.session_state.current_title)}-grown-up-a4.pdf",
+            key="grown_up",
+            scale_note=False,
+        )
 
 
 def _render_generating_screen() -> None:
@@ -1650,6 +1768,8 @@ def _render_first_result() -> None:
         file_name=f"{_slug(st.session_state.current_title)}-a4.pdf",
         key="result",
     )
+
+    _render_grown_up_sheet()
 
     # This box used to rewrite the original idea and draw a new picture from
     # scratch. Since alternatives started coming back genuinely different, that
@@ -1828,7 +1948,7 @@ with create_tab:
             )
             field_1, field_2, field_3 = st.columns(3)
             with field_1:
-                age_profile = st.selectbox("Child profile", ["2-3 years", "4-5 years"])
+                age_profile = st.selectbox("Who it is for", list(QUICK_AGE_CHOICES))
             with field_2:
                 style_name = st.selectbox("Drawing profile", list(STYLE_PRESETS.keys()))
             with field_3:

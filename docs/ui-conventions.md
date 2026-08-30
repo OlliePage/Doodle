@@ -115,6 +115,26 @@ the bottom of one and inside a tab on another.
 homepage. The two used to read `Draw another` and `New doodle`, which describe
 each other.
 
+## One idea, two readers
+
+"Who it is for" runs from a toddler's dozen large regions to a grown-up's
+hundred and fifty small ones, and it changes the drawing rather than only the
+words around it: the region count, the line weight and whether decorative
+pattern is welcome all come from the chosen level. Every level still obeys the
+rules that make a sheet colourable, so a grown-up page is intricate but never
+shaded or filled.
+
+Ticking "Also draw one for me" draws the idea twice from one description of the
+scene, once for the children and once at grown-up detail, so a family colours
+the same picture at once. That is exactly two pictures whatever the number of
+alternatives says, because the pair is one scene rather than several readings
+of it. The children's sheet stays the doodle: changing, colouring and saving
+all act on it, and the grown-up sheet is a second thing to print.
+
+The grown-up sheet is cleaned more gently than the children's. The despeckle
+pass that removes stray pixels from a bold drawing eats fine pattern work, and
+thickening lines closes the smallest regions altogether.
+
 ## Colour is for the screen only
 
 `Colour it in for me` draws a coloured copy of the doodle to look at while

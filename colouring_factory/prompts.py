@@ -41,16 +41,86 @@ STYLE_PRESETS: dict[str, StylePreset] = {
     ),
 }
 
-AGE_RULES = {
-    "2-3 years": (
-        "Aim for roughly 6 to 12 large colouring regions. Avoid tiny fingers, fur texture, "
-        "patterns, clutter and narrow gaps."
+
+@dataclass(frozen=True)
+class DetailLevel:
+    """How much there is to colour, and how fine the lines that divide it.
+
+    The rungs are far apart on purpose. A six-year-old is bored by the sheet
+    drawn for a four-year-old and defeated by the grown-up one, and the whole
+    point of the grown-up level is the density that made adult colouring books
+    worth an evening.
+    """
+
+    label: str
+    reader: str
+    regions: str
+    line_rule: str
+    texture_rule: str
+
+    @property
+    def is_grown_up(self) -> bool:
+        return self.label == "Grown-up"
+
+
+DETAIL_LEVELS: dict[str, DetailLevel] = {
+    "2-3 years": DetailLevel(
+        label="2-3 years",
+        reader="a toddler",
+        regions=(
+            "Aim for roughly 6 to 12 large colouring regions. Avoid tiny fingers, fur "
+            "texture, patterns, clutter and narrow gaps."
+        ),
+        line_rule="Very thick, smooth, rounded outlines with wide gaps between them.",
+        texture_rule="No pattern, texture or fill of any kind inside a region.",
     ),
-    "4-5 years": (
-        "Aim for roughly 12 to 28 colouring regions. Some simple clothing, props and setting "
-        "details are acceptable, but avoid intricate texture."
+    "4-5 years": DetailLevel(
+        label="4-5 years",
+        reader="a preschool child",
+        regions=(
+            "Aim for roughly 12 to 28 colouring regions. Some simple clothing, props and "
+            "setting details are acceptable, but avoid intricate texture."
+        ),
+        line_rule="Thick, smooth outlines that a crayon can stay inside.",
+        texture_rule="At most a few simple marks, such as spots or stripes on clothing.",
+    ),
+    "6-9 years": DetailLevel(
+        label="6-9 years",
+        reader="a school-age child",
+        regions=(
+            "Aim for roughly 30 to 60 colouring regions. Draw a real setting around the "
+            "subject, with foreground and background, and give surfaces their own shapes "
+            "to colour."
+        ),
+        line_rule="Medium, even outlines, thinner for interior detail than for the outline.",
+        texture_rule=(
+            "Simple repeating pattern is welcome on clothing, leaves, brickwork and "
+            "similar surfaces, as long as every shape stays closed and colourable."
+        ),
+    ),
+    "Grown-up": DetailLevel(
+        label="Grown-up",
+        reader="an adult who colours to unwind",
+        regions=(
+            "Aim for 150 or more small colouring regions, filling the page corner to "
+            "corner with almost no empty white space. Build the scene from layers: the "
+            "subject, what surrounds it, a decorative border of repeating motifs, and "
+            "patterned fills wherever a plain area would otherwise sit."
+        ),
+        line_rule=(
+            "Fine, even outlines of consistent weight throughout, in the intricate "
+            "style of an adult colouring book, mandala or zentangle."
+        ),
+        texture_rule=(
+            "Dense decorative pattern is the point: scales, petals, paisley, dots, "
+            "leaves, waves and geometric repeats subdividing every larger area. Every "
+            "one of them must be a closed shape a fine pen or pencil can colour, never "
+            "a shaded or filled black mass."
+        ),
     ),
 }
+
+DEFAULT_LEVEL = "2-3 years"
 
 TARGET_RULES = {
     "A4 page": (
@@ -86,25 +156,27 @@ def build_colouring_prompt(
     scene = variation_brief.strip() or concept
 
     style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
-    age_rule = AGE_RULES.get(age_profile, AGE_RULES["2-3 years"])
+    level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[DEFAULT_LEVEL])
     target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
 
     prompt = f"""
-    Create an original black-and-white colouring-book illustration for a young child.
+    Create an original black-and-white colouring-book illustration for {level.reader}.
 
     Scene: {scene}
 
     Visual rules:
     - Pure white background.
-    - Black line work only: no colour, grey, shading, shadows, gradients, hatching or texture.
-    - Smooth rounded outlines, friendly expressions and coherent anatomy.
-    - Large, closed areas that are pleasant to colour with crayons.
+    - Black line work only: no colour, grey, shading, shadows, gradients or hatching.
+    - Every enclosed shape must be left white, so it can be coloured in.
+    - Coherent anatomy and friendly expressions.
     - No border, words, letters, numbers, logos, signatures or watermark.
     - Do not imitate or reproduce an existing television, film, book or game character.
     - Nothing important may be cropped by the image edge.
 
     Style profile: {style.instruction}
-    Child profile: {age_rule}
+    Reader profile: {level.regions}
+    Line profile: {level.line_rule}
+    Detail profile: {level.texture_rule}
     Composition profile: {target_rule}
     """
 
@@ -133,7 +205,7 @@ def build_refinement_prompt(
         raise ValueError("Describe the change you would like.")
 
     style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
-    age_rule = AGE_RULES.get(age_profile, AGE_RULES["2-3 years"])
+    level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[DEFAULT_LEVEL])
     target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
 
     prompt = f"""
@@ -147,14 +219,16 @@ def build_refinement_prompt(
 
     Visual rules, which the changed picture must still obey:
     - Pure white background.
-    - Black line work only: no colour, grey, shading, shadows, gradients, hatching or texture.
-    - Smooth rounded outlines, friendly expressions and coherent anatomy.
-    - Large, closed areas that are pleasant to colour with crayons.
+    - Black line work only: no colour, grey, shading, shadows, gradients or hatching.
+    - Every enclosed shape must be left white, so it can be coloured in.
+    - Coherent anatomy and friendly expressions.
     - No border, words, letters, numbers, logos, signatures or watermark.
     - Nothing important may be cropped by the image edge.
 
     Style profile: {style.instruction}
-    Child profile: {age_rule}
+    Reader profile: {level.regions}
+    Line profile: {level.line_rule}
+    Detail profile: {level.texture_rule}
     Composition profile: {target_rule}
     """
 
