@@ -6,3 +6,4 @@ __pycache__/
 .DS_Store
 local_data/
 .envrc
+.claude/worktrees/
