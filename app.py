@@ -536,7 +536,7 @@ def _render_connection_setup() -> None:
 
     top_left, top_middle, top_right = st.columns([1, 3, 1])
     with top_left:
-        if st.button("← Back", use_container_width=True):
+        if st.button("← Back", width="stretch"):
             st.session_state.screen = (
                 "home"
                 if st.session_state.connect_return == "generate"
@@ -595,13 +595,13 @@ def _render_connection_setup() -> None:
         st.link_button(
             f"Open {spec.label} API keys ↗",
             spec.key_url,
-            use_container_width=True,
+            width="stretch",
         )
     with link_b:
         st.link_button(
             "Open API billing ↗" if provider_id == "openai" else "Open API pricing ↗",
             spec.billing_url,
-            use_container_width=True,
+            width="stretch",
         )
 
     if provider_id == "openai":
@@ -648,17 +648,17 @@ def _render_connection_setup() -> None:
                 if st.session_state.connect_return != "generate"
                 else "Use this connection & draw",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             ):
                 _set_active_provider(provider_id)
                 _continue_after_connection()
         with replace_col:
-            if st.button("Replace key", use_container_width=True):
+            if st.button("Replace key", width="stretch"):
                 st.session_state.connect_replace = True
                 st.rerun()
 
         if existing_source != get_provider(provider_id).env_var:
-            if st.button("Disconnect this provider", use_container_width=True):
+            if st.button("Disconnect this provider", width="stretch"):
                 session_keys = dict(st.session_state.get("session_provider_keys", {}))
                 session_keys.pop(provider_id, None)
                 st.session_state.session_provider_keys = session_keys
@@ -688,7 +688,7 @@ def _render_connection_setup() -> None:
                 else "3 · Connect"
             )
             connect_clicked = st.form_submit_button(
-                submit_label, type="primary", use_container_width=True
+                submit_label, type="primary", width="stretch"
             )
 
         with st.expander("Where is my key stored?"):
@@ -737,7 +737,7 @@ def _render_connection_setup() -> None:
             _continue_after_connection()
 
     st.divider()
-    if st.button("Try Doodle with a sample picture instead", use_container_width=True):
+    if st.button("Try Doodle with a sample picture instead", width="stretch"):
         st.session_state.quick_mode = "demo"
         st.session_state.generation_nonce = 0
         st.session_state.screen = "generate"
@@ -911,11 +911,11 @@ def _render_first_result() -> None:
     )
     safe_title = html.escape(str(st.session_state.get("current_title", "")))
     st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
-    st.image(st.session_state.quick_processed, use_container_width=True)
+    st.image(st.session_state.quick_processed, width="stretch")
 
     again_col, love_col, print_col = st.columns([1, 1, 1.35])
     with again_col:
-        if st.button("↻ Again", use_container_width=True):
+        if st.button("↻ Again", width="stretch"):
             st.session_state.generation_nonce = (
                 int(st.session_state.get("generation_nonce", 0)) + 1
             )
@@ -925,7 +925,7 @@ def _render_first_result() -> None:
         love_label = "✓ Saved" if st.session_state.get("quick_saved") else "♡ Love it"
         if st.button(
             love_label,
-            use_container_width=True,
+            width="stretch",
             disabled=bool(st.session_state.get("quick_saved")),
         ):
             save_library_item(
@@ -943,7 +943,7 @@ def _render_first_result() -> None:
             file_name=f"{_slug(st.session_state.current_title)}-a4.pdf",
             mime="application/pdf",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
     st.caption("Open the PDF and print at Actual size / 100%. Disable Fit to page.")
@@ -957,7 +957,7 @@ def _render_first_result() -> None:
                 label_visibility="collapsed",
             )
         with apply_col:
-            change_clicked = st.form_submit_button("Apply", use_container_width=True)
+            change_clicked = st.form_submit_button("Apply", width="stretch")
     if change_clicked:
         if change.strip():
             st.session_state.generation_idea = f"{st.session_state.current_title}. Change it like this: {change.strip()}"
@@ -977,18 +977,18 @@ def _render_first_result() -> None:
         )
         studio_col, provider_col = st.columns(2)
         with studio_col:
-            if st.button("Open Doodle Studio", use_container_width=True):
+            if st.button("Open Doodle Studio", width="stretch"):
                 st.session_state.screen = "studio"
                 st.rerun()
         with provider_col:
-            if st.button("Change image provider", use_container_width=True):
+            if st.button("Change image provider", width="stretch"):
                 st.session_state.connect_return = "result"
                 st.session_state.connect_replace = False
                 st.session_state.provider_choice = _active_provider_id()
                 st.session_state.screen = "connect"
                 st.rerun()
 
-    if st.button("Start a new Doodle", use_container_width=True):
+    if st.button("Start a new Doodle", width="stretch"):
         _start_new_doodle()
 
 
@@ -1025,7 +1025,7 @@ with brand_col:
         unsafe_allow_html=True,
     )
 with new_col:
-    if st.button("New doodle", use_container_width=True):
+    if st.button("New doodle", width="stretch"):
         _start_new_doodle()
 
 with st.sidebar:
@@ -1057,7 +1057,7 @@ with st.sidebar:
     if st.button(
         connection_label,
         type="secondary" if api_key else "primary",
-        use_container_width=True,
+        width="stretch",
         key="studio_connect_provider",
     ):
         st.session_state.connect_return = "studio"
@@ -1162,7 +1162,7 @@ with create_tab:
                 )
 
             generate_clicked = st.form_submit_button(
-                "Create doodles", type="primary", use_container_width=True
+                "Create doodles", type="primary", width="stretch"
             )
 
         if generate_clicked:
@@ -1262,11 +1262,11 @@ with create_tab:
             gallery = st.columns(2)
             for index, candidate in enumerate(st.session_state.candidates):
                 with gallery[index % 2]:
-                    st.image(candidate.image_bytes, use_container_width=True)
+                    st.image(candidate.image_bytes, width="stretch")
                     if st.button(
                         "Use this doodle",
                         key=f"candidate_{index}",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         concept = st.session_state.current_metadata.get(
                             "concept", "Generated colouring picture"
@@ -1316,12 +1316,12 @@ with create_tab:
         demo_name = st.selectbox("Demo picture", list(demos.keys()))
         left, right = st.columns([2, 1])
         with left:
-            st.image(str(demos[demo_name]), use_container_width=True)
+            st.image(str(demos[demo_name]), width="stretch")
         with right:
             st.write(
                 "Use an original built-in drawing to test the complete print workflow without an API key."
             )
-            if st.button("Use demo artwork", type="primary", use_container_width=True):
+            if st.button("Use demo artwork", type="primary", width="stretch"):
                 _set_current_artwork(
                     demos[demo_name].read_bytes(),
                     title=demo_name,
@@ -1382,10 +1382,10 @@ with create_tab:
         image_left, image_right = st.columns(2)
         with image_left:
             st.caption("Original")
-            st.image(st.session_state.current_raw, use_container_width=True)
+            st.image(st.session_state.current_raw, width="stretch")
         with image_right:
             st.caption("Print-cleaned")
-            st.image(processed, use_container_width=True)
+            st.image(processed, width="stretch")
 
         metrics = analyse_line_art(processed)
         metric_1, metric_2, metric_3 = st.columns(3)
@@ -1414,7 +1414,7 @@ with create_tab:
                 data=processed,
                 file_name=f"{_slug(st.session_state.current_title)}-clean.png",
                 mime="image/png",
-                use_container_width=True,
+                width="stretch",
             )
         with save_col:
             save_title = st.text_input(
@@ -1423,7 +1423,7 @@ with create_tab:
                 label_visibility="collapsed",
                 placeholder="Library title",
             )
-            if st.button("Save artwork to library", use_container_width=True):
+            if st.button("Save artwork to library", width="stretch"):
                 item_id = save_library_item(
                     processed_image=processed,
                     raw_image=st.session_state.current_raw,
@@ -1654,7 +1654,7 @@ with create_tab:
                 processed, pdf_kind, pdf_config, active_calibration
             )
 
-        if st.button("Build print-ready PDF", type="primary", use_container_width=True):
+        if st.button("Build print-ready PDF", type="primary", width="stretch"):
             try:
                 if pdf_kind == "full":
                     pdf_bytes = create_full_page_pdf(processed, pdf_config)
@@ -1682,7 +1682,7 @@ with create_tab:
             try:
                 st.image(
                     _cached_preview(st.session_state.pdf_bytes),
-                    use_container_width=True,
+                    width="stretch",
                 )
             except RuntimeError as exc:
                 st.info(str(exc))
@@ -1697,7 +1697,7 @@ with create_tab:
                 file_name=st.session_state.pdf_filename,
                 mime="application/pdf",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
             st.info(
                 "Print using Actual size or 100%. Disable Fit to page, Shrink and Scale to printable area."
@@ -1725,7 +1725,7 @@ with library_tab:
         for index, item in enumerate(library_items):
             with library_columns[index % 3]:
                 with st.container(border=True):
-                    st.image(item["processed_path"], use_container_width=True)
+                    st.image(item["processed_path"], width="stretch")
                     st.markdown(f"**{item.get('title', 'Untitled artwork')}**")
                     created = item.get("created_at", "")
                     try:
@@ -1740,7 +1740,7 @@ with library_tab:
                     use_col, delete_col = st.columns(2)
                     with use_col:
                         if st.button(
-                            "Use", key=f"load_{item['id']}", use_container_width=True
+                            "Use", key=f"load_{item['id']}", width="stretch"
                         ):
                             artwork = load_library_image(item["id"], prefer_raw=False)
                             _set_current_artwork(
@@ -1756,7 +1756,7 @@ with library_tab:
                         if st.button(
                             "Delete",
                             key=f"delete_{item['id']}",
-                            use_container_width=True,
+                            width="stretch",
                         ):
                             delete_library_item(item["id"])
                             st.rerun()
@@ -1770,7 +1770,7 @@ with calibration_tab:
     calibration_bytes = _calibration_pdf()
     preview_col, action_col = st.columns([2, 1])
     with preview_col:
-        st.image(_cached_preview(calibration_bytes, dpi=95), use_container_width=True)
+        st.image(_cached_preview(calibration_bytes, dpi=95), width="stretch")
     with action_col:
         st.download_button(
             "Download calibration page",
@@ -1778,7 +1778,7 @@ with calibration_tab:
             file_name="doodle-printer-calibration.pdf",
             mime="application/pdf",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
         st.markdown(
             "1. Print at **Actual size / 100%**.\n\n"
@@ -1825,14 +1825,14 @@ with calibration_tab:
     save_cal_col, reset_cal_col = st.columns(2)
     with save_cal_col:
         if st.button(
-            "Save calibration profile", type="primary", use_container_width=True
+            "Save calibration profile", type="primary", width="stretch"
         ):
             updated = load_settings()
             updated["calibration"] = proposed.to_dict()
             save_settings(updated)
             st.rerun()
     with reset_cal_col:
-        if st.button("Reset to 100%", use_container_width=True):
+        if st.button("Reset to 100%", width="stretch"):
             updated = load_settings()
             updated["calibration"] = CalibrationProfile().to_dict()
             save_settings(updated)
