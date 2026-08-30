@@ -22,7 +22,9 @@ from colouring_factory.generators import (
     GeneratorError,
     check_provider_connection,
     generate_with_provider,
+    refine_with_provider,
 )
+from colouring_factory import history
 from colouring_factory.guidance import guidance_for
 from colouring_factory.version import build_label
 from colouring_factory.image_processing import analyse_line_art, normalise_line_art
@@ -53,6 +55,7 @@ from colouring_factory.providers import (
 from colouring_factory.prompts import (
     STYLE_PRESETS,
     build_colouring_prompt,
+    build_refinement_prompt,
 )
 from colouring_factory.variations import build_variation_briefs
 from colouring_factory.storage import (

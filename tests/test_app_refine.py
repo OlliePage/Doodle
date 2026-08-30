@@ -89,6 +89,107 @@ def test_submitting_an_empty_instruction_does_nothing() -> None:
     assert len(at.session_state["doodle_versions"]) == 1
 
 
+def _stub_google(monkeypatch, changed: bytes):
+    """Answer any Gemini call with `changed`, so no network or money is used."""
+
+    import base64
+    import json
+    from io import BytesIO
+
+    from colouring_factory import generators
+
+    class _Reply(BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.close()
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        payload = {
+            "steps": [
+                {
+                    "type": "model_output",
+                    "content": [
+                        {"type": "image", "data": base64.b64encode(changed).decode()}
+                    ],
+                }
+            ]
+        }
+        return _Reply(json.dumps(payload).encode())
+
+    monkeypatch.setattr(generators, "urlopen", fake_urlopen)
+
+
+def _connected_studio(chain) -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=180)
+    at.session_state["screen"] = "studio"
+    at.session_state["current_raw"] = ARTWORK
+    at.session_state["current_title"] = "Test dinosaur"
+    at.session_state["current_metadata"] = {"source": "test"}
+    at.session_state["doodle_versions"] = chain
+    at.session_state["current_version"] = len(chain) - 1
+    at.session_state["session_provider_keys"] = {"google": "AIza-fake"}
+    at.run()
+    return at
+
+
+def test_a_successful_refinement_advances_the_chain(monkeypatch, tmp_path) -> None:
+    """The happy path.
+
+    Every other test here stops at a failure or at rendering, so all of them
+    passed while three imports were missing and any real refinement raised
+    NameError. Only exercising a change that succeeds catches that.
+    """
+
+    from colouring_factory.storage import load_settings, save_settings
+
+    changed = ARTWORK + b"changed"
+    at = _connected_studio(history.start(_art("original")))
+    settings = load_settings()
+    settings["image_provider"] = "google"
+    save_settings(settings)
+    _stub_google(monkeypatch, changed)
+    at.run()
+
+    _change_box(at).set_value("give the dinosaur a party hat")
+    [b for b in at.button if b.label == "Change it"][0].click().run()
+
+    assert not at.exception, [str(e.value) for e in at.exception]
+    assert not at.error, [e.value for e in at.error]
+
+    chain = at.session_state["doodle_versions"]
+    assert len(chain) == 2
+    assert chain[1].instruction == "give the dinosaur a party hat"
+    assert chain[1].parent == 0
+    assert chain[1].artwork.image_bytes == changed
+    assert at.session_state["current_version"] == 1
+
+
+def test_a_second_refinement_builds_on_the_first(monkeypatch, tmp_path) -> None:
+    from colouring_factory.storage import load_settings, save_settings
+
+    at = _connected_studio(history.start(_art("original")))
+    settings = load_settings()
+    settings["image_provider"] = "google"
+    save_settings(settings)
+    _stub_google(monkeypatch, ARTWORK + b"one")
+    at.run()
+
+    _change_box(at).set_value("add a hat")
+    [b for b in at.button if b.label == "Change it"][0].click().run()
+
+    _stub_google(monkeypatch, ARTWORK + b"two")
+    _change_box(at).set_value("add wellington boots")
+    [b for b in at.button if b.label == "Change it"][0].click().run()
+
+    assert not at.exception
+    chain = at.session_state["doodle_versions"]
+    assert len(chain) == 3
+    assert [v.parent for v in chain] == [None, 0, 1]
+
+
 def test_the_version_strip_shows_the_chain_and_can_step_back() -> None:
     chain = history.start(_art("original"))
     chain = history.append(chain, _art("hatted"), "add a hat", parent=0)
