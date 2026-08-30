@@ -8,7 +8,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-from .layouts import compute_circle_sheet_plan, fit_contain, mm_to_pt
+from .layouts import compute_circle_sheet_plan, fit_contain, fit_inscribed, mm_to_pt
 from .models import (
     CalibrationProfile,
     CircleSheetConfig,
@@ -51,7 +51,43 @@ def _draw_image_contain(
     )
 
 
-def _wrap_text(text: str, font_name: str, font_size: float, max_width_pt: float) -> list[str]:
+def _place_badge_art(
+    pdf: canvas.Canvas,
+    image_bytes: bytes,
+    fit_mode: str,
+    centre_x: float,
+    centre_y: float,
+    box_width: float,
+    box_height: float,
+) -> None:
+    if fit_mode == "fill":
+        _draw_image_contain(
+            pdf,
+            image_bytes,
+            centre_x - (box_width / 2.0),
+            centre_y - (box_height / 2.0),
+            box_width,
+            box_height,
+        )
+        return
+
+    source_width, source_height = _image_dimensions(image_bytes)
+    x, y, width, height = fit_inscribed(
+        source_width, source_height, centre_x, centre_y, box_width, box_height
+    )
+    pdf.drawImage(
+        ImageReader(BytesIO(image_bytes)),
+        x,
+        y,
+        width=width,
+        height=height,
+        mask="auto",
+    )
+
+
+def _wrap_text(
+    text: str, font_name: str, font_size: float, max_width_pt: float
+) -> list[str]:
     words = text.split()
     if not words:
         return []
@@ -105,7 +141,9 @@ def _draw_centred_caption(
         pdf.drawCentredString(centre_x_pt, baseline - (index * leading), line)
 
 
-def _new_canvas(buffer: BytesIO, page_width_mm: float, page_height_mm: float, title: str) -> canvas.Canvas:
+def _new_canvas(
+    buffer: BytesIO, page_width_mm: float, page_height_mm: float, title: str
+) -> canvas.Canvas:
     pdf = canvas.Canvas(
         buffer,
         pagesize=(mm_to_pt(page_width_mm), mm_to_pt(page_height_mm)),
@@ -124,7 +162,9 @@ def create_full_page_pdf(image_bytes: bytes, config: FullPageConfig) -> bytes:
         raise ValueError("The margin is too large for the selected page.")
 
     buffer = BytesIO()
-    pdf = _new_canvas(buffer, config.page_width_mm, config.page_height_mm, "Colouring page")
+    pdf = _new_canvas(
+        buffer, config.page_width_mm, config.page_height_mm, "Colouring page"
+    )
 
     page_w = mm_to_pt(config.page_width_mm)
     page_h = mm_to_pt(config.page_height_mm)
@@ -179,7 +219,9 @@ def create_circle_sheet_pdf(
         raise ValueError("No circles fit on the selected page with these dimensions.")
 
     buffer = BytesIO()
-    pdf = _new_canvas(buffer, config.page_width_mm, config.page_height_mm, "Circular colouring sheet")
+    pdf = _new_canvas(
+        buffer, config.page_width_mm, config.page_height_mm, "Circular colouring sheet"
+    )
 
     safe_w_mm = config.safe_diameter_mm * calibration.x_scale
     safe_h_mm = config.safe_diameter_mm * calibration.y_scale
@@ -213,11 +255,12 @@ def create_circle_sheet_pdf(
         if config.caption.strip():
             caption_h = safe_h * 0.24
             art_h = safe_h - caption_h
-            _draw_image_contain(
+            _place_badge_art(
                 pdf,
                 image_bytes,
-                centre_x - (safe_w / 2.0),
-                centre_y - (safe_h / 2.0) + caption_h,
+                config.fit_mode,
+                centre_x,
+                centre_y + (caption_h / 2.0),
                 safe_w,
                 art_h,
             )
@@ -232,11 +275,12 @@ def create_circle_sheet_pdf(
                 max_lines=2,
             )
         else:
-            _draw_image_contain(
+            _place_badge_art(
                 pdf,
                 image_bytes,
-                centre_x - (safe_w / 2.0),
-                centre_y - (safe_h / 2.0),
+                config.fit_mode,
+                centre_x,
+                centre_y,
                 safe_w,
                 safe_h,
             )
@@ -345,13 +389,17 @@ def create_calibration_pdf() -> bytes:
     circle_cy = page_h - mm_to_pt(125)
     diameter = mm_to_pt(58)
     pdf.circle(circle_cx, circle_cy, diameter / 2.0, stroke=1, fill=0)
-    pdf.drawCentredString(circle_cx, circle_cy + (diameter / 2.0) + mm_to_pt(5), "58 mm circle")
+    pdf.drawCentredString(
+        circle_cx, circle_cy + (diameter / 2.0) + mm_to_pt(5), "58 mm circle"
+    )
 
     square_x = mm_to_pt(125)
     square_y = page_h - mm_to_pt(225)
     square = mm_to_pt(20)
     pdf.rect(square_x, square_y, square, square, stroke=1, fill=0)
-    pdf.drawString(square_x + square + mm_to_pt(5), square_y + mm_to_pt(7), "20 mm square")
+    pdf.drawString(
+        square_x + square + mm_to_pt(5), square_y + mm_to_pt(7), "20 mm square"
+    )
 
     pdf.setFont("Helvetica", 9)
     footer = (

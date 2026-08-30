@@ -24,7 +24,9 @@ def test_openai_adapter_decodes_base64_and_passes_output_settings(monkeypatch) -
     class _Images:
         def generate(self, **kwargs):
             calls.append(kwargs)
-            item = types.SimpleNamespace(b64_json=encoded, url=None, revised_prompt=None)
+            item = types.SimpleNamespace(
+                b64_json=encoded, url=None, revised_prompt=None
+            )
             return types.SimpleNamespace(data=[item])
 
     class _Client:
@@ -38,8 +40,7 @@ def test_openai_adapter_decodes_base64_and_passes_output_settings(monkeypatch) -
 
     output = generate_with_openai(
         api_key="test-key",
-        prompt="A line drawing",
-        variants=2,
+        prompts=["A line drawing of a bear", "A line drawing of a kite"],
         model="gpt-image-2",
         size="1024x1024",
         quality="low",
@@ -51,12 +52,17 @@ def test_openai_adapter_decodes_base64_and_passes_output_settings(monkeypatch) -
     assert calls[0]["size"] == "1024x1024"
     assert calls[0]["quality"] == "low"
     assert calls[0]["background"] == "opaque"
-    assert "alternative 1 of 2" in calls[0]["prompt"]
+
+    # Each prompt is sent verbatim. The generator used to append its own
+    # "alternative N of M" sentence, which produced near-identical pictures;
+    # distinctness is now the caller's job.
+    assert calls[0]["prompt"] == "A line drawing of a bear"
+    assert calls[1]["prompt"] == "A line drawing of a kite"
 
 
 def test_openai_adapter_requires_key() -> None:
     try:
-        generate_with_openai(api_key="", prompt="test")
+        generate_with_openai(api_key="", prompts=["test"])
     except GeneratorError as exc:
         assert "API key" in str(exc)
     else:

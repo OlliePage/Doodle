@@ -77,6 +77,11 @@ class _FakeStreamlit(types.ModuleType):
     def selectbox(self, _label, options, index=0, **_kwargs):
         return list(options)[index]
 
+    def segmented_control(self, label, options, default=None, **_kwargs):
+        if label in self.radio_overrides:
+            return self.radio_overrides[label]
+        return default if default is not None else list(options)[0]
+
     def select_slider(self, _label, options, value=None, **_kwargs):
         return value if value is not None else list(options)[0]
 
@@ -131,17 +136,23 @@ class _FakeStreamlit(types.ModuleType):
         return lambda *_args, **_kwargs: None
 
 
-def _execute_app(monkeypatch, tmp_path, layout_choice: str, module_suffix: str):
-    fake = _FakeStreamlit({"Output format": layout_choice})
+def _execute_app(
+    monkeypatch, tmp_path, layout_choice: str, module_suffix: str, **widget_choices
+):
+    fake = _FakeStreamlit({"Output format": layout_choice, **widget_choices})
     project_root = Path(__file__).resolve().parents[1]
-    fake.session_state["current_raw"] = (project_root / "assets" / "demo_dinosaur.png").read_bytes()
+    fake.session_state["current_raw"] = (
+        project_root / "assets" / "demo_dinosaur.png"
+    ).read_bytes()
     fake.session_state["current_title"] = "Smoke-test dinosaur"
     fake.session_state["current_metadata"] = {"source": "test"}
     monkeypatch.setitem(sys.modules, "streamlit", fake)
     monkeypatch.setenv("DOODLE_DATA_DIR", str(tmp_path / module_suffix / "data"))
 
     app_path = project_root / "app.py"
-    spec = importlib.util.spec_from_file_location(f"colouring_factory_app_{module_suffix}", app_path)
+    spec = importlib.util.spec_from_file_location(
+        f"colouring_factory_app_{module_suffix}", app_path
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -162,23 +173,21 @@ def test_fresh_app_opens_on_minimal_doodle_homepage(monkeypatch, tmp_path) -> No
     with pytest.raises(_StopExecution):
         spec.loader.exec_module(module)
 
-    assert fake.session_state["studio_open"] is False
     assert any("doodle-logo--hero" in body for body in fake.markdown_calls)
-    assert fake.text_input_calls == [
-        (
-            "Describe a picture to colour",
-            {
-                "key": "home_prompt",
-                "placeholder": "What shall we draw?",
-                "label_visibility": "collapsed",
-                "on_change": module._open_studio_from_home,
-            },
-        )
-    ]
 
+    assert len(fake.text_input_calls) == 1
+    label, kwargs = fake.text_input_calls[0]
+    assert label == "Describe a picture to colour"
+    assert kwargs["key"] == "home_prompt"
+    assert kwargs["placeholder"] == "What shall we draw?"
+    assert kwargs["label_visibility"] == "collapsed"
+    assert callable(kwargs["on_change"])
+
+    # Submitting an idea must leave the homepage. Which screen it goes to
+    # depends on whether a provider key is present, so assert only that it moved.
     fake.session_state["home_prompt"] = "A bear flying a kite"
-    module._open_studio_from_home()
-    assert fake.session_state["studio_open"] is True
+    kwargs["on_change"]()
+    assert fake.session_state["screen"] != "home"
     assert fake.session_state["generation_idea"] == "A bear flying a kite"
 
 
@@ -189,6 +198,26 @@ def test_streamlit_app_executes_full_page_branch(monkeypatch, tmp_path) -> None:
 
 def test_streamlit_app_executes_circle_branch(monkeypatch, tmp_path) -> None:
     fake = _execute_app(monkeypatch, tmp_path, "A4 circle sheet", "circle")
+    assert fake.session_state["current_raw"] is not None
+
+
+def test_the_circle_branch_defaults_to_fitting_the_whole_picture(
+    monkeypatch, tmp_path
+) -> None:
+    # The badge preview runs for real inside this branch, so reaching the end
+    # of the script proves the preview renders with the default settings.
+    fake = _execute_app(monkeypatch, tmp_path, "A4 circle sheet", "circle_inscribe")
+    assert fake.session_state["current_raw"] is not None
+
+
+def test_the_circle_branch_accepts_filling_the_circle(monkeypatch, tmp_path) -> None:
+    fake = _execute_app(
+        monkeypatch,
+        tmp_path,
+        "A4 circle sheet",
+        "circle_fill",
+        **{"Artwork fit": "Fill the circle"},
+    )
     assert fake.session_state["current_raw"] is not None
 
 

@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 
@@ -70,3 +71,20 @@ def test_default_threshold_keeps_pale_strokes() -> None:
 def test_old_default_threshold_erased_pale_strokes() -> None:
     # Guards the fix: 215 is what produced the broken outlines Ollie reported.
     assert not _stroke_survives(215)
+
+
+def test_the_first_run_path_takes_the_tuned_defaults() -> None:
+    # The first-run path repeated the processing numbers as literals, so it kept
+    # the old threshold when the tuned one was raised — on the very first picture
+    # a new user sees. It must read them from ProcessingOptions instead.
+    app_source = (Path(__file__).resolve().parents[1] / "app.py").read_text(
+        encoding="utf-8"
+    )
+    quick = app_source[app_source.index("def _quick_generate") :]
+    quick = quick[: quick.index("\ndef ")]
+
+    assert "ProcessingOptions(" in quick
+    assert "quick_defaults.threshold" in quick
+    assert str(ProcessingOptions().threshold) not in quick, (
+        "the threshold is repeated as a literal and will drift again"
+    )

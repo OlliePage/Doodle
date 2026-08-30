@@ -41,6 +41,52 @@ def fit_contain(
     return x, y, width, height
 
 
+def largest_margin_that_fits(config: CircleSheetConfig) -> float | None:
+    """The largest half-millimetre margin leaving room for at least one circle.
+
+    Returns None when the badge itself is as wide as the page, where no margin
+    can help and the diameter has to change instead.
+    """
+
+    smallest_page = min(config.page_width_mm, config.page_height_mm)
+    if config.cut_diameter_mm >= smallest_page:
+        return None
+
+    usable = (smallest_page - config.cut_diameter_mm) / 2.0
+    return max(0.0, math.floor(usable * 2.0) / 2.0)
+
+
+def fit_inscribed(
+    source_width: float,
+    source_height: float,
+    centre_x: float,
+    centre_y: float,
+    ellipse_width: float,
+    ellipse_height: float,
+) -> tuple[float, float, float, float]:
+    """Largest rectangle of the source's aspect ratio fitting wholly inside the ellipse.
+
+    Scaling a rectangle to the ellipse's bounding box leaves its corners outside
+    the ellipse, so anything drawn there is clipped away. Solving the ellipse
+    equation for the corner instead guarantees nothing is lost: for half-extents
+    (a, b) and aspect ratio r = w/h, w = 2ar / sqrt(r^2 + (a/b)^2).
+    """
+
+    if source_width <= 0 or source_height <= 0:
+        raise ValueError("Source dimensions must be positive.")
+    if ellipse_width <= 0 or ellipse_height <= 0:
+        raise ValueError("Ellipse dimensions must be positive.")
+
+    semi_x = ellipse_width / 2.0
+    semi_y = ellipse_height / 2.0
+    ratio = source_width / source_height
+
+    width = (2.0 * semi_x * ratio) / math.sqrt((ratio**2) + ((semi_x / semi_y) ** 2))
+    height = width / ratio
+
+    return centre_x - (width / 2.0), centre_y - (height / 2.0), width, height
+
+
 def validate_circle_config(config: CircleSheetConfig) -> None:
     positive_values = {
         "page width": config.page_width_mm,

@@ -69,6 +69,9 @@ class CircleSheetConfig:
     show_cut_guide: bool = True
     show_finished_guide: bool = False
     show_safe_guide: bool = False
+    # "inscribe" keeps the whole picture inside the safe circle; "fill" is the
+    # earlier behaviour, which scales to the bounding square and loses corners.
+    fit_mode: str = "inscribe"
 
 
 @dataclass(frozen=True)
