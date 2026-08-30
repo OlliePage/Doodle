@@ -88,3 +88,17 @@ def test_the_first_run_path_takes_the_tuned_defaults() -> None:
     assert str(ProcessingOptions().threshold) not in quick, (
         "the threshold is repeated as a literal and will drift again"
     )
+
+
+def test_the_studio_advances_the_seed_between_generations() -> None:
+    # Recraft is the only provider given a seed. Reading the nonce without
+    # advancing it returned the identical set of pictures every time the same
+    # idea was submitted, with no control anywhere to break the tie.
+    app_source = (Path(__file__).resolve().parents[1] / "app.py").read_text(
+        encoding="utf-8"
+    )
+    block = app_source[app_source.index("variant_prompts = ["):]
+    block = block[: block.index("st.session_state.candidates")]
+
+    assert "generation_nonce" in block
+    assert "+ 1" in block, "the studio reads the seed nonce without advancing it"

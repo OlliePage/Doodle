@@ -20,6 +20,10 @@ class ProviderSpec:
     billing_note: str
     text_model: str = ""
     supports_seed: bool = False
+    # Kept per provider rather than branched on in the interface, where a
+    # two-way if/else silently gave Gemini users Recraft's instructions.
+    setup_hint: str = ""
+    billing_button_label: str = "Open API pricing ↗"
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -39,6 +43,12 @@ PROVIDERS: dict[str, ProviderSpec] = {
         billing_note="ChatGPT and the API are billed separately. API billing must be enabled.",
         text_model="gpt-5-mini",
         supports_seed=False,
+        setup_hint=(
+            "On the OpenAI page, create a new secret key, name it Doodle, and copy it "
+            "while it is visible, then return here. ChatGPT and API billing are separate, "
+            "so a ChatGPT subscription does not pay for this."
+        ),
+        billing_button_label="Open API billing ↗",
     ),
     "google": ProviderSpec(
         id="google",
@@ -60,6 +70,12 @@ PROVIDERS: dict[str, ProviderSpec] = {
         billing_note="A free allowance covers occasional use; heavier use needs billing enabled.",
         text_model="gemini-3.5-flash-lite",
         supports_seed=False,
+        setup_hint=(
+            "On the Google AI Studio page, select Create API key, choose or create a "
+            "project, then copy the key and return here. The free allowance needs no "
+            "card."
+        ),
+        billing_button_label="Open usage and billing ↗",
     ),
     "recraft": ProviderSpec(
         id="recraft",
@@ -77,6 +93,11 @@ PROVIDERS: dict[str, ProviderSpec] = {
         billing_note="Recraft requires a positive API-unit balance before it will issue a token.",
         text_model="",
         supports_seed=True,
+        setup_hint=(
+            "Add API units in Recraft first, then open Profile → API, generate a token, "
+            "copy it and return here. Recraft will not issue a token on a zero balance."
+        ),
+        billing_button_label="Open API pricing ↗",
     ),
 }
 

@@ -125,3 +125,39 @@ def test_openai_connection_check_still_uses_a_bearer_token(monkeypatch) -> None:
     generators.check_provider_connection("openai", "sk-test")
 
     assert captured["headers"]["Authorization"] == "Bearer sk-test"
+
+
+def _http_error(status: int, body: str):
+    from urllib.error import HTTPError
+
+    return HTTPError("https://example", status, "Bad Request", {}, BytesIO(body.encode()))
+
+
+def test_a_400_saying_the_key_is_invalid_is_treated_as_authentication(monkeypatch) -> None:
+    # Google documents 401 for a rejected key but returns 400 with this wording
+    # for a malformed one, which fell through to the generic failure message and
+    # never offered to replace the key.
+    body = '{"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}}'
+
+    def fake_urlopen(request, timeout=None):
+        raise _http_error(400, body)
+
+    monkeypatch.setattr(generators, "urlopen", fake_urlopen)
+
+    with pytest.raises(GeneratorError) as caught:
+        generate_with_google(api_key="not-a-real-key", prompts=["a bear"])
+    assert caught.value.code == "authentication"
+    assert "did not accept that API key" in str(caught.value)
+
+
+def test_a_quota_error_is_treated_as_rate_limiting(monkeypatch) -> None:
+    body = '{"error": {"code": 429, "message": "Resource exhausted", "status": "quota_exceeded"}}'
+
+    def fake_urlopen(request, timeout=None):
+        raise _http_error(429, body)
+
+    monkeypatch.setattr(generators, "urlopen", fake_urlopen)
+
+    with pytest.raises(GeneratorError) as caught:
+        generate_with_google(api_key="AIza-test", prompts=["a bear"])
+    assert caught.value.code == "rate_limit"

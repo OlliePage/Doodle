@@ -62,3 +62,25 @@ def test_recraft_has_no_text_model_but_supports_seeds() -> None:
 def test_openai_has_a_text_model_and_no_seed() -> None:
     assert PROVIDERS["openai"].text_model == "gpt-5-mini"
     assert PROVIDERS["openai"].supports_seed is False
+
+
+def test_every_provider_has_its_own_setup_instructions() -> None:
+    # A two-way if/else in the interface silently gave Gemini users Recraft's
+    # instructions, so the copy now lives with the provider it describes.
+    hints = {}
+    for provider_id, spec in PROVIDERS.items():
+        assert spec.setup_hint.strip(), f"{provider_id} has no setup hint"
+        assert spec.billing_button_label.strip()
+        hints[provider_id] = spec.setup_hint
+
+    assert len(set(hints.values())) == len(hints), "two providers share a setup hint"
+
+
+def test_no_setup_hint_names_a_different_provider() -> None:
+    for provider_id, spec in PROVIDERS.items():
+        for other_id, other in PROVIDERS.items():
+            if other_id == provider_id:
+                continue
+            assert other.label.lower() not in spec.setup_hint.lower(), (
+                f"{provider_id}'s instructions mention {other.label}"
+            )

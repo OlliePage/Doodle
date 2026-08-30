@@ -41,11 +41,15 @@ def _normalise_error(
     )
     raw = " ".join(part for part in (details, str(exc)) if part).lower()
 
+    # Google documents 401 for a rejected key but returns 400 with "API key not
+    # valid" for a malformed one, so the wording is matched as well as the code.
     if status == 401 or any(
         marker in raw
         for marker in (
             "incorrect api key",
             "invalid api key",
+            "api key not valid",
+            "api_key_invalid",
             "invalid token",
             "authentication",
         )
@@ -95,7 +99,12 @@ def _normalise_error(
             code="permission",
             status_code=status,
         )
-    if status == 429 or "rate limit" in raw or "too many requests" in raw:
+    if (
+        status == 429
+        or "rate limit" in raw
+        or "too many requests" in raw
+        or "quota_exceeded" in raw
+    ):
         return GeneratorError(
             f"{provider} is temporarily rate-limiting requests. Wait briefly, then try again.",
             provider=provider,
