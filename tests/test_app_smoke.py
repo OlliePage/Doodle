@@ -68,6 +68,9 @@ class _FakeStreamlit(types.ModuleType):
     def expander(self, *_args, **_kwargs):
         return _Context()
 
+    def popover(self, *_args, **_kwargs):
+        return _Context()
+
     def spinner(self, *_args, **_kwargs):
         return _Context()
 

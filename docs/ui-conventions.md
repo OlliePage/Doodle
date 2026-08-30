@@ -70,8 +70,8 @@ inside Doodle Studio. Saving used to end at a disabled `Saved` button with no
 route onward, so the library it wrote to was effectively invisible. The rules:
 
 - The result screen's save button becomes the route to what it just saved.
-- The homepage offers `Your saved doodles (n)` once there is at least one, and
-  stays a single idea box before that.
+- The homepage offers `Saved doodles (n)` in the top-right corner once there is
+  at least one, out of the centre column, and shows nothing there before that.
 - Opening a saved doodle always lands in Doodle Studio's Create tab, with a
   confirmation naming the doodle, because laying it out is the reason to reopen
   one.
@@ -94,10 +94,18 @@ exists to correct.
 ## Before the drawing, and after it
 
 Anything that changes what gets drawn is asked before the drawing, on the
-homepage, under `Drawing options`. Putting those controls only in Doodle Studio
-meant the first way to change how many pictures Doodle draws was to draw the
-wrong one first and pay for it. The answers persist, because a parent drawing
-for the same children wants the same answers every time.
+homepage. Putting those controls only in Doodle Studio meant the first way to
+change how many pictures Doodle draws was to draw the wrong one first and pay
+for it. The answers persist, because a parent drawing for the same children
+wants the same answers every time.
+
+The homepage owes those answers a home that does not cost it its shape. Below
+the logo it holds one full-width element, the idea box, and the button that
+acts on it; the settings are a line of small grey text under the button reading
+the current answers, each one opening its choices in a floating panel. A panel
+below the button turned the page into a column of same-weight boxes, which is
+the look the page exists to avoid. Nothing on the homepage opens in place, so
+nothing below it ever moves.
 
 Every screen holding a doodle carries the same top bar: the logo, `Saved (n)`
 and `New doodle`. Both routes are one click from the top of the page, never at
