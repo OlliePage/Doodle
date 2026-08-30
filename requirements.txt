@@ -4,3 +4,4 @@ Pillow>=11,<14
 reportlab>=4.2,<5
 PyMuPDF>=1.24,<2
 pypdf>=5,<7
+watchdog>=4,<7
