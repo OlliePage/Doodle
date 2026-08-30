@@ -57,19 +57,25 @@ branching on a provider's name.
 
 | | OpenAI | Google Gemini | Recraft |
 |---|---|---|---|
-| Endpoint | `client.images.edit` | `POST /v1beta/interactions` | `/v1/images/imageToImage` |
-| Image passed as | multipart file | a `{"type": "image", "mime_type", "data"}` block beside the text block | multipart file |
+| Endpoint | `client.images.edit` | `POST /v1beta/interactions` | `POST /v1/images/imageToImage` |
+| Image passed as | multipart file | a `{"type": "image", "mime_type", "data"}` block beside the text block | multipart field `image` |
 | Mask | optional | not applicable | separate inpainting endpoint |
-| Fidelity control | `input_fidelity` | none | `strength` |
+| Closeness control | `input_fidelity`, higher is closer | none | `strength`, **lower** is closer |
 
 Gemini uses the same endpoint and models for editing as for generation; the
-input becomes a two-element list rather than one. OpenAI's `input_fidelity`
-parameter controls how closely the result tracks the original and directly
-addresses the drift described below, so it is set high.
+input becomes a two-element list rather than one.
 
-[ASSUMPTION] Recraft's exact image-to-image path and parameter names are taken
-from its endpoint index rather than a worked example. The first implementation
-task confirms them against the live API reference before the adapter is written.
+The two closeness controls run in opposite directions, which is a trap worth
+naming. OpenAI's `input_fidelity` measures how closely the result tracks the
+original, so it is set high. Recraft's `strength` measures the *difference* from
+the original — its own documentation says 0 is "almost identical" and 1 is
+"minimal similarity" — so it is set low. Both are stored as a single
+`edit_closeness` float on the provider spec, where 1.0 always means "stay as
+close as possible", and each adapter translates it into its vendor's direction.
+Storing the raw vendor value would invite someone to copy 0.9 from one provider
+to the other and get the opposite of what they wanted.
+
+Recraft's `strength` is a required field, not optional, so it cannot be omitted.
 
 ## Design
 
@@ -78,10 +84,11 @@ task confirms them against the live API reference before the adapter is written.
 `ProviderSpec` gains two fields:
 
 - `supports_edit: bool` — whether the provider can change an existing image.
-- `edit_fidelity_param: str` — the name of its fidelity control, empty where
-  there is none. Kept as data so `generators.py` sets it without an if-else on
-  the provider's identity, which is the mistake that gave Gemini users Recraft's
-  instructions.
+- `edit_closeness: float` — how close to the original a refinement should stay,
+  on one scale where 1.0 is closest, translated by each adapter into its
+  vendor's own direction. Kept as data so `generators.py` sets it without an
+  if-else on the provider's identity, which is the mistake that gave Gemini
+  users Recraft's instructions.
 
 ### Editing
 
