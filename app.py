@@ -27,6 +27,7 @@ from colouring_factory.guidance import guidance_for
 from colouring_factory.image_processing import analyse_line_art, normalise_line_art
 from colouring_factory.layouts import (
     compute_circle_sheet_plan,
+    largest_margin_that_fits,
 )
 from colouring_factory.models import (
     CalibrationProfile,
@@ -1560,6 +1561,23 @@ with create_tab:
                     f"safe {safe:g} mm; {len(plan.placements)} copies"
                 )
 
+                # A sheet that holds nothing is reported as a zero-capacity plan
+                # rather than raised as an error, so it needs explaining here.
+                if not plan.placements:
+                    suggested = largest_margin_that_fits(pdf_config)
+                    if suggested is None:
+                        _show_guidance("badge_too_large")
+                    else:
+                        _show_guidance("no_circles_fit", suggested_margin_mm=suggested)
+                        if st.button(
+                            f"Set the margin to {suggested:g} mm",
+                            width="stretch",
+                            icon=":material/straighten:",
+                        ):
+                            st.session_state.circle_margin_mm = suggested
+                            st.rerun()
+                    summary = "No badges fit this sheet"
+
                 badge_col, legend_col = st.columns([1, 1])
                 with badge_col:
                     try:
@@ -1739,9 +1757,7 @@ with library_tab:
                     st.caption(f"Source: {source}")
                     use_col, delete_col = st.columns(2)
                     with use_col:
-                        if st.button(
-                            "Use", key=f"load_{item['id']}", width="stretch"
-                        ):
+                        if st.button("Use", key=f"load_{item['id']}", width="stretch"):
                             artwork = load_library_image(item["id"], prefer_raw=False)
                             _set_current_artwork(
                                 artwork,
@@ -1824,9 +1840,7 @@ with calibration_tab:
 
     save_cal_col, reset_cal_col = st.columns(2)
     with save_cal_col:
-        if st.button(
-            "Save calibration profile", type="primary", width="stretch"
-        ):
+        if st.button("Save calibration profile", type="primary", width="stretch"):
             updated = load_settings()
             updated["calibration"] = proposed.to_dict()
             save_settings(updated)
