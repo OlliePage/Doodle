@@ -114,6 +114,26 @@ def test_the_homepage_shows_one_prompt_bar_and_a_hint() -> None:
     assert "doodle-logo--hero" in body
 
 
+def _all_rendered(at: AppTest) -> str:
+    blocks = [block.value for block in at.markdown]
+    blocks += [block.proto.body for block in at.get("html")]
+    return " ".join(blocks)
+
+
+def test_the_build_badge_survives_every_screen() -> None:
+    # This branch added three screens that each end in st.stop(), any of which
+    # could have left the badge unreached.
+    home = AppTest.from_file(APP, default_timeout=60)
+    home.run()
+    assert "doodle-build" in _all_rendered(home)
+
+    home.text_input[0].set_value("A bear flying a kite").run()
+    assert home.session_state["screen"] == "connect"
+    assert "doodle-build" in _all_rendered(home)
+
+    assert "doodle-build" in _all_rendered(_circle_sheet())
+
+
 def test_an_idea_with_no_key_routes_to_the_connection_screen() -> None:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
