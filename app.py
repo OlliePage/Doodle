@@ -708,7 +708,7 @@ def _render_connection_setup() -> None:
 
     top_left, top_middle, top_right = st.columns([1, 3, 1])
     with top_left:
-        if st.button("← Back", width="stretch"):
+        if st.button("Back", width="stretch", icon=":material/arrow_back:"):
             st.session_state.screen = (
                 "home"
                 if st.session_state.connect_return == "generate"
@@ -759,21 +759,23 @@ def _render_connection_setup() -> None:
     )
 
     st.markdown(
-        '<div class="step-label">1 · Create a provider key</div>',
+        '<div class="step-label">Step 1 · Create a provider key</div>',
         unsafe_allow_html=True,
     )
     link_a, link_b = st.columns(2)
     with link_a:
         st.link_button(
-            f"Open {spec.label} API keys ↗",
+            f"Open {spec.label} API keys",
             spec.key_url,
             width="stretch",
+            icon=":material/open_in_new:",
         )
     with link_b:
         st.link_button(
             spec.billing_button_label,
             spec.billing_url,
             width="stretch",
+            icon=":material/open_in_new:",
         )
 
     st.caption(spec.setup_hint)
@@ -799,7 +801,7 @@ def _render_connection_setup() -> None:
 
     if existing_key and not replacing:
         st.markdown(
-            '<div class="step-label">2 · Confirm the connection</div>',
+            '<div class="step-label">Step 2 · Confirm the connection</div>',
             unsafe_allow_html=True,
         )
         st.success(
@@ -836,7 +838,8 @@ def _render_connection_setup() -> None:
             )
     else:
         st.markdown(
-            '<div class="step-label">2 · Paste the key</div>', unsafe_allow_html=True
+            '<div class="step-label">Step 2 · Paste the key</div>',
+            unsafe_allow_html=True,
         )
         with st.form(f"connect_{provider_id}", clear_on_submit=False):
             pasted_key = st.text_input(
@@ -846,13 +849,17 @@ def _render_connection_setup() -> None:
                 help="Doodle never writes this key into artwork, PDFs or the Git repository.",
             )
             remember_key = st.checkbox("Remember on this Mac", value=True)
+            # The step number belongs to the heading above, not to the button.
             submit_label = (
-                "3 · Connect & draw"
+                "Connect and draw"
                 if st.session_state.connect_return == "generate"
-                else "3 · Connect"
+                else "Connect"
             )
             connect_clicked = st.form_submit_button(
-                submit_label, type="primary", width="stretch"
+                submit_label,
+                type="primary",
+                width="stretch",
+                icon=":material/link:",
             )
 
         with st.expander("Where is my key stored?"):
@@ -1102,18 +1109,19 @@ def _render_first_result() -> None:
 
     again_col, love_col, print_col = st.columns([1, 1, 1.35])
     with again_col:
-        if st.button("↻ Again", width="stretch"):
+        if st.button("Draw another", width="stretch", icon=":material/refresh:"):
             st.session_state.generation_nonce = (
                 int(st.session_state.get("generation_nonce", 0)) + 1
             )
             st.session_state.screen = "generate"
             st.rerun()
     with love_col:
-        love_label = "✓ Saved" if st.session_state.get("quick_saved") else "♡ Love it"
+        already_saved = bool(st.session_state.get("quick_saved"))
         if st.button(
-            love_label,
+            "Saved" if already_saved else "Save to your doodles",
             width="stretch",
-            disabled=bool(st.session_state.get("quick_saved")),
+            icon=":material/check:" if already_saved else ":material/favorite:",
+            disabled=already_saved,
         ):
             save_library_item(
                 processed_image=st.session_state.quick_processed,
@@ -1125,7 +1133,7 @@ def _render_first_result() -> None:
             st.rerun()
     with print_col:
         st.download_button(
-            "Print my Doodle",
+            "Print this doodle",
             data=st.session_state.quick_pdf,
             file_name=f"{_slug(st.session_state.current_title)}-a4.pdf",
             mime="application/pdf",
@@ -1158,7 +1166,7 @@ def _render_first_result() -> None:
                 st.session_state.screen = "connect"
                 st.rerun()
 
-    if st.button("Start a new Doodle", width="stretch"):
+    if st.button("New doodle", width="stretch", icon=":material/add:"):
         _start_new_doodle()
 
 
@@ -1195,7 +1203,7 @@ with brand_col:
         unsafe_allow_html=True,
     )
 with new_col:
-    if st.button("New doodle", width="stretch"):
+    if st.button("New doodle", width="stretch", icon=":material/add:"):
         _start_new_doodle()
 
 with st.sidebar:
@@ -1292,7 +1300,7 @@ create_tab, library_tab, calibration_tab, guide_tab = st.tabs(
 
 with create_tab:
     st.markdown(
-        '<div class="step-label">Step 1 - Choose the artwork source</div>',
+        '<div class="step-label">Step 1 · Choose the artwork source</div>',
         unsafe_allow_html=True,
     )
     source_mode = st.radio(
@@ -1332,7 +1340,7 @@ with create_tab:
                 )
 
             generate_clicked = st.form_submit_button(
-                "Create doodles", type="primary", width="stretch"
+                "Draw it", type="primary", width="stretch", icon=":material/brush:"
             )
 
         if generate_clicked:
@@ -1513,7 +1521,7 @@ with create_tab:
     if st.session_state.current_raw:
         st.divider()
         st.markdown(
-            '<div class="step-label">Step 2 - Prepare clean line art</div>',
+            '<div class="step-label">Step 2 · Prepare clean line art</div>',
             unsafe_allow_html=True,
         )
         st.subheader(st.session_state.current_title or "Selected artwork")
@@ -1535,9 +1543,9 @@ with create_tab:
                 "Thicken lines", min_value=0, max_value=3, value=0
             )
             despeckle_label = st.selectbox(
-                "Remove tiny specks", ["Off", "Light", "Stronger"]
+                "Remove tiny specks", ["Off", "Light", "Strong"]
             )
-            despeckle_size = {"Off": 0, "Light": 3, "Stronger": 5}[despeckle_label]
+            despeckle_size = {"Off": 0, "Light": 3, "Strong": 5}[despeckle_label]
         with controls_3:
             crop_whitespace = st.checkbox("Crop excess white space", value=True)
             padding_percent = st.slider("White padding after crop", 0.0, 20.0, 5.0, 0.5)
@@ -1601,12 +1609,12 @@ with create_tab:
             )
         with save_col:
             save_title = st.text_input(
-                "Library title",
+                "Name for this doodle",
                 value=st.session_state.current_title or "Colouring picture",
                 label_visibility="collapsed",
-                placeholder="Library title",
+                placeholder="Name for this doodle",
             )
-            if st.button("Save artwork to library", width="stretch"):
+            if st.button("Save to your doodles", width="stretch", icon=":material/favorite:"):
                 item_id = save_library_item(
                     processed_image=processed,
                     raw_image=st.session_state.current_raw,
@@ -1621,7 +1629,7 @@ with create_tab:
 
         st.divider()
         st.markdown(
-            '<div class="step-label">Step 3 - Define the physical layout</div>',
+            '<div class="step-label">Step 3 · Define the physical layout</div>',
             unsafe_allow_html=True,
         )
         layout_type = st.radio(
@@ -1642,12 +1650,12 @@ with create_tab:
             with c1:
                 orientation = st.selectbox("Orientation", ["Portrait", "Landscape"])
             with c2:
-                margin_mm = st.number_input("Page margin (mm)", 5.0, 40.0, 12.0, 0.5)
+                margin_mm = st.number_input("Margin (mm)", 5.0, 40.0, 12.0, 0.5)
             with c3:
                 caption_size = st.number_input(
                     "Caption size (pt)", 7.0, 36.0, 17.0, 0.5
                 )
-            caption = st.text_input("Optional caption", value="")
+            caption = st.text_input("Caption (optional)", value="")
             page_w, page_h = _orientation_dimensions(orientation)
             pdf_config = FullPageConfig(
                 page_width_mm=page_w,
@@ -1679,7 +1687,14 @@ with create_tab:
                     "Safe artwork diameter (mm)", 5.0, 180.0, 50.0, 0.1
                 )
             with row_1[3]:
-                copies = st.number_input("Copies (0 = fill sheet)", 0, 100, 0, 1)
+                copies = st.number_input(
+                    "Copies",
+                    0,
+                    100,
+                    0,
+                    1,
+                    help="Leave at zero to fill the sheet with as many as fit.",
+                )
 
             row_2 = st.columns(4)
             with row_2[0]:
@@ -1692,12 +1707,10 @@ with create_tab:
                 apply_calibration = st.checkbox("Apply saved calibration", value=False)
             with row_2[3]:
                 circle_caption_size = st.number_input(
-                    "Badge caption size (pt)", 5.0, 16.0, 7.5, 0.5
+                    "Caption size (pt)", 5.0, 16.0, 7.5, 0.5
                 )
 
-            circle_caption = st.text_input(
-                "Optional text inside every circle", value=""
-            )
+            circle_caption = st.text_input("Caption (optional)", value="")
             guide_1, guide_2, guide_3 = st.columns(3)
             with guide_1:
                 show_cut = st.checkbox("Show cut line", value=True)
@@ -1818,12 +1831,10 @@ with create_tab:
                     "PDF page height (mm)", 20.0, 500.0, 100.0, 0.1
                 )
             with custom_3:
-                custom_margin = st.number_input(
-                    "Inner margin (mm)", 0.0, 80.0, 5.0, 0.5
-                )
-            custom_caption = st.text_input("Optional caption on custom page", value="")
+                custom_margin = st.number_input("Margin (mm)", 0.0, 80.0, 5.0, 0.5)
+            custom_caption = st.text_input("Caption (optional)", value="")
             custom_caption_size = st.number_input(
-                "Custom caption size (pt)", 5.0, 30.0, 11.0, 0.5
+                "Caption size (pt)", 5.0, 30.0, 11.0, 0.5
             )
             pdf_config = CustomPageConfig(
                 page_width_mm=float(custom_w),
@@ -1907,7 +1918,7 @@ with library_tab:
 
     library_items = list_library_items()
     if not library_items:
-        st.info("The library is empty. Prepare a picture in Create, then save it.")
+        st.info("You have no saved doodles yet. Draw or upload a picture in Create, then save it.")
     else:
         library_columns = st.columns(3)
         for index, item in enumerate(library_items):
@@ -1931,7 +1942,7 @@ with library_tab:
                             artwork = load_library_image(item["id"], prefer_raw=False)
                             _set_current_artwork(
                                 artwork,
-                                title=item.get("title", "Library artwork"),
+                                title=item.get("title", "Saved doodle"),
                                 metadata={
                                     "source": "Library",
                                     "library_id": item["id"],
