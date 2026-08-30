@@ -5,7 +5,12 @@ import pymupdf
 import pytest
 from PIL import Image
 
-from colouring_factory.layouts import fit_contain, fit_inscribed, mm_to_pt
+from colouring_factory.layouts import (
+    compute_circle_sheet_plan,
+    fit_contain,
+    fit_inscribed,
+    mm_to_pt,
+)
 from colouring_factory.models import CalibrationProfile, CircleSheetConfig
 from colouring_factory.pdf_export import create_circle_sheet_pdf
 
@@ -114,3 +119,78 @@ def test_fill_mode_reproduces_the_previous_geometry() -> None:
     assert count == 1
     assert pdf_bytes.startswith(b"%PDF")
     assert _drawn_width_pt(artwork, "fill") == pytest.approx(mm_to_pt(50.0), rel=0.01)
+
+
+@pytest.mark.parametrize(
+    "source_width,source_height",
+    [(1024, 1024), (1024, 1536), (1536, 1024), (300, 100)],
+)
+def test_an_offset_rectangle_still_fits_inside_the_ellipse(
+    source_width, source_height
+) -> None:
+    # A caption pushes the artwork up, which swings its lower corners further
+    # from the centre. Solving against a caption-reduced box instead of the real
+    # clip ellipse put those corners outside it by up to 5.6 per cent.
+    safe = 58.0
+    caption_h = safe * 0.24
+    box = fit_inscribed(
+        source_width, source_height, 0.0, 0.0, safe, safe, offset_y=caption_h / 2.0
+    )
+    for corner in _corners(*box):
+        assert _inside_ellipse(corner, 0.0, 0.0, safe, safe)
+
+
+def test_an_offset_rectangle_clears_the_caption_band() -> None:
+    safe = 58.0
+    caption_h = safe * 0.24
+    _x, y, _w, _h = fit_inscribed(
+        1024, 1024, 0.0, 0.0, safe, safe, offset_y=caption_h / 2.0
+    )
+    caption_top = -(safe / 2.0) + caption_h
+    assert y >= caption_top - 1e-9
+
+
+def test_no_offset_matches_the_closed_form() -> None:
+    plain = fit_inscribed(1024, 1536, 0.0, 0.0, 58.0, 58.0)
+    explicit_zero = fit_inscribed(1024, 1536, 0.0, 0.0, 58.0, 58.0, offset_y=0.0)
+    assert plain == explicit_zero
+
+
+def test_an_offset_is_smaller_than_no_offset() -> None:
+    _x, _y, centred_w, _h = fit_inscribed(1024, 1024, 0.0, 0.0, 58.0, 58.0)
+    _x2, _y2, shifted_w, _h2 = fit_inscribed(
+        1024, 1024, 0.0, 0.0, 58.0, 58.0, offset_y=7.0
+    )
+    assert shifted_w < centred_w
+
+
+def test_an_offset_beyond_the_ellipse_is_refused() -> None:
+    with pytest.raises(ValueError):
+        fit_inscribed(100, 100, 0.0, 0.0, 58.0, 58.0, offset_y=29.0)
+
+
+def test_a_captioned_badge_keeps_every_corner_inside_the_clip() -> None:
+    artwork = _full_bleed_png()
+    config = CircleSheetConfig(copies=1, caption="Well done", fit_mode="inscribe")
+    pdf_bytes, _count = create_circle_sheet_pdf(artwork, config, CalibrationProfile())
+    page = pymupdf.open(stream=pdf_bytes, filetype="pdf")[0]
+    placed = page.get_images(full=True)
+    assert placed
+    rect = page.get_image_rects(placed[0][0])[0]
+
+    # The clip is the whole safe circle, centred on the badge.
+    plan = compute_circle_sheet_plan(config, CalibrationProfile())
+    centre = plan.placements[0]
+    centre_x_pt = mm_to_pt(centre.centre_x_mm)
+    centre_y_pt = mm_to_pt(centre.centre_y_mm)
+    semi = mm_to_pt(config.safe_diameter_mm) / 2.0
+
+    # PyMuPDF reports y downward from the page top; the circle is symmetric, so
+    # comparing distances from the centre works in either convention.
+    page_height_pt = mm_to_pt(config.page_height_mm)
+    for x in (rect.x0, rect.x1):
+        for y in (page_height_pt - rect.y0, page_height_pt - rect.y1):
+            offset = math.hypot(x - centre_x_pt, y - centre_y_pt)
+            assert offset <= semi + 0.5, (
+                "a captioned badge corner falls outside the clip"
+            )

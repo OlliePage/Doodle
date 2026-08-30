@@ -57,23 +57,39 @@ def _place_badge_art(
     fit_mode: str,
     centre_x: float,
     centre_y: float,
-    box_width: float,
-    box_height: float,
+    safe_width: float,
+    safe_height: float,
+    offset_y: float = 0.0,
 ) -> None:
+    """Draw the artwork inside the safe ellipse.
+
+    In inscribe mode the rectangle is solved against the whole safe ellipse, not
+    against a caption-reduced box: shrinking the box and then shifting it up
+    swings the lower corners further from the centre, so they end up outside the
+    clip and are cut off despite the interface promising nothing is lost.
+    """
+
     if fit_mode == "fill":
+        box_height = safe_height - (2.0 * abs(offset_y))
         _draw_image_contain(
             pdf,
             image_bytes,
-            centre_x - (box_width / 2.0),
-            centre_y - (box_height / 2.0),
-            box_width,
+            centre_x - (safe_width / 2.0),
+            centre_y + offset_y - (box_height / 2.0),
+            safe_width,
             box_height,
         )
         return
 
     source_width, source_height = _image_dimensions(image_bytes)
     x, y, width, height = fit_inscribed(
-        source_width, source_height, centre_x, centre_y, box_width, box_height
+        source_width,
+        source_height,
+        centre_x,
+        centre_y,
+        safe_width,
+        safe_height,
+        offset_y=offset_y,
     )
     pdf.drawImage(
         ImageReader(BytesIO(image_bytes)),
@@ -254,15 +270,15 @@ def create_circle_sheet_pdf(
 
         if config.caption.strip():
             caption_h = safe_h * 0.24
-            art_h = safe_h - caption_h
             _place_badge_art(
                 pdf,
                 image_bytes,
                 config.fit_mode,
                 centre_x,
-                centre_y + (caption_h / 2.0),
+                centre_y,
                 safe_w,
-                art_h,
+                safe_h,
+                offset_y=caption_h / 2.0,
             )
             _draw_centred_caption(
                 pdf,
