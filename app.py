@@ -60,11 +60,15 @@ from colouring_factory.prompts import (
 )
 from colouring_factory.variations import build_variation_briefs
 from colouring_factory.storage import (
+    QUICK_AGE_CHOICES,
+    QUICK_ALTERNATIVE_CHOICES,
+    QUICK_STYLE_CHOICES,
     data_root,
     delete_library_item,
     list_library_items,
     load_library_image,
     load_settings,
+    quick_drawing_options,
     save_library_item,
     save_settings,
 )
@@ -462,6 +466,8 @@ def _render_homepage() -> None:
     if st.session_state.get("home_error"):
         st.error(st.session_state.home_error)
 
+    _render_home_options()
+
     # Offered only once there is something to open, so a first-time homepage
     # stays a single idea box and one button.
     saved_count = _saved_doodle_count()
@@ -556,6 +562,147 @@ def _build_signature(
 def _start_version_chain(artwork) -> None:
     st.session_state.doodle_versions = history.start(artwork)
     st.session_state.current_version = 0
+
+
+def _render_top_bar(*, where: str) -> None:
+    """The logo and the two routes that must never be more than one click away.
+
+    Starting a fresh doodle used to mean scrolling past the change box to a
+    button at the very bottom, and reaching the saved doodles meant finding
+    Doodle Studio first.
+    """
+
+    brand, saved, fresh = st.columns([3, 1.5, 1.3])
+    with brand:
+        st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
+    with saved:
+        count = _saved_doodle_count()
+        if st.button(
+            f"Saved ({count})" if count else "Saved",
+            width="stretch",
+            icon=":material/collections_bookmark:",
+            key=f"top_saved_{where}",
+            disabled=not count,
+            help="Every doodle you have saved on this computer."
+            if count
+            else "Nothing saved yet.",
+        ):
+            st.session_state.library_return = where
+            st.session_state.screen = "library"
+            st.rerun()
+    with fresh:
+        if st.button(
+            "New doodle",
+            width="stretch",
+            icon=":material/add:",
+            key=f"top_new_{where}",
+        ):
+            _start_new_doodle()
+
+
+def _render_alternatives_picker() -> None:
+    """The other readings of the same idea, when more than one was drawn."""
+
+    candidates = st.session_state.get("candidates") or []
+    if len(candidates) < 2:
+        return
+
+    st.caption("Doodle drew these from the same idea. Tap one to work on it instead.")
+    columns = st.columns(len(candidates))
+    for index, candidate in enumerate(candidates):
+        with columns[index]:
+            st.image(candidate.image_bytes, width="stretch")
+            chosen = candidate.image_bytes == st.session_state.get("current_raw")
+            if st.button(
+                "Showing" if chosen else "Use this one",
+                key=f"quick_candidate_{index}",
+                width="stretch",
+                disabled=chosen,
+            ):
+                _adopt_artwork(
+                    candidate,
+                    st.session_state.current_metadata.get("concept", "Doodle"),
+                )
+                _prepare_quick_outputs()
+                st.rerun()
+
+    with st.expander("How these differ"):
+        for index, candidate in enumerate(candidates, start=1):
+            st.markdown(f"**Picture {index}**")
+            st.caption(
+                candidate.metadata.get("brief") or "Drawn from the idea as written."
+            )
+
+
+def _render_home_options() -> None:
+    """The three questions the homepage asks before it draws anything.
+
+    Pressing Enter used to draw one picture on fixed settings, with the only
+    controls for them buried in Doodle Studio, behind the drawing that had
+    already been paid for.
+    """
+
+    settings = load_settings()
+    options = quick_drawing_options(settings)
+
+    # Read the widgets' own state for the summary. The saved settings are one
+    # rerun behind the control the user has just moved, so a label built from
+    # them would describe the previous choice.
+    shown_alternatives = (
+        st.session_state.get("home_alternatives") or options["alternatives"]
+    )
+    shown_age = st.session_state.get("home_age_profile") or options["age_profile"]
+    shown_style = st.session_state.get("home_style") or options["style"]
+    plural = "" if int(shown_alternatives) == 1 else "s"
+    summary = f"{shown_alternatives} picture{plural} · {shown_age} · {str(shown_style).lower()}"
+
+    with st.expander(f"Drawing options — {summary}"):
+        alternatives = st.segmented_control(
+            "How many to draw",
+            list(QUICK_ALTERNATIVE_CHOICES),
+            default=options["alternatives"],
+            key="home_alternatives",
+            help="Each one is drawn separately, from its own reading of your idea, and costs one generation.",
+        )
+        age_profile = st.segmented_control(
+            "Who it is for",
+            list(QUICK_AGE_CHOICES),
+            default=options["age_profile"],
+            key="home_age_profile",
+        )
+        style = st.selectbox(
+            "Drawing style",
+            list(QUICK_STYLE_CHOICES),
+            index=list(QUICK_STYLE_CHOICES).index(options["style"]),
+            key="home_style",
+        )
+
+        # A segmented control returns None when its selection is cleared, which
+        # would otherwise write a null into the settings file.
+        chosen = {
+            "quick_alternatives": int(alternatives or options["alternatives"]),
+            "quick_age_profile": str(age_profile or options["age_profile"]),
+            "quick_style": str(style or options["style"]),
+        }
+        if any(settings.get(key) != value for key, value in chosen.items()):
+            save_settings({**settings, **chosen})
+
+
+def _adopt_artwork(artwork, idea: str) -> None:
+    """Make one generated picture the current doodle, starting its history."""
+
+    _set_current_artwork(
+        artwork.image_bytes,
+        title=idea,
+        metadata={
+            "source": artwork.provider,
+            "concept": idea,
+            "prompt": artwork.prompt,
+            "model": artwork.model,
+            "generation": artwork.metadata,
+        },
+    )
+    _start_version_chain(artwork)
 
 
 def _send_to_printer(pdf_bytes: bytes) -> None:
@@ -1146,14 +1293,29 @@ def _quick_generate() -> None:
                 code="missing_key",
             )
 
-        prompt = build_colouring_prompt(
-            idea,
-            age_profile="2-3 years",
-            style_name=list(STYLE_PRESETS.keys())[0],
-            target="A4 page",
-            extra_instructions="One clear subject or action, generous white space, no caption or text.",
-        )
         settings = load_settings()
+        options = quick_drawing_options(settings)
+        wanted = int(options["alternatives"])
+
+        # One alternative needs no plan: the brief exists to pull several
+        # drawings of one idea apart from each other.
+        briefs = [""]
+        if wanted > 1:
+            briefs = build_variation_briefs(
+                idea, wanted, provider_id=provider_id, api_key=api_key
+            )
+
+        prompts = [
+            build_colouring_prompt(
+                idea,
+                age_profile=str(options["age_profile"]),
+                style_name=str(options["style"]),
+                target="A4 page",
+                extra_instructions="One clear subject or action, generous white space, no caption or text.",
+                variation_brief=brief,
+            )
+            for brief in briefs
+        ]
         model = str(settings.get(f"{provider_id}_model", spec.default_model))
         if model not in spec.models:
             model = spec.default_model
@@ -1167,25 +1329,23 @@ def _quick_generate() -> None:
         artworks = generate_with_provider(
             provider_id=provider_id,
             api_key=api_key,
-            prompts=[prompt],
+            prompts=prompts,
             model=model,
             size=spec.portrait_size,
             quality=quality,
             random_seed=random_seed,
         )
-        art = artworks[0]
-        _set_current_artwork(
-            art.image_bytes,
-            title=idea,
-            metadata={
-                "source": art.provider,
-                "concept": idea,
-                "prompt": art.prompt,
-                "model": art.model,
-                "generation": art.metadata,
-            },
-        )
-        _start_version_chain(art)
+        for artwork, brief in zip(artworks, briefs):
+            artwork.metadata["brief"] = brief
+        st.session_state.candidates = artworks if len(artworks) > 1 else []
+        _adopt_artwork(artworks[0], idea)
+
+    _prepare_quick_outputs()
+    st.session_state.screen = "result"
+
+
+def _prepare_quick_outputs() -> None:
+    """Clean the current picture and build its A4 PDF."""
 
     # Take the tuned defaults rather than repeating them. A copied number here
     # was quietly undoing the threshold set everywhere else, on the very first
@@ -1211,7 +1371,6 @@ def _quick_generate() -> None:
     st.session_state.quick_processed = processed
     st.session_state.quick_pdf = create_full_page_pdf(processed, config)
     st.session_state.quick_saved = False
-    st.session_state.screen = "result"
 
 
 def _render_generating_screen() -> None:
@@ -1290,17 +1449,20 @@ def _render_first_result() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
+    _render_top_bar(where="result")
     st.markdown(
         '<div class="happy-title">Your Doodle is ready</div>', unsafe_allow_html=True
     )
     safe_title = html.escape(str(st.session_state.get("current_title", "")))
     st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
     st.image(st.session_state.quick_processed, width="stretch")
+    _render_alternatives_picker()
 
     again_col, love_col, print_col = st.columns([1, 1, 1.35])
     with again_col:
-        if st.button("Draw another", width="stretch", icon=":material/refresh:"):
+        if st.button(
+            "Draw this idea again", width="stretch", icon=":material/refresh:"
+        ):
             st.session_state.generation_nonce = (
                 int(st.session_state.get("generation_nonce", 0)) + 1
             )
@@ -1371,9 +1533,6 @@ def _render_first_result() -> None:
                 st.session_state.screen = "connect"
                 st.rerun()
 
-    if st.button("New doodle", width="stretch", icon=":material/add:"):
-        _start_new_doodle()
-
 
 # A direct prompt should always enter the happy path. Injected artwork in tests or
 # a restored session goes straight to the advanced studio.
@@ -1403,16 +1562,11 @@ if st.session_state.screen == "library":
 settings = load_settings()
 calibration_profile = CalibrationProfile.from_dict(settings.get("calibration"))
 
-brand_col, new_col = st.columns([6, 1])
-with brand_col:
-    st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
-    st.markdown(
-        '<div class="studio-subtitle">Turn an idea into a print-ready colouring page.</div>',
-        unsafe_allow_html=True,
-    )
-with new_col:
-    if st.button("New doodle", width="stretch", icon=":material/add:"):
-        _start_new_doodle()
+_render_top_bar(where="studio")
+st.markdown(
+    '<div class="studio-subtitle">Turn an idea into a print-ready colouring page.</div>',
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
     st.markdown("### Settings")
