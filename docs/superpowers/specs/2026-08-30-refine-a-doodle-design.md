@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 Branch: `claude/refine-doodles`
-Status: draft, awaiting approval
+Status: approved for planning
 Supersedes: the refinement third of the closed [#1](https://github.com/OlliePage/Doodle/pull/1)
 
 ## Problem
@@ -179,9 +179,10 @@ existing generator tests do.
 That last point is the lesson of #8: a recovery button shipped broken past a test
 that checked only that it rendered.
 
-## Open question for approval
+## Decided: show the count, do not cap
 
-Refining costs a full image generation each time, and the strip makes iterating
-easy. Should Doodle cap a chain's length, warn past some number of versions, or
-simply show the count and leave it to the user? The design above shows the count
-and does not cap.
+Refining costs a full image generation each time, and the version strip makes
+iterating easy. Doodle shows the number of versions in the current chain beside
+the refine box and leaves the judgement to the user. No cap, no warning
+threshold, because a threshold is a guess at someone else's budget and a cap
+blocks work at the moment it is going well.
