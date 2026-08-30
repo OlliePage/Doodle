@@ -15,7 +15,11 @@ from streamlit.testing.v1 import AppTest
 
 from colouring_factory import generators, variations
 from colouring_factory.models import GeneratedArtwork
-from colouring_factory.storage import load_settings, quick_drawing_options
+from colouring_factory.storage import (
+    load_settings,
+    quick_drawing_options,
+    save_library_item,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP = str(PROJECT_ROOT / "app.py")
@@ -96,15 +100,59 @@ def test_the_number_of_pictures_is_remembered_between_visits() -> None:
     assert not fresh.exception
 
 
-def test_the_collapsed_options_say_what_will_happen() -> None:
-    at = _homepage()
-    at = at.segmented_control(key="home_alternatives").set_value(3).run()
-    headings = " ".join(
-        str(block.proto.label)
-        for block in at.main.children.values()
-        if getattr(block, "type", "") == "expander"
+def _blocks(block, kind: str) -> list:
+    """Every block of one kind, at any depth below this one."""
+
+    found = [block] if getattr(block, "type", "") == kind else []
+    for child in getattr(block, "children", {}).values():
+        found.extend(_blocks(child, kind))
+    return found
+
+
+def _settings_line(at: AppTest) -> str:
+    return " ".join(
+        popover.proto.popover.label for popover in _blocks(at.main, "popover")
     )
-    assert "3 pictures" in headings
+
+
+def test_the_settings_line_says_what_will_happen() -> None:
+    at = _homepage()
+    assert "1 picture" in _settings_line(at)
+
+    at = at.segmented_control(key="home_alternatives").set_value(3).run()
+    assert "3 pictures" in _settings_line(at)
+    assert "2-3 years" in _settings_line(at)
+    assert "toddler bold" in _settings_line(at)
+
+
+def test_the_homepage_stacks_nothing_below_the_button() -> None:
+    """The aesthetic is a logo, a bar and a button; settings are a text line.
+
+    A panel under the button turned the page into a column of same-weight
+    boxes, which is the look this page exists to avoid.
+    """
+
+    save_library_item(
+        processed_image=ARTWORK,
+        raw_image=ARTWORK,
+        title="Blue dinosaur",
+        metadata={"source": "test"},
+    )
+    at = _homepage()
+    assert not at.exception
+    assert _blocks(at.main, "expander") == [], "no panel below the search bar"
+
+    # The route to the library is a corner link, not a fourth stacked row.
+    corner = [
+        block
+        for block in _blocks(at.main, "flex_container")
+        if "doodle-home-corner" in block.proto.id
+    ]
+    assert len(corner) == 1
+    saved = _button(at, "saved doodles")
+    assert saved.key == "home_saved_link"
+    assert saved.proto.type == "tertiary", "the corner link carries no weight"
+    assert saved.proto.id in str(corner[0].children[0].proto.id)
 
 
 def test_asking_for_three_draws_three_and_offers_the_choice(drawn) -> None:

@@ -418,24 +418,56 @@ def _render_homepage() -> None:
             min-height: 48px;
             font-size: 1rem;
           }
-          /* The route to saved doodles keeps the pill's width so the column
-             stays aligned, but none of its weight: drawing is what this page
-             is for. */
-          div[data-testid="stButton"] {
-            width: min(100%, 730px);
-            margin: .55rem auto 0;
+          /* The route to saved doodles leaves the centre column entirely and
+             takes the corner, the way a homepage keeps its account and inbox
+             links out of the way of the search bar. Fixed, so it stays put
+             while the column below it is vertically centred. */
+          .st-key-doodle-home-corner {
+            position: fixed;
+            top: .7rem;
+            right: 1.3rem;
+            z-index: 20;
           }
-          div[data-testid="stButton"] button {
+          /* The settings read as one line of small grey text under the button.
+             Each value opens its choices in a floating panel, so nothing on
+             this page is a form and nothing reflows when it is opened. */
+          .st-key-doodle-home-settings {
+            margin-top: .85rem;
+          }
+          /* Streamlit truncates a button's label with an ellipsis, which on a
+             one-word setting leaves "toddler bo…" and defeats the point of a
+             line that is supposed to be readable at a glance. The wrappers
+             are sized from the truncated label, so they have to be widened
+             along with it. */
+          .st-key-doodle-home-settings [data-testid="stLayoutWrapper"],
+          .st-key-doodle-home-settings [data-testid="stPopover"],
+          .st-key-doodle-home-settings [data-testid="stPopoverButton"],
+          .st-key-doodle-home-settings [data-testid="stPopoverButton"] > div,
+          .st-key-doodle-home-settings [data-testid="stPopoverButton"] > div > div {
+            width: max-content !important;
+            max-width: none !important;
+            flex: 0 0 auto !important;
+          }
+          .st-key-doodle-home-settings [data-testid="stPopoverButton"] p {
+            overflow: visible;
+            text-overflow: clip;
+            max-width: none;
+            white-space: nowrap;
+            margin: 0;
+          }
+          .st-key-doodle-home-corner button,
+          .st-key-doodle-home-settings button {
+            color: #5f6368 !important;
+            font-size: .92rem;
+            font-weight: 400;
             border-radius: 999px;
-            min-height: 44px;
-            border-color: transparent;
-            background: transparent;
-            color: #5f6368;
+            padding: .25rem .7rem;
+            min-height: 0;
           }
-          div[data-testid="stButton"] button:hover {
-            background: #f4f5f7;
-            color: #202124;
-            border-color: transparent;
+          .st-key-doodle-home-corner button:hover,
+          .st-key-doodle-home-settings button:hover {
+            background: #f4f5f7 !important;
+            color: #202124 !important;
           }
           @media (max-width: 640px) {
             .block-container, [data-testid="stMainBlockContainer"] {
@@ -449,6 +481,22 @@ def _render_homepage() -> None:
         """,
         unsafe_allow_html=True,
     )
+    # Offered only once there is something to open, so a first-time homepage
+    # is a logo, a bar and a button and nothing else.
+    saved_count = _saved_doodle_count()
+    if saved_count:
+        with st.container(
+            key="doodle-home-corner", horizontal=True, horizontal_alignment="right"
+        ):
+            if st.button(
+                f"Saved doodles ({saved_count})",
+                type="tertiary",
+                key="home_saved_link",
+            ):
+                st.session_state.library_return = "home"
+                st.session_state.screen = "library"
+                st.rerun()
+
     st.markdown(_doodle_logo("hero", centred=True), unsafe_allow_html=True)
     # A form, not on_change: a bare text input commits when it loses focus as
     # well as on Enter, so clicking away from a half-typed prompt jumped
@@ -471,19 +519,6 @@ def _render_homepage() -> None:
         st.error(st.session_state.home_error)
 
     _render_home_options()
-
-    # Offered only once there is something to open, so a first-time homepage
-    # stays a single idea box and one button.
-    saved_count = _saved_doodle_count()
-    if saved_count:
-        if st.button(
-            f"Your saved doodles ({saved_count})",
-            width="stretch",
-            icon=":material/collections_bookmark:",
-        ):
-            st.session_state.library_return = "home"
-            st.session_state.screen = "library"
-            st.rerun()
 
 
 @st.cache_data(show_spinner=False)
@@ -734,13 +769,16 @@ def _render_home_options() -> None:
 
     Pressing Enter used to draw one picture on fixed settings, with the only
     controls for them buried in Doodle Studio, behind the drawing that had
-    already been paid for.
+    already been paid for. Answering them in a panel below the bar turned the
+    page into a stack of boxes, so the answers are a line of small grey text
+    instead, and each one opens its choices in a floating panel rather than
+    pushing the page around.
     """
 
     settings = load_settings()
     options = quick_drawing_options(settings)
 
-    # Read the widgets' own state for the summary. The saved settings are one
+    # Read the widgets' own state for the labels. The saved settings are one
     # rerun behind the control the user has just moved, so a label built from
     # them would describe the previous choice.
     shown_alternatives = (
@@ -749,38 +787,46 @@ def _render_home_options() -> None:
     shown_age = st.session_state.get("home_age_profile") or options["age_profile"]
     shown_style = st.session_state.get("home_style") or options["style"]
     plural = "" if int(shown_alternatives) == 1 else "s"
-    summary = f"{shown_alternatives} picture{plural} · {shown_age} · {str(shown_style).lower()}"
 
-    with st.expander(f"Drawing options — {summary}"):
-        alternatives = st.segmented_control(
-            "How many to draw",
-            list(QUICK_ALTERNATIVE_CHOICES),
-            default=options["alternatives"],
-            key="home_alternatives",
-            help="Each one is drawn separately, from its own reading of your idea, and costs one generation.",
-        )
-        age_profile = st.segmented_control(
-            "Who it is for",
-            list(QUICK_AGE_CHOICES),
-            default=options["age_profile"],
-            key="home_age_profile",
-        )
-        style = st.selectbox(
-            "Drawing style",
-            list(QUICK_STYLE_CHOICES),
-            index=list(QUICK_STYLE_CHOICES).index(options["style"]),
-            key="home_style",
-        )
+    with st.container(
+        key="doodle-home-settings",
+        horizontal=True,
+        horizontal_alignment="center",
+        vertical_alignment="center",
+        gap="small",
+    ):
+        with st.popover(f"{shown_alternatives} picture{plural}", type="tertiary"):
+            alternatives = st.segmented_control(
+                "How many to draw",
+                list(QUICK_ALTERNATIVE_CHOICES),
+                default=options["alternatives"],
+                key="home_alternatives",
+                help="Each one is drawn separately, from its own reading of your idea, and costs one generation.",
+            )
+        with st.popover(str(shown_age), type="tertiary"):
+            age_profile = st.segmented_control(
+                "Who it is for",
+                list(QUICK_AGE_CHOICES),
+                default=options["age_profile"],
+                key="home_age_profile",
+            )
+        with st.popover(str(shown_style).lower(), type="tertiary"):
+            style = st.selectbox(
+                "Drawing style",
+                list(QUICK_STYLE_CHOICES),
+                index=list(QUICK_STYLE_CHOICES).index(options["style"]),
+                key="home_style",
+            )
 
-        # A segmented control returns None when its selection is cleared, which
-        # would otherwise write a null into the settings file.
-        chosen = {
-            "quick_alternatives": int(alternatives or options["alternatives"]),
-            "quick_age_profile": str(age_profile or options["age_profile"]),
-            "quick_style": str(style or options["style"]),
-        }
-        if any(settings.get(key) != value for key, value in chosen.items()):
-            save_settings({**settings, **chosen})
+    # A segmented control returns None when its selection is cleared, which
+    # would otherwise write a null into the settings file.
+    chosen = {
+        "quick_alternatives": int(alternatives or options["alternatives"]),
+        "quick_age_profile": str(age_profile or options["age_profile"]),
+        "quick_style": str(style or options["style"]),
+    }
+    if any(settings.get(key) != value for key, value in chosen.items()):
+        save_settings({**settings, **chosen})
 
 
 def _adopt_artwork(artwork, idea: str) -> None:
