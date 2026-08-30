@@ -10,6 +10,7 @@ from datetime import datetime
 import streamlit as st
 
 from colouring_factory.badge_preview import render_badge_preview
+from colouring_factory.browser_print import print_trigger_html
 from colouring_factory.calibration import profile_from_measurements
 from colouring_factory.demo import list_demo_artwork
 from colouring_factory.credentials import (
@@ -555,6 +556,49 @@ def _build_signature(
 def _start_version_chain(artwork) -> None:
     st.session_state.doodle_versions = history.start(artwork)
     st.session_state.current_version = 0
+
+
+def _send_to_printer(pdf_bytes: bytes) -> None:
+    """Open the browser's print dialogue on this PDF.
+
+    Downloading was never the point of these files. Every layout in Doodle is
+    measured in millimetres for a printer, so the button that finishes the job
+    has to reach the print dialogue rather than the Downloads folder.
+    """
+
+    nonce = int(st.session_state.get("print_nonce", 0)) + 1
+    st.session_state.print_nonce = nonce
+    st.html(
+        print_trigger_html(pdf_bytes, nonce=f"doodle-print-{nonce}"),
+        unsafe_allow_javascript=True,
+    )
+
+
+def _render_print_help(
+    pdf_bytes: bytes, *, file_name: str, key: str, scale_note: bool = True
+) -> None:
+    """The scale warning, and a way out when the browser blocks printing."""
+
+    if scale_note:
+        st.caption(
+            "In the print dialogue set Scale to 100% (Actual size) and turn off "
+            "Fit to page, or the sizes will not come out as measured."
+        )
+    with st.expander("Nothing happened when I pressed print"):
+        st.write(
+            "Some browsers refuse to open a print dialogue on a page's behalf. "
+            "Save the PDF and print it from Preview or Adobe Reader instead, "
+            "using the same Actual size setting."
+        )
+        st.download_button(
+            "Download the PDF",
+            data=pdf_bytes,
+            file_name=file_name,
+            mime="application/pdf",
+            width="stretch",
+            key=f"download_pdf_{key}",
+            icon=":material/download:",
+        )
 
 
 def _saved_doodle_count() -> int:
@@ -1287,19 +1331,22 @@ def _render_first_result() -> None:
             st.session_state.quick_saved = True
             st.rerun()
     with print_col:
-        st.download_button(
+        if st.button(
             "Print this doodle",
-            data=st.session_state.quick_pdf,
-            file_name=f"{_slug(st.session_state.current_title)}-a4.pdf",
-            mime="application/pdf",
             type="primary",
             width="stretch",
-        )
+            icon=":material/print:",
+        ):
+            _send_to_printer(st.session_state.quick_pdf)
 
     if st.session_state.get("quick_saved"):
         st.success("Saved to your doodles, on this computer.", icon=":material/check:")
 
-    st.caption("Open the PDF and print at Actual size / 100%. Disable Fit to page.")
+    _render_print_help(
+        st.session_state.quick_pdf,
+        file_name=f"{_slug(st.session_state.current_title)}-a4.pdf",
+        key="result",
+    )
 
     # This box used to rewrite the original idea and draw a new picture from
     # scratch. Since alternatives started coming back genuinely different, that
@@ -2060,16 +2107,18 @@ with create_tab:
                 f"{st.session_state.pdf_summary}</div>",
                 unsafe_allow_html=True,
             )
-            st.download_button(
-                "Download print-ready PDF",
-                data=st.session_state.pdf_bytes,
-                file_name=st.session_state.pdf_filename,
-                mime="application/pdf",
+            if st.button(
+                "Print this layout",
                 type="primary",
                 width="stretch",
-            )
-            st.info(
-                "Print using Actual size or 100%. Disable Fit to page, Shrink and Scale to printable area."
+                icon=":material/print:",
+                key="print_studio",
+            ):
+                _send_to_printer(st.session_state.pdf_bytes)
+            _render_print_help(
+                st.session_state.pdf_bytes,
+                file_name=st.session_state.pdf_filename,
+                key="studio",
             )
         elif st.session_state.pdf_bytes:
             st.warning(
@@ -2095,18 +2144,24 @@ with calibration_tab:
     with preview_col:
         st.image(_cached_preview(calibration_bytes, dpi=95), width="stretch")
     with action_col:
-        st.download_button(
-            "Download calibration page",
-            data=calibration_bytes,
-            file_name="doodle-printer-calibration.pdf",
-            mime="application/pdf",
+        if st.button(
+            "Print the calibration page",
             type="primary",
             width="stretch",
-        )
+            icon=":material/print:",
+            key="print_calibration",
+        ):
+            _send_to_printer(calibration_bytes)
         st.markdown(
             "1. Print at **Actual size / 100%**.\n\n"
             "2. Measure both 100 mm lines.\n\n"
             "3. Enter the measured lengths below."
+        )
+        _render_print_help(
+            calibration_bytes,
+            file_name="doodle-printer-calibration.pdf",
+            key="calibration",
+            scale_note=False,
         )
 
     measure_1, measure_2 = st.columns(2)
