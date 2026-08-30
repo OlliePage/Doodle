@@ -1,3 +1,5 @@
+import struct
+import zlib
 from io import BytesIO
 
 import pytest
@@ -5,6 +7,11 @@ from PIL import Image
 from PIL.TiffImagePlugin import IFDRational
 
 from colouring_factory.photos import prepare_photo
+
+# Recognisable stand-in for a real colour profile — an iPhone photo carries a
+# genuine Display P3 profile of its own, but the content does not matter here,
+# only that it round-trips (or fails to).
+ICC_PROFILE = b"FAKE_ICC_PROFILE_MARKER_DOODLE_TEST_1234567890"
 
 # 51°30'N, 0°7'W — the coordinates a London phone photo would carry. Pillow 12
 # encodes a RATIONAL from an IFDRational, not from a (numerator, denominator)
@@ -39,6 +46,39 @@ def _photo_with_gps(size=(60, 40), orientation=6) -> bytes:
     return buffer.getvalue()
 
 
+def _photo_with_icc_profile() -> bytes:
+    """A real JPEG carrying an embedded ICC colour profile, as an iPhone's
+    Display P3 photos do."""
+
+    image = Image.new("RGB", (60, 40), (180, 90, 40))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", icc_profile=ICC_PROFILE)
+    return buffer.getvalue()
+
+
+def _oversized_header_png() -> bytes:
+    """A crafted PNG whose header claims a 50,000 x 50,000 canvas.
+
+    Genuinely allocating a photo that size would need gigabytes, so this
+    fixture carries no real pixel data — it exists purely to trip Pillow's
+    own decompression-bomb guard at open time, exactly as a hostile upload
+    claiming implausible dimensions would.
+    """
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data))
+        )
+
+    signature = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", 50000, 50000, 8, 2, 0, 0, 0)
+    idat = zlib.compress(b"\x00\x00\x00")
+    return signature + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+
+
 def test_the_fixture_really_carries_gps_and_a_make_tag() -> None:
     original = Image.open(BytesIO(_photo_with_gps()))
     exif = original.getexif()
@@ -60,6 +100,28 @@ def test_gps_and_every_other_exif_tag_are_gone() -> None:
     # Belt and braces against a tag surviving in a chunk getexif does not read.
     assert b"Apple" not in prepared
     assert b"GPS" not in prepared
+
+
+def test_the_icc_fixture_really_carries_a_profile() -> None:
+    original = Image.open(BytesIO(_photo_with_icc_profile()))
+    assert original.info.get("icc_profile") == ICC_PROFILE
+
+
+def test_the_icc_profile_does_not_survive_into_the_output() -> None:
+    # This guards the rebuild-from-pixels step specifically: converting a
+    # JPEG to PNG already drops EXIF for free, so a stripping test that only
+    # checks EXIF tags can pass even if that step is deleted. A colour
+    # profile is copied across a format change unless something removes it,
+    # so it is what actually exercises the rebuild.
+    prepared = prepare_photo(_photo_with_icc_profile())
+    reopened = Image.open(BytesIO(prepared))
+
+    assert reopened.info.get("icc_profile") is None
+    # A PNG carries a colour profile in its own "iCCP" chunk, zlib-compressed,
+    # so the profile's plain bytes would not appear in the file even if the
+    # profile survived; checking for the chunk tag itself is what a raw-bytes
+    # check on this needs to look for.
+    assert b"iCCP" not in prepared
 
 
 def test_the_output_really_is_a_png() -> None:
@@ -101,6 +163,15 @@ def test_empty_and_unreadable_input_are_refused() -> None:
         prepare_photo(b"")
     with pytest.raises(ValueError):
         prepare_photo(b"this is not a picture")
+
+
+def test_an_implausibly_large_declared_size_is_refused() -> None:
+    # A 68-byte file can declare a 50,000 x 50,000 canvas; Pillow's own guard
+    # against decompression bombs stops the allocation, but it raises a plain
+    # Exception the caller does not expect, so prepare_photo must translate
+    # it into the ValueError its docstring promises.
+    with pytest.raises(ValueError):
+        prepare_photo(_oversized_header_png())
 
 
 def test_a_heic_photograph_can_be_read() -> None:

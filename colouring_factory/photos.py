@@ -46,6 +46,14 @@ def prepare_photo(photo_bytes: bytes, max_edge: int = MAX_PHOTO_EDGE_PX) -> byte
             flattened = _flatten_to_white(rotated)
     except (UnidentifiedImageError, OSError) as exc:
         raise ValueError("That file could not be read as a photograph.") from exc
+    except Image.DecompressionBombError as exc:
+        # A crafted header can claim billions of pixels while weighing only a
+        # few dozen bytes; Pillow's own guard stops the allocation, but that
+        # guard raises a plain Exception, not one of the above, so it has to
+        # be turned into the ValueError this function promises its callers.
+        raise ValueError(
+            "That photograph is too large to process. Please choose a smaller file."
+        ) from exc
 
     if max(flattened.size) > max_edge:
         flattened.thumbnail((max_edge, max_edge), Image.LANCZOS)
