@@ -79,9 +79,22 @@ generating a paid image.
 Google is the only one of the three with a free tier, so it is also the answer to "I do not want
 a card on file". OpenAI stays the default.
 
-[ASSUMPTION] The Gemini image model identifier and endpoint shape must be read from Google's
-live API documentation during implementation. Model names in training data are stale and must
-not be guessed.
+Google's API shape was read from the live documentation on 2026-08-30, because model names in
+training data were stale. The verified details:
+
+- Endpoint: `POST https://generativelanguage.googleapis.com/v1beta/interactions`
+- Authentication: the `x-goog-api-key` request header
+- Image models: `gemini-3.1-flash-image` (default), `gemini-3.1-flash-lite-image` (cheapest),
+  `gemini-3-pro-image`
+- Text model for variation briefs: `gemini-3.5-flash-lite`
+- Image request body: `{"model": ..., "input": [{"type": "text", "text": prompt}],
+  "response_format": {"type": "image", "mime_type": "image/png", "aspect_ratio": ...,
+  "image_size": "2K"}}`
+- Text request body: `{"model": ..., "input": "<prompt>"}`
+- Response: `steps[].content[]`, where a block of `"type": "image"` carries base64 in `data`
+  and a block of `"type": "text"` carries the string in `text`
+- Aspect ratios include `3:4` (used for A4 portrait) and `1:1` (used for badges)
+- Key creation page: `https://aistudio.google.com/apikey`
 
 ### 2. Variation diversity
 
