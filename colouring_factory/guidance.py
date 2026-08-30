@@ -188,6 +188,30 @@ _ENTRIES: dict[str, Guidance] = {
         ),
         control="Make a change, beneath the picture",
     ),
+    "photo_declined": Guidance(
+        title="The provider would not draw from that picture",
+        cause=(
+            "The drawing service ran its own check on the picture and declined "
+            "it. Doodle does not know which part it objected to."
+        ),
+        fix=(
+            "Try a different picture of the same character, or untick them and "
+            "let the written description do the work."
+        ),
+        control="Your characters, on the homepage",
+    ),
+    "no_reference_support": Guidance(
+        title="This drawing service cannot draw from a picture",
+        cause="Recraft accepts one picture per request, so it cannot carry a cast.",
+        fix="Connect OpenAI or Google Gemini to draw your characters.",
+        control="Change image provider, on the result screen",
+    ),
+    "too_many_references": Guidance(
+        title="That is more characters than this service will look at",
+        cause="Each drawing service has its own limit on reference pictures.",
+        fix="Untick some characters and draw again.",
+        control="Your characters, on the homepage",
+    ),
     "unknown": Guidance(
         title="Something went wrong",
         cause="Doodle did not recognise this failure.",

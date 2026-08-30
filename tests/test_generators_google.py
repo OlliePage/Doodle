@@ -5,9 +5,15 @@ from io import BytesIO
 import pytest
 
 from colouring_factory import generators
-from colouring_factory.generators import GeneratorError, generate_with_google
+from colouring_factory.generators import (
+    GeneratorError,
+    generate_with_google,
+    refine_with_google,
+)
 
 PIXEL = base64.b64encode(b"fake-png-bytes").decode("ascii")
+PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-png-reference"
+JPEG_BYTES = b"\xff\xd8\xfffake-jpeg-reference"
 
 
 class _FakeResponse(BytesIO):
@@ -68,7 +74,9 @@ def test_google_makes_one_request_per_prompt(monkeypatch) -> None:
 
     monkeypatch.setattr(generators, "urlopen", fake_urlopen)
 
-    artworks = generate_with_google(api_key="AIza-test", prompts=["one", "two", "three"])
+    artworks = generate_with_google(
+        api_key="AIza-test", prompts=["one", "two", "three"]
+    )
 
     assert len(artworks) == 3
     assert len(calls) == 3
@@ -130,10 +138,14 @@ def test_openai_connection_check_still_uses_a_bearer_token(monkeypatch) -> None:
 def _http_error(status: int, body: str):
     from urllib.error import HTTPError
 
-    return HTTPError("https://example", status, "Bad Request", {}, BytesIO(body.encode()))
+    return HTTPError(
+        "https://example", status, "Bad Request", {}, BytesIO(body.encode())
+    )
 
 
-def test_a_400_saying_the_key_is_invalid_is_treated_as_authentication(monkeypatch) -> None:
+def test_a_400_saying_the_key_is_invalid_is_treated_as_authentication(
+    monkeypatch,
+) -> None:
     # Google documents 401 for a rejected key but returns 400 with this wording
     # for a malformed one, which fell through to the generic failure message and
     # never offered to replace the key.
@@ -161,3 +173,24 @@ def test_a_quota_error_is_treated_as_rate_limiting(monkeypatch) -> None:
     with pytest.raises(GeneratorError) as caught:
         generate_with_google(api_key="AIza-test", prompts=["a bear"])
     assert caught.value.code == "rate_limit"
+
+
+def test_each_reference_picture_becomes_its_own_image_block(monkeypatch) -> None:
+    captured = {}
+
+    def fake_urlopen(request, timeout=None):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _google_reply(_one_image_reply())
+
+    monkeypatch.setattr(generators, "urlopen", fake_urlopen)
+
+    refine_with_google(
+        api_key="key",
+        prompt="draw them on a beach",
+        reference_images=(PNG_BYTES, JPEG_BYTES),
+    )
+
+    blocks = captured["body"]["input"]
+    assert [block["type"] for block in blocks] == ["text", "image", "image"]
+    assert blocks[1]["mime_type"] == "image/png"
+    assert blocks[2]["mime_type"] == "image/jpeg"

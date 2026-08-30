@@ -96,6 +96,35 @@ def test_the_mini_is_left_out_of_it(wire) -> None:
     assert b"input_fidelity" not in wire[0]
 
 
+def test_two_reference_pictures_become_two_image_parts(wire) -> None:
+    generators.refine_with_openai(
+        api_key="sk-test",
+        prompt="draw them on a beach",
+        reference_images=(b"first-picture", b"second-picture"),
+        model="gpt-image-2",
+    )
+
+    assert len(wire) == 1
+    assert wire[0].count(b'name="image[]"') == 2
+
+
+def test_one_picture_stays_a_single_part(wire) -> None:
+    """A single picture keeps the old wire form.
+
+    Sending a one-element list changes the multipart field from image to
+    image[], and there is no reason to move every existing call onto a
+    different shape.
+    """
+
+    generators.refine_with_openai(
+        api_key="sk-test", image_bytes=b"one", prompt="change it"
+    )
+
+    assert len(wire) == 1
+    assert b'name="image"' in wire[0]
+    assert b"image[]" not in wire[0]
+
+
 @pytest.mark.parametrize(
     ("model", "expected"),
     [

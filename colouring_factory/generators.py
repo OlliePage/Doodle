@@ -41,6 +41,22 @@ def _multipart_body(
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
+def _mime_for(payload: bytes) -> str:
+    """Name the format from the bytes rather than asserting one.
+
+    Every picture Doodle used to send was one it had drawn, so the hardcoded
+    "image/png" was harmless. A reference photograph is usually a JPEG.
+    """
+
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if payload.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/png"
+
+
 def _check_instruction(prompt: str) -> str:
     instruction = prompt.strip()
     if not instruction:
@@ -532,7 +548,8 @@ def openai_supports_input_fidelity(model: str) -> bool:
 def refine_with_openai(
     *,
     api_key: str,
-    image_bytes: bytes,
+    image_bytes: bytes | None = None,
+    reference_images: Sequence[bytes] = (),
     prompt: str,
     model: str = "gpt-image-2",
     size: str = "1024x1536",
@@ -540,7 +557,12 @@ def refine_with_openai(
     closeness: float = 0.85,
     mask_bytes: bytes | None = None,
 ) -> GeneratedArtwork:
-    """Change an existing picture with the OpenAI image edit endpoint."""
+    """Change an existing picture with the OpenAI image edit endpoint.
+
+    Reference pictures of people ride alongside the picture being changed, as
+    extra "image" parts in the same request, so the model can draw them into
+    the scene rather than only following a written description of them.
+    """
 
     instruction = _check_instruction(prompt)
     if not api_key.strip():
@@ -559,9 +581,22 @@ def refine_with_openai(
             code="edit_failed",
         ) from exc
 
+    pictures = [*([image_bytes] if image_bytes else []), *reference_images]
+    if not pictures:
+        raise ValueError("At least one picture is required.")
+
+    def _part(index: int, payload: bytes) -> tuple[str, BytesIO, str]:
+        return (f"doodle{index}.png", BytesIO(payload), _mime_for(payload))
+
     request_kwargs: dict[str, Any] = {
         "model": model,
-        "image": ("doodle.png", BytesIO(image_bytes), "image/png"),
+        # A single picture keeps the plain "image" field every existing caller
+        # and test depends on; only a list of two or more becomes "image[]".
+        "image": (
+            _part(0, pictures[0])
+            if len(pictures) == 1
+            else [_part(index, payload) for index, payload in enumerate(pictures)]
+        ),
         "prompt": instruction,
         "size": size,
         "quality": quality,
@@ -569,7 +604,11 @@ def refine_with_openai(
     if openai_supports_input_fidelity(model):
         request_kwargs["input_fidelity"] = openai_input_fidelity(closeness)
     if mask_bytes:
-        request_kwargs["mask"] = ("mask.png", BytesIO(mask_bytes), "image/png")
+        request_kwargs["mask"] = (
+            "mask.png",
+            BytesIO(mask_bytes),
+            _mime_for(mask_bytes),
+        )
 
     try:
         client = OpenAI(api_key=api_key.strip(), timeout=240.0, max_retries=2)
@@ -598,7 +637,8 @@ def refine_with_openai(
 def refine_with_google(
     *,
     api_key: str,
-    image_bytes: bytes,
+    image_bytes: bytes | None = None,
+    reference_images: Sequence[bytes] = (),
     prompt: str,
     model: str = "gemini-3.1-flash-image",
     size: str = "3:4",
@@ -606,7 +646,7 @@ def refine_with_google(
     """Change an existing picture with the Gemini Interactions API.
 
     The same endpoint and models as generation; the input becomes a text block
-    followed by the picture rather than a text block alone.
+    followed by one image block per picture, rather than a text block alone.
     """
 
     instruction = _check_instruction(prompt)
@@ -617,15 +657,20 @@ def refine_with_google(
             code="missing_key",
         )
 
+    pictures = [*([image_bytes] if image_bytes else []), *reference_images]
+
     body = {
         "model": model,
         "input": [
             {"type": "text", "text": instruction},
-            {
-                "type": "image",
-                "mime_type": "image/png",
-                "data": base64.b64encode(image_bytes).decode("ascii"),
-            },
+            *(
+                {
+                    "type": "image",
+                    "mime_type": _mime_for(payload),
+                    "data": base64.b64encode(payload).decode("ascii"),
+                }
+                for payload in pictures
+            ),
         ],
         "response_format": {
             "type": "image",
@@ -678,7 +723,8 @@ def refine_with_google(
 def refine_with_recraft(
     *,
     api_key: str,
-    image_bytes: bytes,
+    image_bytes: bytes | None = None,
+    reference_images: Sequence[bytes] = (),
     prompt: str,
     model: str = "recraftv4_1",
     closeness: float = 0.85,
@@ -694,6 +740,12 @@ def refine_with_recraft(
             code="missing_key",
         )
 
+    # Recraft's multipart helper keys files by name, and a dict cannot hold
+    # two keys both called "image", so only the first picture is ever sent.
+    # refine_with_provider already refuses a cast before this is reached.
+    pictures = [*([image_bytes] if image_bytes else []), *reference_images]
+    picture = pictures[0]
+
     # Recraft's strength is the difference from the original, the inverse of
     # closeness: its own documentation calls 0 "almost identical".
     strength = round(max(0.0, min(1.0, 1.0 - closeness)), 3)
@@ -708,7 +760,7 @@ def refine_with_recraft(
         fields["random_seed"] = str(int(random_seed))
 
     payload_bytes, content_type = _multipart_body(
-        fields, {"image": ("doodle.png", image_bytes, "image/png")}
+        fields, {"image": ("doodle.png", picture, _mime_for(picture))}
     )
     request = Request(
         RECRAFT_EDIT_ENDPOINT,
@@ -751,11 +803,65 @@ def refine_with_recraft(
     )
 
 
+def _dispatch_refinement(
+    *,
+    provider: str,
+    api_key: str,
+    image_bytes: bytes | None,
+    reference_images: Sequence[bytes],
+    prompt: str,
+    model: str,
+    size: str,
+    quality: str,
+    closeness: float,
+    mask_bytes: bytes | None,
+    random_seed: int | None,
+) -> GeneratedArtwork:
+    """Call the one adapter refine_with_provider chose.
+
+    Split out from refine_with_provider so its try/except can wrap this one
+    call rather than the whole dispatch function, which would otherwise force
+    the except branch to guess which provider's request had actually failed.
+    """
+
+    if provider == "openai":
+        return refine_with_openai(
+            api_key=api_key,
+            image_bytes=image_bytes,
+            reference_images=reference_images,
+            prompt=prompt,
+            model=model,
+            size=size,
+            quality=quality,
+            closeness=closeness,
+            mask_bytes=mask_bytes,
+        )
+    if provider == "google":
+        return refine_with_google(
+            api_key=api_key,
+            image_bytes=image_bytes,
+            reference_images=reference_images,
+            prompt=prompt,
+            model=model,
+            size=size,
+        )
+    return refine_with_recraft(
+        api_key=api_key,
+        image_bytes=image_bytes,
+        reference_images=reference_images,
+        prompt=prompt,
+        model=model,
+        closeness=closeness,
+        random_seed=random_seed,
+    )
+
+
 def refine_with_provider(
     *,
     provider_id: str,
     api_key: str,
-    image_bytes: bytes,
+    image_bytes: bytes | None = None,
+    reference_images: Sequence[bytes] = (),
     prompt: str,
     model: str,
     size: str,
@@ -781,33 +887,49 @@ def refine_with_provider(
             code="edit_unsupported",
         )
 
-    if provider == "openai":
-        return refine_with_openai(
+    # Whether a picture of someone can ride along is data on the spec, so a
+    # provider that cannot look at one is refused here rather than by asking
+    # its adapter to fail in a way this layer would then have to interpret.
+    if reference_images and spec.max_reference_images < 1:
+        raise GeneratorError(
+            f"{spec.label} cannot draw from a picture of someone.",
+            provider=spec.label,
+            code="no_reference_support",
+        )
+    if reference_images and len(reference_images) > spec.max_reference_images:
+        raise GeneratorError(
+            f"{spec.label} can look at {spec.max_reference_images} pictures at "
+            "a time. Choose fewer characters.",
+            provider=spec.label,
+            code="too_many_references",
+        )
+
+    try:
+        return _dispatch_refinement(
+            provider=provider,
             api_key=api_key,
             image_bytes=image_bytes,
+            reference_images=reference_images,
             prompt=prompt,
             model=model,
             size=size,
             quality=quality,
             closeness=spec.edit_closeness,
             mask_bytes=mask_bytes,
+            random_seed=random_seed,
         )
-    if provider == "google":
-        return refine_with_google(
-            api_key=api_key,
-            image_bytes=image_bytes,
-            prompt=prompt,
-            model=model,
-            size=size,
-        )
-    return refine_with_recraft(
-        api_key=api_key,
-        image_bytes=image_bytes,
-        prompt=prompt,
-        model=model,
-        closeness=spec.edit_closeness,
-        random_seed=random_seed,
-    )
+    except GeneratorError as error:
+        # _normalise_error classifies a refusal from its wording alone, so it
+        # cannot tell a declined photograph from a declined description. Only
+        # this layer knows a picture of someone was attached to the request.
+        if error.code == "content" and reference_images:
+            raise GeneratorError(
+                f"{spec.label} would not draw from that picture.",
+                provider=spec.label,
+                code="photo_declined",
+                status_code=error.status_code,
+            ) from error
+        raise
 
 
 def check_provider_connection(provider_id: str, api_key: str) -> dict[str, Any]:
