@@ -159,3 +159,30 @@ def build_refinement_prompt(
     """
 
     return dedent(prompt).strip()
+
+
+def build_colour_suggestion_prompt() -> str:
+    """Ask for a coloured version of the same drawing, as a guide to copy.
+
+    The printable page stays black and white. This is a picture of what the
+    finished thing could look like, for a child deciding what colour water,
+    grass or a dinosaur's back should be.
+    """
+
+    prompt = """
+    Colour in this black-and-white line drawing.
+
+    Keep every black outline exactly where it is, at the same weight. Do not
+    redraw, move, add or remove anything: the shapes, characters and
+    composition must match the original line for line.
+
+    Fill the enclosed areas with flat, bright, friendly colour, the way a
+    child's picture book is coloured. Use the colours the real thing would be,
+    so that the picture can be copied: sky and water blue, grass and leaves
+    green, tree trunks brown, sand and sun yellow. Keep the background white
+    wherever the original left it white.
+
+    No shading, gradients, texture, outlines in colour, watermark or text.
+    """
+
+    return dedent(prompt).strip()

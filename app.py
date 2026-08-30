@@ -56,6 +56,7 @@ from colouring_factory.providers import (
 from colouring_factory.prompts import (
     STYLE_PRESETS,
     build_colouring_prompt,
+    build_colour_suggestion_prompt,
     build_refinement_prompt,
 )
 from colouring_factory.variations import build_variation_briefs
@@ -273,6 +274,8 @@ def _initialise_state() -> None:
         "quick_processed": None,
         "quick_pdf": None,
         "quick_saved": False,
+        "colour_previews": {},
+        "showing_colours": False,
         "session_provider_keys": {},
         "provider_choice": DEFAULT_PROVIDER,
         "connect_return": "generate",
@@ -346,6 +349,7 @@ def _start_new_doodle() -> None:
     st.session_state.quick_processed = None
     st.session_state.quick_pdf = None
     st.session_state.quick_saved = False
+    st.session_state.showing_colours = False
     st.session_state.connection_error = None
     st.session_state.quick_mode = "ai"
     st.session_state.generation_nonce = 0
@@ -598,6 +602,97 @@ def _render_top_bar(*, where: str) -> None:
             key=f"top_new_{where}",
         ):
             _start_new_doodle()
+
+
+def _colour_key(image_bytes: bytes) -> str:
+    return hashlib.sha256(image_bytes).hexdigest()
+
+
+def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
+    """The picture, with the option of seeing it coloured in as a guide.
+
+    A toddler deciding what colour water or grass should be has nothing to copy
+    from a page of outlines. The coloured version is only ever shown on screen:
+    the PDF that gets printed is always the line art, because the point of the
+    thing is that a child colours it.
+    """
+
+    cache = st.session_state.setdefault("colour_previews", {})
+    key = _colour_key(image_bytes)
+    coloured = cache.get(key)
+    showing = bool(st.session_state.get("showing_colours")) and coloured is not None
+
+    st.image(coloured if showing else image_bytes, width="stretch")
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+
+    if showing:
+        st.caption(
+            "Suggested colours, for copying from. The page you print stays "
+            "black and white."
+        )
+        if st.button(
+            "Show the outlines",
+            key=f"{key_prefix}_hide_colours",
+            width="stretch",
+            icon=":material/gesture:",
+        ):
+            st.session_state.showing_colours = False
+            st.rerun()
+        return
+
+    if coloured is not None:
+        if st.button(
+            "Show suggested colours",
+            key=f"{key_prefix}_show_colours",
+            width="stretch",
+            icon=":material/palette:",
+        ):
+            st.session_state.showing_colours = True
+            st.rerun()
+        return
+
+    if not spec.supports_edit:
+        st.caption(
+            f"{spec.label} cannot colour a picture in. Connect OpenAI or Google Gemini to try it."
+        )
+        return
+
+    if not st.button(
+        "Colour it in for me",
+        key=f"{key_prefix}_make_colours",
+        width="stretch",
+        icon=":material/palette:",
+        help="Draws a coloured copy to compare against. Costs one generation, and is never printed.",
+        disabled=not api_key,
+    ):
+        return
+
+    settings = load_settings()
+    model = str(settings.get(f"{provider_id}_model", spec.default_model))
+    if model not in spec.models:
+        model = spec.default_model
+
+    try:
+        with st.spinner("Choosing colours…"):
+            artwork = refine_with_provider(
+                provider_id=provider_id,
+                api_key=api_key,
+                image_bytes=image_bytes,
+                prompt=build_colour_suggestion_prompt(),
+                model=model,
+                size=spec.portrait_size,
+            )
+    except GeneratorError as exc:
+        _show_guidance(exc.code, detail=str(exc))
+        return
+
+    cache[key] = artwork.image_bytes
+    st.session_state.colour_previews = cache
+    st.session_state.showing_colours = True
+    st.rerun()
 
 
 def _render_alternatives_picker() -> None:
@@ -1455,7 +1550,7 @@ def _render_first_result() -> None:
     )
     safe_title = html.escape(str(st.session_state.get("current_title", "")))
     st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
-    st.image(st.session_state.quick_processed, width="stretch")
+    _render_doodle_with_colours(st.session_state.quick_processed, key_prefix="result")
     _render_alternatives_picker()
 
     again_col, love_col, print_col = st.columns([1, 1, 1.35])
