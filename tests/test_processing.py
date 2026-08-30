@@ -80,7 +80,7 @@ def test_the_first_run_path_takes_the_tuned_defaults() -> None:
     app_source = (Path(__file__).resolve().parents[1] / "app.py").read_text(
         encoding="utf-8"
     )
-    quick = app_source[app_source.index("def _quick_generate") :]
+    quick = app_source[app_source.index("def _prepare_quick_outputs") :]
     quick = quick[: quick.index("\ndef ")]
 
     assert "ProcessingOptions(" in quick

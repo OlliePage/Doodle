@@ -90,3 +90,19 @@ for the browsers that refuse. Wherever printing is offered, the instruction to
 set Scale to 100% and turn off Fit to page goes with it: the browser's own
 default rescales a PDF, which is exactly the distortion the Print scale page
 exists to correct.
+
+## Before the drawing, and after it
+
+Anything that changes what gets drawn is asked before the drawing, on the
+homepage, under `Drawing options`. Putting those controls only in Doodle Studio
+meant the first way to change how many pictures Doodle draws was to draw the
+wrong one first and pay for it. The answers persist, because a parent drawing
+for the same children wants the same answers every time.
+
+Every screen holding a doodle carries the same top bar: the logo, `Saved (n)`
+and `New doodle`. Both routes are one click from the top of the page, never at
+the bottom of one and inside a tab on another.
+
+`Draw this idea again` redraws the same idea; `New doodle` returns to an empty
+homepage. The two used to read `Draw another` and `New doodle`, which describe
+each other.

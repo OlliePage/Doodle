@@ -39,7 +39,11 @@ def save_library_item(
     title: str,
     metadata: dict[str, Any],
 ) -> str:
-    item_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
+    item_id = (
+        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        + "-"
+        + uuid.uuid4().hex[:8]
+    )
     folder = library_root() / item_id
     folder.mkdir(parents=True, exist_ok=False)
 
@@ -53,7 +57,9 @@ def save_library_item(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "metadata": metadata,
     }
-    (folder / "metadata.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    (folder / "metadata.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
     return item_id
 
 
@@ -79,7 +85,9 @@ def list_library_items() -> list[dict[str, Any]]:
 
 def load_library_image(item_id: str, prefer_raw: bool = False) -> bytes:
     folder = library_root() / item_id
-    chosen = folder / ("raw.png" if prefer_raw and (folder / "raw.png").exists() else "processed.png")
+    chosen = folder / (
+        "raw.png" if prefer_raw and (folder / "raw.png").exists() else "processed.png"
+    )
     if not chosen.exists():
         raise FileNotFoundError(f"Library item {item_id} was not found.")
     return chosen.read_bytes()
@@ -110,3 +118,38 @@ def save_settings(settings: dict[str, Any]) -> None:
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(settings, indent=2), encoding="utf-8")
     temporary.replace(path)
+
+
+# The homepage asks these three questions before it draws, and remembers the
+# answers, because a parent drawing for the same two children wants the same
+# answers every time. Read through here so a settings file written by an older
+# version, or edited by hand, still yields something the app can draw with.
+QUICK_ALTERNATIVE_CHOICES = (1, 2, 3, 4)
+QUICK_AGE_CHOICES = ("2-3 years", "4-5 years")
+QUICK_STYLE_CHOICES = (
+    "Toddler bold",
+    "Preschool detailed",
+    "Badge portrait",
+    "Simple objects",
+)
+
+
+def quick_drawing_options(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    settings = settings or {}
+
+    try:
+        alternatives = int(settings.get("quick_alternatives", 1))
+    except (TypeError, ValueError):
+        alternatives = 1
+    if alternatives not in QUICK_ALTERNATIVE_CHOICES:
+        alternatives = 1
+
+    age_profile = str(settings.get("quick_age_profile", QUICK_AGE_CHOICES[0]))
+    if age_profile not in QUICK_AGE_CHOICES:
+        age_profile = QUICK_AGE_CHOICES[0]
+
+    style = str(settings.get("quick_style", QUICK_STYLE_CHOICES[0]))
+    if style not in QUICK_STYLE_CHOICES:
+        style = QUICK_STYLE_CHOICES[0]
+
+    return {"alternatives": alternatives, "age_profile": age_profile, "style": style}
