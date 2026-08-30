@@ -376,7 +376,7 @@ def _quick_generate() -> None:
             target="A4 page",
             extra_instructions="One clear subject or action, generous white space, no caption or text.",
         )
-        artworks = generate_with_openai(api_key=api_key, prompt=prompt, variants=1, model="gpt-image-2", size="1024x1536", quality="low")
+        artworks = generate_with_openai(api_key=api_key, prompt=prompt, variants=1, model="gpt-image-2", size="1024x1536", quality="medium")
         art = artworks[0]
         _set_current_artwork(art.image_bytes, title=idea, metadata={"source": art.provider, "concept": idea, "prompt": art.prompt, "model": art.model})
     processed = _cached_process(st.session_state.current_raw, 215, True, True, 5.0, 3, 0)
@@ -469,7 +469,7 @@ with st.sidebar:
         help="Kept in this app session and never written to the artwork library.",
     )
     model = st.selectbox("Image model", ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"], index=0)
-    quality = st.select_slider("Generation quality", options=["low", "medium", "high"], value="low")
+    quality = st.select_slider("Generation quality", options=["low", "medium", "high"], value="medium")
     st.caption("Demo and upload modes work without an API key.")
 
     st.divider()
@@ -625,7 +625,7 @@ with create_tab:
                 "Black/white threshold",
                 min_value=80,
                 max_value=250,
-                value=215,
+                value=240,
                 help="Higher values retain more faint grey marks as black.",
             )
             auto_invert = st.checkbox("Correct a dark background automatically", value=True)
