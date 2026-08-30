@@ -9,6 +9,7 @@ from datetime import datetime
 
 import streamlit as st
 
+from colouring_factory.badge_preview import render_badge_preview
 from colouring_factory.calibration import profile_from_measurements
 from colouring_factory.demo import list_demo_artwork
 from colouring_factory.credentials import (
@@ -402,6 +403,17 @@ def _cached_process(
 @st.cache_data(show_spinner=False)
 def _cached_preview(pdf_bytes: bytes, dpi: int = 115) -> bytes:
     return render_pdf_preview(pdf_bytes, dpi=dpi)
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def _cached_badge_preview(
+    image_bytes: bytes, config_payload: str, calibration_payload: str
+) -> bytes:
+    # The configs arrive as sorted JSON because Streamlit's cache needs a
+    # hashable key and the dataclasses are not hashable.
+    config = CircleSheetConfig(**json.loads(config_payload))
+    calibration = CalibrationProfile.from_dict(json.loads(calibration_payload))
+    return render_badge_preview(image_bytes, config, calibration)
 
 
 @st.cache_data(show_spinner=False)
@@ -1472,6 +1484,13 @@ with create_tab:
             with guide_3:
                 show_safe = st.checkbox("Show safe-area guide", value=False)
 
+            fit_choice = st.segmented_control(
+                "Artwork fit",
+                ["Fit the whole picture", "Fill the circle"],
+                default="Fit the whole picture",
+                help="Filling the circle draws the picture larger but cuts off its corners.",
+            )
+
             pdf_config = CircleSheetConfig(
                 finished_diameter_mm=float(finished),
                 cut_diameter_mm=float(cut),
@@ -1484,6 +1503,7 @@ with create_tab:
                 show_cut_guide=show_cut,
                 show_finished_guide=show_finished,
                 show_safe_guide=show_safe,
+                fit_mode="fill" if fit_choice == "Fill the circle" else "inscribe",
             )
             active_calibration = (
                 calibration_profile if apply_calibration else CalibrationProfile()
@@ -1500,6 +1520,40 @@ with create_tab:
                     f"A4 circle sheet: finished {finished:g} mm; cut {cut:g} mm; "
                     f"safe {safe:g} mm; {len(plan.placements)} copies"
                 )
+
+                badge_col, legend_col = st.columns([1, 1])
+                with badge_col:
+                    try:
+                        st.image(
+                            _cached_badge_preview(
+                                processed,
+                                json.dumps(asdict(pdf_config), sort_keys=True),
+                                json.dumps(
+                                    active_calibration.to_dict(), sort_keys=True
+                                ),
+                            ),
+                            caption="One badge, actual proportions",
+                            width="stretch",
+                        )
+                    except (ValueError, RuntimeError) as exc:
+                        st.info(str(exc))
+                with legend_col:
+                    with st.container(border=True):
+                        st.markdown("**Solid line** — where the paper is cut.")
+                        st.markdown("**Dashed line** — the visible face once pressed.")
+                        st.markdown(
+                            "**Dotted line** — keep faces, eyes and text inside this."
+                        )
+                        if pdf_config.fit_mode == "inscribe":
+                            st.caption(
+                                "The whole picture is fitted inside the dotted circle, "
+                                "so nothing is lost when the badge is made."
+                            )
+                        else:
+                            st.caption(
+                                "The picture fills the circle, so its four corners are "
+                                "cut away. Switch to Fit the whole picture to keep them."
+                            )
             except ValueError as exc:
                 st.error(str(exc))
                 summary = "Invalid circle layout"

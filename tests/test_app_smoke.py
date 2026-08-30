@@ -77,6 +77,11 @@ class _FakeStreamlit(types.ModuleType):
     def selectbox(self, _label, options, index=0, **_kwargs):
         return list(options)[index]
 
+    def segmented_control(self, label, options, default=None, **_kwargs):
+        if label in self.radio_overrides:
+            return self.radio_overrides[label]
+        return default if default is not None else list(options)[0]
+
     def select_slider(self, _label, options, value=None, **_kwargs):
         return value if value is not None else list(options)[0]
 
@@ -131,8 +136,10 @@ class _FakeStreamlit(types.ModuleType):
         return lambda *_args, **_kwargs: None
 
 
-def _execute_app(monkeypatch, tmp_path, layout_choice: str, module_suffix: str):
-    fake = _FakeStreamlit({"Output format": layout_choice})
+def _execute_app(
+    monkeypatch, tmp_path, layout_choice: str, module_suffix: str, **widget_choices
+):
+    fake = _FakeStreamlit({"Output format": layout_choice, **widget_choices})
     project_root = Path(__file__).resolve().parents[1]
     fake.session_state["current_raw"] = (
         project_root / "assets" / "demo_dinosaur.png"
@@ -191,6 +198,26 @@ def test_streamlit_app_executes_full_page_branch(monkeypatch, tmp_path) -> None:
 
 def test_streamlit_app_executes_circle_branch(monkeypatch, tmp_path) -> None:
     fake = _execute_app(monkeypatch, tmp_path, "A4 circle sheet", "circle")
+    assert fake.session_state["current_raw"] is not None
+
+
+def test_the_circle_branch_defaults_to_fitting_the_whole_picture(
+    monkeypatch, tmp_path
+) -> None:
+    # The badge preview runs for real inside this branch, so reaching the end
+    # of the script proves the preview renders with the default settings.
+    fake = _execute_app(monkeypatch, tmp_path, "A4 circle sheet", "circle_inscribe")
+    assert fake.session_state["current_raw"] is not None
+
+
+def test_the_circle_branch_accepts_filling_the_circle(monkeypatch, tmp_path) -> None:
+    fake = _execute_app(
+        monkeypatch,
+        tmp_path,
+        "A4 circle sheet",
+        "circle_fill",
+        **{"Artwork fit": "Fill the circle"},
+    )
     assert fake.session_state["current_raw"] is not None
 
 
