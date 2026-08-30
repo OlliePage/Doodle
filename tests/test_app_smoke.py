@@ -134,14 +134,18 @@ class _FakeStreamlit(types.ModuleType):
 def _execute_app(monkeypatch, tmp_path, layout_choice: str, module_suffix: str):
     fake = _FakeStreamlit({"Output format": layout_choice})
     project_root = Path(__file__).resolve().parents[1]
-    fake.session_state["current_raw"] = (project_root / "assets" / "demo_dinosaur.png").read_bytes()
+    fake.session_state["current_raw"] = (
+        project_root / "assets" / "demo_dinosaur.png"
+    ).read_bytes()
     fake.session_state["current_title"] = "Smoke-test dinosaur"
     fake.session_state["current_metadata"] = {"source": "test"}
     monkeypatch.setitem(sys.modules, "streamlit", fake)
     monkeypatch.setenv("DOODLE_DATA_DIR", str(tmp_path / module_suffix / "data"))
 
     app_path = project_root / "app.py"
-    spec = importlib.util.spec_from_file_location(f"colouring_factory_app_{module_suffix}", app_path)
+    spec = importlib.util.spec_from_file_location(
+        f"colouring_factory_app_{module_suffix}", app_path
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -162,23 +166,21 @@ def test_fresh_app_opens_on_minimal_doodle_homepage(monkeypatch, tmp_path) -> No
     with pytest.raises(_StopExecution):
         spec.loader.exec_module(module)
 
-    assert fake.session_state["studio_open"] is False
     assert any("doodle-logo--hero" in body for body in fake.markdown_calls)
-    assert fake.text_input_calls == [
-        (
-            "Describe a picture to colour",
-            {
-                "key": "home_prompt",
-                "placeholder": "What shall we draw?",
-                "label_visibility": "collapsed",
-                "on_change": module._open_studio_from_home,
-            },
-        )
-    ]
 
+    assert len(fake.text_input_calls) == 1
+    label, kwargs = fake.text_input_calls[0]
+    assert label == "Describe a picture to colour"
+    assert kwargs["key"] == "home_prompt"
+    assert kwargs["placeholder"] == "What shall we draw?"
+    assert kwargs["label_visibility"] == "collapsed"
+    assert callable(kwargs["on_change"])
+
+    # Submitting an idea must leave the homepage. Which screen it goes to
+    # depends on whether a provider key is present, so assert only that it moved.
     fake.session_state["home_prompt"] = "A bear flying a kite"
-    module._open_studio_from_home()
-    assert fake.session_state["studio_open"] is True
+    kwargs["on_change"]()
+    assert fake.session_state["screen"] != "home"
     assert fake.session_state["generation_idea"] == "A bear flying a kite"
 
 

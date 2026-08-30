@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import html
 import hashlib
 import json
-import os
 import re
 from dataclasses import asdict
 from datetime import datetime
@@ -11,7 +11,17 @@ import streamlit as st
 
 from colouring_factory.calibration import profile_from_measurements
 from colouring_factory.demo import list_demo_artwork
-from colouring_factory.generators import GeneratorError, generate_with_openai
+from colouring_factory.credentials import (
+    delete_provider_key,
+    mask_key,
+    resolve_provider_key,
+    save_provider_key,
+)
+from colouring_factory.generators import (
+    GeneratorError,
+    check_provider_connection,
+    generate_with_provider,
+)
 from colouring_factory.image_processing import analyse_line_art, normalise_line_art
 from colouring_factory.layouts import compute_circle_sheet_plan
 from colouring_factory.models import (
@@ -28,6 +38,12 @@ from colouring_factory.pdf_export import (
     create_full_page_pdf,
 )
 from colouring_factory.preview import render_pdf_preview
+from colouring_factory.providers import (
+    DEFAULT_PROVIDER,
+    PROVIDERS,
+    get_provider,
+    provider_id_from_label,
+)
 from colouring_factory.prompts import STYLE_PRESETS, build_colouring_prompt
 from colouring_factory.storage import (
     data_root,
@@ -55,6 +71,7 @@ st.markdown(
         --doodle-muted: #676b70;
         --doodle-line: #e1e4e8;
         --doodle-soft: #f7f7f8;
+        --doodle-primary: #4f46e5;
       }
 
       #MainMenu, footer {visibility: hidden;}
@@ -62,10 +79,11 @@ st.markdown(
       .block-container,
       [data-testid="stMainBlockContainer"] {
         max-width: 1180px;
-        padding-top: 1.25rem;
+        padding-top: 5rem;
         padding-bottom: 3rem;
+        overflow: visible;
       }
-      [data-testid="stSidebar"] .block-container {padding-top: 1.2rem;}
+      [data-testid="stSidebar"] .block-container {padding-top: 2rem;}
       .small-muted {color: var(--doodle-muted); font-size: 0.88rem;}
       .step-label {
         font-weight: 760;
@@ -85,28 +103,34 @@ st.markdown(
       .studio-subtitle {
         color: var(--doodle-muted);
         font-size: .98rem;
-        margin: -.15rem 0 1.25rem;
+        margin: .1rem 0 1.25rem;
       }
       .doodle-logo {
         position: relative;
         display: table;
+        overflow: visible;
         color: var(--doodle-ink);
         font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Avenir Next", sans-serif;
         font-weight: 900;
-        line-height: .92;
+        line-height: 1.08;
         letter-spacing: -.105em;
         white-space: nowrap;
         user-select: none;
+        padding: .12em .04em .08em 0;
       }
       .doodle-logo--hero {
-        margin: 0 auto 2.25rem;
+        margin: 0 auto 2.35rem;
         font-size: clamp(4.9rem, 12vw, 8.15rem);
         padding-right: .16em;
       }
       .doodle-logo--compact {
-        margin: .15rem 0 .4rem;
-        font-size: 2.15rem;
+        margin: 0 0 .25rem;
+        font-size: 2.35rem;
         padding-right: .16em;
+      }
+      .doodle-logo--centred {
+        margin-left: auto;
+        margin-right: auto;
       }
       .doodle-letter {
         position: relative;
@@ -123,7 +147,7 @@ st.markdown(
       .doodle-logo__spark {
         position: absolute;
         right: -.08em;
-        top: -.24em;
+        top: -.12em;
         color: #f5a623;
         font-family: Georgia, serif;
         font-size: .22em;
@@ -135,27 +159,43 @@ st.markdown(
         display: block;
         width: 73%;
         height: .11em;
-        margin: .14em auto 0;
+        margin: .1em auto 0;
         border-top: .055em solid #202124;
         border-radius: 50%;
         transform: rotate(-1.5deg);
       }
       div[data-testid="stButton"] > button,
-      div[data-testid="stDownloadButton"] > button {
+      div[data-testid="stDownloadButton"] > button,
+      div[data-testid="stLinkButton"] > a {
+        min-height: 2.75rem;
         border-radius: 999px;
+      }
+      div[data-testid="stButton"] > button:focus-visible,
+      div[data-testid="stDownloadButton"] > button:focus-visible,
+      div[data-testid="stLinkButton"] > a:focus-visible {
+        outline: 3px solid rgba(79, 70, 229, .24);
+        outline-offset: 2px;
       }
       .stTabs [data-baseweb="tab-list"] {gap: .35rem;}
       .stTabs [data-baseweb="tab"] {border-radius: 999px; padding-left: 1rem; padding-right: 1rem;}
       .stTabs [aria-selected="true"] {background: var(--doodle-soft);}
+      @media (max-width: 640px) {
+        .block-container, [data-testid="stMainBlockContainer"] {
+          padding-top: 2rem;
+          padding-left: 1rem;
+          padding-right: 1rem;
+        }
+      }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-def _doodle_logo(mode: str = "compact") -> str:
+def _doodle_logo(mode: str = "compact", *, centred: bool = False) -> str:
+    centred_class = " doodle-logo--centred" if centred else ""
     return f"""
-    <div class="doodle-logo doodle-logo--{mode}" aria-label="Doodle">
+    <div class="doodle-logo doodle-logo--{mode}{centred_class}" aria-label="Doodle">
       <span class="doodle-letter doodle-letter--1">D</span>
       <span class="doodle-letter doodle-letter--2">o</span>
       <span class="doodle-letter doodle-letter--3">o</span>
@@ -169,9 +209,10 @@ def _doodle_logo(mode: str = "compact") -> str:
 
 def _initialise_state() -> None:
     defaults = {
-        "studio_open": False,
+        "screen": "home",
         "home_prompt": "",
-        "generation_idea": "A cheerful baby dinosaur washing a toy fire engine",
+        "home_error": "",
+        "generation_idea": "",
         "candidates": [],
         "current_raw": None,
         "current_metadata": {},
@@ -181,30 +222,69 @@ def _initialise_state() -> None:
         "pdf_summary": "",
         "pdf_signature": "",
         "library_notice": "",
-        "first_run": False,
-        "result_mode": False,
         "quick_processed": None,
         "quick_pdf": None,
+        "quick_saved": False,
+        "session_provider_keys": {},
+        "provider_choice": DEFAULT_PROVIDER,
+        "connect_return": "generate",
+        "connect_replace": False,
+        "connection_error": None,
+        "pending_remember_key": True,
+        "pending_provider": "",
+        "quick_mode": "ai",
+        "generation_nonce": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
+    # Upgrade sessions created by the earlier boolean-based prototype.
+    if st.session_state.get("studio_open") and st.session_state.get("screen") == "home":
+        st.session_state.screen = "studio"
+
 
 _initialise_state()
 
 
-def _open_studio_from_home() -> None:
+def _active_provider_id() -> str:
+    configured = str(load_settings().get("image_provider", DEFAULT_PROVIDER)).lower()
+    return configured if configured in PROVIDERS else DEFAULT_PROVIDER
+
+
+def _set_active_provider(provider_id: str) -> None:
+    provider = provider_id if provider_id in PROVIDERS else DEFAULT_PROVIDER
+    settings = load_settings()
+    settings["image_provider"] = provider
+    save_settings(settings)
+    st.session_state.provider_choice = provider
+
+
+def _provider_key(provider_id: str | None = None) -> tuple[str, str]:
+    provider = provider_id or _active_provider_id()
+    session_keys = st.session_state.get("session_provider_keys", {})
+    return resolve_provider_key(provider, session_keys)
+
+
+def _submit_home_prompt() -> None:
     prompt = str(st.session_state.get("home_prompt", "")).strip()
     if not prompt:
         return
     st.session_state.generation_idea = prompt
-    st.session_state.studio_open = True
+    st.session_state.home_error = ""
+    st.session_state.connection_error = None
+    st.session_state.connect_return = "generate"
+    st.session_state.connect_replace = False
+    st.session_state.quick_mode = "ai"
+    st.session_state.generation_nonce = 0
+    api_key, _source = _provider_key()
+    st.session_state.screen = "generate" if api_key else "connect"
 
 
 def _start_new_doodle() -> None:
-    st.session_state.studio_open = False
+    st.session_state.screen = "home"
     st.session_state.home_prompt = ""
+    st.session_state.home_error = ""
     st.session_state.generation_idea = ""
     st.session_state.candidates = []
     st.session_state.current_raw = None
@@ -213,6 +293,12 @@ def _start_new_doodle() -> None:
     st.session_state.pdf_bytes = None
     st.session_state.pdf_summary = ""
     st.session_state.pdf_signature = ""
+    st.session_state.quick_processed = None
+    st.session_state.quick_pdf = None
+    st.session_state.quick_saved = False
+    st.session_state.connection_error = None
+    st.session_state.quick_mode = "ai"
+    st.session_state.generation_nonce = 0
     st.rerun()
 
 
@@ -229,67 +315,64 @@ def _render_homepage() -> None:
           .block-container,
           [data-testid="stMainBlockContainer"] {
             max-width: 860px !important;
-            min-height: 100vh;
-            padding: 0 1.35rem 10vh !important;
+            min-height: 100dvh;
+            padding: clamp(3rem, 9vh, 6.5rem) 1.35rem clamp(5rem, 13vh, 8rem) !important;
             display: flex;
             flex-direction: column;
             justify-content: center;
+            overflow: visible !important;
           }
           div[data-testid="stTextInput"] {
             width: min(100%, 730px);
             margin: 0 auto;
           }
-          div[data-testid="stTextInput"] > div > div,
-          div[data-baseweb="input"] {
+          div[data-testid="stTextInput"] > div > div {
             min-height: 64px;
             border-radius: 999px !important;
-            border-color: #dfe1e5 !important;
+            border: 1px solid #dfe1e5 !important;
             background: #fff !important;
             box-shadow: 0 1px 6px rgba(32, 33, 36, .20);
             transition: box-shadow .16s ease, border-color .16s ease;
+            overflow: hidden;
           }
           div[data-testid="stTextInput"] > div > div:hover,
-          div[data-testid="stTextInput"] > div > div:focus-within,
-          div[data-baseweb="input"]:hover,
-          div[data-baseweb="input"]:focus-within {
+          div[data-testid="stTextInput"] > div > div:focus-within {
             border-color: transparent !important;
             box-shadow: 0 2px 10px rgba(32, 33, 36, .24);
           }
           div[data-testid="stTextInput"] input {
             height: 62px;
-            padding: 0 1.7rem;
+            padding: 0 1.7rem !important;
             border-radius: 999px;
             font-size: 1.08rem;
             color: #202124;
-            caret-color: #4f46e5;
+            caret-color: var(--doodle-primary);
           }
           div[data-testid="stTextInput"] input::placeholder {color: #858a91; opacity: 1;}
+          div[data-testid="stTextInput"] [data-testid="InputInstructions"],
+          div[data-testid="stTextInput"] button {display: none !important;}
           @media (max-width: 640px) {
+            .block-container, [data-testid="stMainBlockContainer"] {
+              padding: max(2.5rem, env(safe-area-inset-top)) 1rem max(4rem, env(safe-area-inset-bottom)) !important;
+            }
             .doodle-logo--hero {font-size: clamp(4.1rem, 22vw, 6rem); margin-bottom: 1.9rem;}
-            div[data-testid="stTextInput"] > div > div,
-            div[data-baseweb="input"] {min-height: 58px;}
-            div[data-testid="stTextInput"] input {height: 56px; font-size: 1rem; padding: 0 1.3rem;}
+            div[data-testid="stTextInput"] > div > div {min-height: 58px;}
+            div[data-testid="stTextInput"] input {height: 56px; font-size: 1rem; padding: 0 1.3rem !important;}
           }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown(_doodle_logo("hero"), unsafe_allow_html=True)
+    st.markdown(_doodle_logo("hero", centred=True), unsafe_allow_html=True)
     st.text_input(
         "Describe a picture to colour",
         key="home_prompt",
         placeholder="What shall we draw?",
         label_visibility="collapsed",
-        on_change=_open_studio_from_home,
+        on_change=_submit_home_prompt,
     )
-
-
-if st.session_state.current_raw is not None:
-    st.session_state.studio_open = True
-
-if not st.session_state.studio_open:
-    _render_homepage()
-    st.stop()
+    if st.session_state.get("home_error"):
+        st.error(st.session_state.home_error)
 
 
 @st.cache_data(show_spinner=False)
@@ -326,7 +409,6 @@ def _calibration_pdf() -> bytes:
 
 
 def _set_current_artwork(raw: bytes, *, title: str, metadata: dict) -> None:
-    st.session_state.studio_open = True
     st.session_state.current_raw = raw
     st.session_state.current_title = title
     st.session_state.current_metadata = metadata
@@ -356,19 +438,258 @@ def _build_signature(image_bytes: bytes, kind: str, config: object, calibration:
 
 
 
+def _provider_connection_message(error: GeneratorError) -> dict[str, object]:
+    return {
+        "message": str(error),
+        "code": getattr(error, "code", "unknown"),
+        "provider": getattr(error, "provider", "") or get_provider(_active_provider_id()).label,
+    }
+
+
+def _continue_after_connection() -> None:
+    destination = str(st.session_state.get("connect_return", "generate"))
+    st.session_state.connection_error = None
+    st.session_state.connect_replace = False
+    if destination == "generate":
+        st.session_state.quick_mode = "ai"
+    st.session_state.screen = destination if destination in {"generate", "studio", "result"} else "generate"
+    st.rerun()
+
+
+def _render_connection_setup() -> None:
+    st.markdown(
+        """
+        <style>
+          [data-testid="stHeader"], [data-testid="stToolbar"],
+          [data-testid="collapsedControl"], [data-testid="stSidebar"] {display:none!important;}
+          .block-container, [data-testid="stMainBlockContainer"] {
+            max-width: 720px!important;
+            padding-top: clamp(2.25rem, 6vh, 4rem)!important;
+            padding-bottom: 4rem!important;
+          }
+          .connection-title {text-align:center;font-size:1.65rem;font-weight:780;margin:.55rem 0 .35rem;}
+          .connection-subtitle {text-align:center;color:#676b70;font-size:1rem;margin:0 auto 1.6rem;max-width:560px;}
+          .idea-waiting {border:1px solid #e4e7eb;border-radius:1rem;background:#fafafa;padding:.9rem 1rem;margin:0 0 1.25rem;}
+          .idea-waiting__label {font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:#777b81;font-weight:750;margin-bottom:.3rem;}
+          .provider-note {border:1px solid #e4e7eb;border-radius:1rem;padding:1rem 1.05rem;margin:.7rem 0 1rem;background:#fff;}
+          .provider-note strong {display:block;margin-bottom:.2rem;}
+          [data-testid="stForm"] {border:0!important;padding:0!important;}
+          [data-testid="stForm"] [data-testid="InputInstructions"] {display:none!important;}
+          @media (max-width:640px) {
+            .connection-title {font-size:1.4rem;}
+            .block-container, [data-testid="stMainBlockContainer"] {padding:2rem 1rem 3rem!important;}
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    top_left, top_middle, top_right = st.columns([1, 3, 1])
+    with top_left:
+        if st.button("← Back", use_container_width=True):
+            st.session_state.screen = "home" if st.session_state.connect_return == "generate" else st.session_state.connect_return
+            st.session_state.connection_error = None
+            st.rerun()
+    with top_middle:
+        st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
+    with top_right:
+        st.empty()
+
+    st.markdown('<div class="connection-title">Connect an image generator</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="connection-subtitle">One key lets Doodle turn your description into a printable picture. You only do this once.</div>',
+        unsafe_allow_html=True,
+    )
+
+    idea = str(st.session_state.get("generation_idea", "")).strip()
+    if idea and st.session_state.get("connect_return") == "generate":
+        st.markdown(
+            '<div class="idea-waiting"><div class="idea-waiting__label">Your idea is waiting</div></div>',
+            unsafe_allow_html=True,
+        )
+        st.write(idea)
+
+    active_id = str(st.session_state.get("provider_choice") or _active_provider_id())
+    active_id = active_id if active_id in PROVIDERS else DEFAULT_PROVIDER
+    labels = [spec.label for spec in PROVIDERS.values()]
+    current_index = list(PROVIDERS).index(active_id)
+    chosen_label = st.radio(
+        "Choose a provider",
+        labels,
+        index=current_index,
+        horizontal=True,
+        help="You can switch provider later without changing your saved Doodles.",
+    )
+    provider_id = provider_id_from_label(chosen_label)
+    st.session_state.provider_choice = provider_id
+    spec = get_provider(provider_id)
+
+    st.markdown(
+        f'<div class="provider-note"><strong>{spec.label}</strong>{spec.description}<br><span class="small-muted">{spec.billing_note}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="step-label">1 · Create a provider key</div>', unsafe_allow_html=True)
+    link_a, link_b = st.columns(2)
+    with link_a:
+        st.link_button(
+            f"Open {spec.label} API keys ↗",
+            spec.key_url,
+            use_container_width=True,
+        )
+    with link_b:
+        st.link_button(
+            "Open API billing ↗" if provider_id == "openai" else "Open API pricing ↗",
+            spec.billing_url,
+            use_container_width=True,
+        )
+
+    if provider_id == "openai":
+        st.caption(
+            "On the OpenAI page, create a new secret key, name it Doodle, copy it while it is visible, "
+            "then return here. ChatGPT and API billing are separate."
+        )
+    else:
+        st.caption(
+            "Add API units in Recraft, open Profile → API, generate a token, copy it, then return here."
+        )
+
+    connection_error = st.session_state.get("connection_error")
+    if connection_error and str(connection_error.get("provider", "")).lower() in {"", spec.label.lower()}:
+        st.error(str(connection_error.get("message", "The connection failed.")))
+        code = str(connection_error.get("code", ""))
+        if code == "billing":
+            st.info("The key may be valid, but the provider has no usable API balance or billing method.")
+        elif code == "verification":
+            st.info("Finish the provider's account verification, then try the same key again.")
+
+    existing_key, existing_source = _provider_key(provider_id)
+    replacing = bool(st.session_state.get("connect_replace"))
+
+    if existing_key and not replacing:
+        st.markdown('<div class="step-label">2 · Confirm the connection</div>', unsafe_allow_html=True)
+        st.success(f"{spec.label} is connected using {mask_key(existing_key)} ({existing_source}).")
+        use_col, replace_col = st.columns(2)
+        with use_col:
+            if st.button(
+                "Use this connection" if st.session_state.connect_return != "generate" else "Use this connection & draw",
+                type="primary",
+                use_container_width=True,
+            ):
+                _set_active_provider(provider_id)
+                _continue_after_connection()
+        with replace_col:
+            if st.button("Replace key", use_container_width=True):
+                st.session_state.connect_replace = True
+                st.rerun()
+
+        if existing_source != get_provider(provider_id).env_var:
+            if st.button("Disconnect this provider", use_container_width=True):
+                session_keys = dict(st.session_state.get("session_provider_keys", {}))
+                session_keys.pop(provider_id, None)
+                st.session_state.session_provider_keys = session_keys
+                delete_provider_key(provider_id)
+                st.session_state.connect_replace = True
+                st.session_state.connection_error = None
+                st.rerun()
+        else:
+            st.caption(f"This key comes from the {spec.env_var} environment variable. Remove it in Terminal to disconnect it.")
+    else:
+        st.markdown('<div class="step-label">2 · Paste the key</div>', unsafe_allow_html=True)
+        with st.form(f"connect_{provider_id}", clear_on_submit=False):
+            pasted_key = st.text_input(
+                f"{spec.label} API key",
+                type="password",
+                placeholder=spec.key_placeholder,
+                help="Doodle never writes this key into artwork, PDFs or the Git repository.",
+            )
+            remember_key = st.checkbox("Remember on this Mac", value=True)
+            submit_label = "3 · Connect & draw" if st.session_state.connect_return == "generate" else "3 · Connect"
+            connect_clicked = st.form_submit_button(submit_label, type="primary", use_container_width=True)
+
+        with st.expander("Where is my key stored?"):
+            st.caption(
+                f"Doodle stores remembered keys only on this computer at {data_root() / 'credentials.json'}, "
+                "with user-only file permissions. The file is outside the repository and excluded by Git."
+            )
+
+        if connect_clicked:
+            key = pasted_key.strip()
+            if not key:
+                st.session_state.connection_error = {
+                    "message": "Paste the API key you just created.",
+                    "code": "missing_key",
+                    "provider": spec.label,
+                }
+                st.rerun()
+            try:
+                with st.spinner(f"Checking {spec.label}…"):
+                    check = check_provider_connection(provider_id, key)
+                credits = check.get("credits")
+                if provider_id == "recraft" and credits is not None:
+                    try:
+                        credit_balance = float(credits)
+                    except (TypeError, ValueError):
+                        credit_balance = None
+                    if credit_balance is not None and credit_balance <= 0:
+                        raise GeneratorError(
+                            "Recraft is connected, but the API-unit balance is zero.",
+                            provider="Recraft",
+                            code="billing",
+                        )
+            except GeneratorError as exc:
+                st.session_state.connection_error = _provider_connection_message(exc)
+                st.rerun()
+
+            session_keys = dict(st.session_state.get("session_provider_keys", {}))
+            session_keys[provider_id] = key
+            st.session_state.session_provider_keys = session_keys
+            if remember_key:
+                save_provider_key(provider_id, key)
+            elif replacing:
+                delete_provider_key(provider_id)
+            _set_active_provider(provider_id)
+            st.session_state.connection_error = None
+            _continue_after_connection()
+
+    st.divider()
+    if st.button("Try Doodle with a sample picture instead", use_container_width=True):
+        st.session_state.quick_mode = "demo"
+        st.session_state.generation_nonce = 0
+        st.session_state.screen = "generate"
+        st.session_state.connection_error = None
+        st.rerun()
+    st.caption("The sample tests the complete print flow, but it will not match the description you entered.")
+
+
 def _quick_generate() -> None:
     idea = str(st.session_state.get("generation_idea", "")).strip()
     if not idea:
-        return
-    environment_key = os.getenv("OPENAI_API_KEY", "")
-    api_key = str(st.session_state.get("quick_api_key", "") or environment_key)
-    if not api_key:
-        # Zero-friction prototype fallback: demonstrate the happy path without setup.
-        demos = list_demo_artwork()
-        raw = next(iter(demos.values())).read_bytes()
-        _set_current_artwork(raw, title=idea, metadata={"source": "Built-in demo", "concept": idea})
+        raise GeneratorError("Describe what Doodle should draw first.", code="missing_prompt")
+
+    if st.session_state.get("quick_mode") == "demo":
+        demos = list(list_demo_artwork().items())
+        nonce = int(st.session_state.get("generation_nonce", 0))
+        index = int(hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16) % len(demos)
+        demo_name, demo_path = demos[index]
+        raw = demo_path.read_bytes()
+        _set_current_artwork(
+            raw,
+            title=idea,
+            metadata={"source": "Built-in sample", "sample": demo_name, "concept": idea},
+        )
         st.session_state.candidates = []
     else:
+        provider_id = _active_provider_id()
+        spec = get_provider(provider_id)
+        api_key, _source = _provider_key(provider_id)
+        if not api_key:
+            raise GeneratorError(
+                f"Connect {spec.label} before generating artwork.",
+                provider=spec.label,
+                code="missing_key",
+            )
+
         prompt = build_colouring_prompt(
             idea,
             age_profile="2-3 years",
@@ -376,77 +697,211 @@ def _quick_generate() -> None:
             target="A4 page",
             extra_instructions="One clear subject or action, generous white space, no caption or text.",
         )
-        artworks = generate_with_openai(api_key=api_key, prompt=prompt, variants=1, model="gpt-image-2", size="1024x1536", quality="low")
+        settings = load_settings()
+        model = str(settings.get(f"{provider_id}_model", spec.default_model))
+        if model not in spec.models:
+            model = spec.default_model
+        quality = str(settings.get("openai_quality", "low"))
+        nonce = int(st.session_state.get("generation_nonce", 0))
+        random_seed = int(hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16)
+        artworks = generate_with_provider(
+            provider_id=provider_id,
+            api_key=api_key,
+            prompt=prompt,
+            variants=1,
+            model=model,
+            size=spec.portrait_size,
+            quality=quality,
+            random_seed=random_seed,
+        )
         art = artworks[0]
-        _set_current_artwork(art.image_bytes, title=idea, metadata={"source": art.provider, "concept": idea, "prompt": art.prompt, "model": art.model})
+        _set_current_artwork(
+            art.image_bytes,
+            title=idea,
+            metadata={
+                "source": art.provider,
+                "concept": idea,
+                "prompt": art.prompt,
+                "model": art.model,
+                "generation": art.metadata,
+            },
+        )
+
     processed = _cached_process(st.session_state.current_raw, 215, True, True, 5.0, 3, 0)
-    config = FullPageConfig(page_width_mm=210.0, page_height_mm=297.0, margin_mm=12.0, caption="", caption_font_size_pt=17.0, caption_area_mm=27.0)
+    config = FullPageConfig(
+        page_width_mm=210.0,
+        page_height_mm=297.0,
+        margin_mm=12.0,
+        caption="",
+        caption_font_size_pt=17.0,
+        caption_area_mm=27.0,
+    )
     st.session_state.quick_processed = processed
     st.session_state.quick_pdf = create_full_page_pdf(processed, config)
-    st.session_state.result_mode = True
+    st.session_state.quick_saved = False
+    st.session_state.screen = "result"
+
+
+def _render_generating_screen() -> None:
+    st.markdown(
+        """
+        <style>
+          [data-testid="stHeader"], [data-testid="stToolbar"],
+          [data-testid="collapsedControl"], [data-testid="stSidebar"] {display:none!important;}
+          .block-container, [data-testid="stMainBlockContainer"] {
+            max-width:650px!important;min-height:100dvh;padding:3rem 1.25rem 5rem!important;
+            display:flex;flex-direction:column;justify-content:center;text-align:center;overflow:visible!important;
+          }
+          .drawing-title{font-size:1.35rem;font-weight:760;margin:.8rem 0 .35rem;}
+          .drawing-idea{color:#676b70;max-width:520px;margin:0 auto 1rem;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
+    st.markdown('<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True)
+    safe_idea = html.escape(str(st.session_state.get("generation_idea", "")))
+    st.markdown(f'<div class="drawing-idea">{safe_idea}</div>', unsafe_allow_html=True)
+
+    try:
+        with st.spinner("Creating clean colouring-book line art"):
+            _quick_generate()
+    except GeneratorError as exc:
+        provider_id = _active_provider_id()
+        _key, source = _provider_key(provider_id)
+        if exc.code == "content":
+            st.session_state.home_error = str(exc)
+            st.session_state.home_prompt = st.session_state.generation_idea
+            st.session_state.screen = "home"
+        else:
+            st.session_state.connection_error = _provider_connection_message(exc)
+            st.session_state.connect_return = "generate"
+            st.session_state.connect_replace = exc.code in {"authentication", "permission"}
+            if exc.code == "authentication":
+                session_keys = dict(st.session_state.get("session_provider_keys", {}))
+                session_keys.pop(provider_id, None)
+                st.session_state.session_provider_keys = session_keys
+                if source == "this Mac":
+                    delete_provider_key(provider_id)
+            st.session_state.screen = "connect"
+        st.rerun()
+    st.rerun()
 
 
 def _render_first_result() -> None:
-    st.markdown("""
-    <style>
-      [data-testid="stSidebar"], [data-testid="collapsedControl"] {display:none !important;}
-      .block-container,[data-testid="stMainBlockContainer"] {max-width:760px!important;padding-top:1rem!important;}
-      .happy-title{text-align:center;font-size:1.05rem;color:#676b70;margin:.2rem 0 1rem;}
-    </style>
-    """, unsafe_allow_html=True)
-    st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
-    st.markdown('<div class="happy-title">Your first Doodle is ready.</div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <style>
+          [data-testid="stHeader"], [data-testid="stToolbar"],
+          [data-testid="stSidebar"], [data-testid="collapsedControl"] {display:none!important;}
+          .block-container,[data-testid="stMainBlockContainer"] {max-width:800px!important;padding:2.5rem 1.15rem 4rem!important;overflow:visible!important;}
+          .happy-title{text-align:center;font-size:1.1rem;font-weight:720;color:#34373b;margin:.5rem 0 .15rem;}
+          .happy-idea{text-align:center;font-size:.94rem;color:#777b81;margin:0 0 1.15rem;}
+          [data-testid="stImage"] img{border:1px solid #e5e7eb;border-radius:1rem;background:#fff;box-shadow:0 10px 30px rgba(20,20,20,.06);}
+          [data-testid="stForm"] [data-testid="InputInstructions"] {display:none!important;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
+    st.markdown('<div class="happy-title">Your Doodle is ready</div>', unsafe_allow_html=True)
+    safe_title = html.escape(str(st.session_state.get("current_title", "")))
+    st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
     st.image(st.session_state.quick_processed, use_container_width=True)
-    a,b,c=st.columns([1,1,1.25])
-    with a:
+
+    again_col, love_col, print_col = st.columns([1, 1, 1.35])
+    with again_col:
         if st.button("↻ Again", use_container_width=True):
-            st.session_state.result_mode=False
-            try:
-                with st.spinner("Drawing another one…"):
-                    _quick_generate()
-            except (ValueError, GeneratorError) as exc:
-                st.error(str(exc))
+            st.session_state.generation_nonce = int(st.session_state.get("generation_nonce", 0)) + 1
+            st.session_state.screen = "generate"
             st.rerun()
-    with b:
-        if st.button("♡ Love it", use_container_width=True):
-            save_library_item(processed_image=st.session_state.quick_processed, raw_image=st.session_state.current_raw, title=st.session_state.current_title or "Doodle", metadata=st.session_state.current_metadata)
-            st.toast("Saved to your Doodles")
-    with c:
-        st.download_button("Print my Doodle", data=st.session_state.quick_pdf, file_name=f"{_slug(st.session_state.current_title)}-a4.pdf", mime="application/pdf", type="primary", use_container_width=True)
-    change = st.text_input("Make a change", placeholder="Make the dinosaur wear a party hat…", label_visibility="collapsed")
-    if change:
-        st.session_state.generation_idea = f"{st.session_state.current_title}. Change it like this: {change}"
-        st.session_state.result_mode=False
-        try:
-            with st.spinner("Making that change…"):
-                _quick_generate()
-        except (ValueError, GeneratorError) as exc:
-            st.error(str(exc))
-        st.rerun()
+    with love_col:
+        love_label = "✓ Saved" if st.session_state.get("quick_saved") else "♡ Love it"
+        if st.button(love_label, use_container_width=True, disabled=bool(st.session_state.get("quick_saved"))):
+            save_library_item(
+                processed_image=st.session_state.quick_processed,
+                raw_image=st.session_state.current_raw,
+                title=st.session_state.current_title or "Doodle",
+                metadata=st.session_state.current_metadata,
+            )
+            st.session_state.quick_saved = True
+            st.rerun()
+    with print_col:
+        st.download_button(
+            "Print my Doodle",
+            data=st.session_state.quick_pdf,
+            file_name=f"{_slug(st.session_state.current_title)}-a4.pdf",
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True,
+        )
+
+    st.caption("Open the PDF and print at Actual size / 100%. Disable Fit to page.")
+
+    with st.form("quick_change_form", clear_on_submit=True):
+        change_col, apply_col = st.columns([4, 1])
+        with change_col:
+            change = st.text_input(
+                "Make a change",
+                placeholder="Make the dinosaur wear a party hat…",
+                label_visibility="collapsed",
+            )
+        with apply_col:
+            change_clicked = st.form_submit_button("Apply", use_container_width=True)
+    if change_clicked:
+        if change.strip():
+            st.session_state.generation_idea = (
+                f"{st.session_state.current_title}. Change it like this: {change.strip()}"
+            )
+            st.session_state.generation_nonce = 0
+            st.session_state.quick_mode = "ai"
+            api_key, _source = _provider_key()
+            st.session_state.connect_return = "generate"
+            st.session_state.connect_replace = False
+            st.session_state.screen = "generate" if api_key else "connect"
+            st.rerun()
+        else:
+            st.warning("Describe the change first.")
+
     with st.expander("Other sizes & advanced options"):
-        st.caption("Need badges, custom millimetre dimensions, captions or printer calibration?")
-        if st.button("Open Doodle Studio", use_container_width=True):
-            st.session_state.first_run=False
-            st.session_state.result_mode=False
-            st.rerun()
+        st.caption("Badges, exact millimetre sizes, captions, saved artwork and printer calibration live in Doodle Studio.")
+        studio_col, provider_col = st.columns(2)
+        with studio_col:
+            if st.button("Open Doodle Studio", use_container_width=True):
+                st.session_state.screen = "studio"
+                st.rerun()
+        with provider_col:
+            if st.button("Change image provider", use_container_width=True):
+                st.session_state.connect_return = "result"
+                st.session_state.connect_replace = False
+                st.session_state.provider_choice = _active_provider_id()
+                st.session_state.screen = "connect"
+                st.rerun()
+
+    if st.button("Start a new Doodle", use_container_width=True):
+        _start_new_doodle()
+
+
+# A direct prompt should always enter the happy path. Injected artwork in tests or
+# a restored session goes straight to the advanced studio.
+if st.session_state.current_raw is not None and st.session_state.screen == "home" and not st.session_state.home_prompt:
+    st.session_state.screen = "studio"
+
+if st.session_state.screen == "home":
+    _render_homepage()
+    st.stop()
+if st.session_state.screen == "connect":
+    _render_connection_setup()
+    st.stop()
+if st.session_state.screen == "generate":
+    _render_generating_screen()
+    st.stop()
+if st.session_state.screen == "result":
+    _render_first_result()
+    st.stop()
 
 settings = load_settings()
 calibration_profile = CalibrationProfile.from_dict(settings.get("calibration"))
-
-# First-run happy path: prompt -> one result -> print. Advanced controls remain available only on demand.
-if st.session_state.get("first_run", True):
-    if not st.session_state.get("result_mode", False):
-        try:
-            with st.spinner("Drawing your Doodle…"):
-                _quick_generate()
-        except (ValueError, GeneratorError) as exc:
-            st.error(str(exc))
-            st.text_input("OpenAI API key", key="quick_api_key", type="password", placeholder="Paste an API key to try again")
-            if st.button("Try again", type="primary"):
-                st.rerun()
-            st.stop()
-    _render_first_result()
-    st.stop()
 
 brand_col, new_col = st.columns([6, 1])
 with brand_col:
@@ -461,16 +916,71 @@ with new_col:
 
 with st.sidebar:
     st.markdown("### Settings")
-    environment_key = os.getenv("OPENAI_API_KEY", "")
-    api_key = st.text_input(
-        "OpenAI API key",
-        value=environment_key,
-        type="password",
-        help="Kept in this app session and never written to the artwork library.",
+    studio_provider_id = _active_provider_id()
+    studio_provider_labels = [spec.label for spec in PROVIDERS.values()]
+    selected_provider_label = st.selectbox(
+        "Image provider",
+        studio_provider_labels,
+        index=list(PROVIDERS).index(studio_provider_id),
     )
-    model = st.selectbox("Image model", ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"], index=0)
-    quality = st.select_slider("Generation quality", options=["low", "medium", "high"], value="low")
-    st.caption("Demo and upload modes work without an API key.")
+    selected_provider_id = provider_id_from_label(selected_provider_label)
+    if selected_provider_id != studio_provider_id:
+        _set_active_provider(selected_provider_id)
+        studio_provider_id = selected_provider_id
+        settings = load_settings()
+
+    studio_provider = get_provider(studio_provider_id)
+    api_key, api_key_source = _provider_key(studio_provider_id)
+    if api_key:
+        st.success(f"Connected · {mask_key(api_key)}")
+        st.caption(f"Source: {api_key_source}")
+    else:
+        st.warning(f"{studio_provider.label} is not connected.")
+
+    connection_label = "Change connection" if api_key else f"Connect {studio_provider.label}"
+    if st.button(
+        connection_label,
+        type="secondary" if api_key else "primary",
+        use_container_width=True,
+        key="studio_connect_provider",
+    ):
+        st.session_state.connect_return = "studio"
+        st.session_state.connect_replace = bool(api_key)
+        st.session_state.provider_choice = studio_provider_id
+        st.session_state.connection_error = None
+        st.session_state.screen = "connect"
+        st.rerun()
+
+    saved_model = str(settings.get(f"{studio_provider_id}_model", studio_provider.default_model))
+    if saved_model not in studio_provider.models:
+        saved_model = studio_provider.default_model
+    model = st.selectbox(
+        "Image model",
+        list(studio_provider.models),
+        index=list(studio_provider.models).index(saved_model),
+    )
+    quality = "low"
+    if studio_provider_id == "openai":
+        saved_quality = str(settings.get("openai_quality", "low"))
+        if saved_quality not in {"low", "medium", "high"}:
+            saved_quality = "low"
+        quality = st.select_slider(
+            "Generation quality",
+            options=["low", "medium", "high"],
+            value=saved_quality,
+        )
+
+    if model != settings.get(f"{studio_provider_id}_model") or (
+        studio_provider_id == "openai" and quality != settings.get("openai_quality")
+    ):
+        updated_settings = load_settings()
+        updated_settings[f"{studio_provider_id}_model"] = model
+        if studio_provider_id == "openai":
+            updated_settings["openai_quality"] = quality
+        save_settings(updated_settings)
+        settings = updated_settings
+
+    st.caption("Demo and upload modes work without a provider connection.")
 
     st.divider()
     st.markdown("### Print calibration")
@@ -523,40 +1033,65 @@ with create_tab:
             generate_clicked = st.form_submit_button("Create doodles", type="primary", use_container_width=True)
 
         if generate_clicked:
-            try:
-                generated_prompt = build_colouring_prompt(
-                    idea,
-                    age_profile=age_profile,
-                    style_name=style_name,
-                    target=target,
-                    extra_instructions=extra,
-                )
-                size = "1024x1536" if target == "A4 page" else "1024x1024"
-                with st.spinner(f"Drawing {int(variants)} doodle(s)..."):
-                    artworks = generate_with_openai(
-                        api_key=api_key,
-                        prompt=generated_prompt,
-                        variants=int(variants),
-                        model=model,
-                        size=size,
-                        quality=quality,
+            if not idea.strip():
+                st.error("Describe what Doodle should draw.")
+            elif not api_key:
+                st.session_state.generation_idea = idea.strip()
+                st.session_state.connect_return = "studio"
+                st.session_state.connect_replace = False
+                st.session_state.provider_choice = studio_provider_id
+                st.session_state.connection_error = None
+                st.session_state.screen = "connect"
+                st.rerun()
+            else:
+                try:
+                    generated_prompt = build_colouring_prompt(
+                        idea,
+                        age_profile=age_profile,
+                        style_name=style_name,
+                        target=target,
+                        extra_instructions=extra,
                     )
-                st.session_state.candidates = artworks
-                first = artworks[0]
-                _set_current_artwork(
-                    first.image_bytes,
-                    title=idea,
-                    metadata={
-                        "source": "OpenAI",
-                        "concept": idea,
-                        "prompt": first.prompt,
-                        "model": first.model,
-                        "generation": first.metadata,
-                    },
-                )
-                st.success("Your doodles are ready. Choose one, then prepare it for print.")
-            except (ValueError, GeneratorError) as exc:
-                st.error(str(exc))
+                    size = studio_provider.portrait_size if target == "A4 page" else studio_provider.square_size
+                    nonce = int(st.session_state.get("generation_nonce", 0))
+                    seed_source = f"{idea}|{style_name}|{target}|{nonce}"
+                    random_seed = int(hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16)
+                    with st.spinner(f"Drawing {int(variants)} doodle(s)..."):
+                        artworks = generate_with_provider(
+                            provider_id=studio_provider_id,
+                            api_key=api_key,
+                            prompt=generated_prompt,
+                            variants=int(variants),
+                            model=model,
+                            size=size,
+                            quality=quality,
+                            random_seed=random_seed,
+                        )
+                    st.session_state.candidates = artworks
+                    first = artworks[0]
+                    _set_current_artwork(
+                        first.image_bytes,
+                        title=idea,
+                        metadata={
+                            "source": first.provider,
+                            "concept": idea,
+                            "prompt": first.prompt,
+                            "model": first.model,
+                            "generation": first.metadata,
+                        },
+                    )
+                    st.success("Your doodles are ready. Choose one, then prepare it for print.")
+                except GeneratorError as exc:
+                    if exc.code in {"missing_key", "authentication", "permission", "billing", "verification"}:
+                        st.session_state.connection_error = _provider_connection_message(exc)
+                        st.session_state.connect_return = "studio"
+                        st.session_state.connect_replace = exc.code in {"authentication", "permission"}
+                        st.session_state.provider_choice = studio_provider_id
+                        st.session_state.screen = "connect"
+                        st.rerun()
+                    st.error(str(exc))
+                except ValueError as exc:
+                    st.error(str(exc))
 
         if st.session_state.candidates:
             st.subheader("Choose a doodle")
