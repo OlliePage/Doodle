@@ -112,3 +112,50 @@ def build_colouring_prompt(
         prompt += f"\nAdditional direction: {extra_instructions.strip()}\n"
 
     return dedent(prompt).strip()
+
+
+def build_refinement_prompt(
+    instruction: str,
+    *,
+    style_name: str = "Toddler bold",
+    age_profile: str = "2-3 years",
+    target: str = "A4 page",
+) -> str:
+    """Wrap a change request in the same rules the original drawing obeyed.
+
+    Sent bare, an instruction loses the colouring-book contract and comes back
+    shaded or grey, because nothing tells the model the picture is line art
+    meant for crayons.
+    """
+
+    instruction = instruction.strip()
+    if not instruction:
+        raise ValueError("Describe the change you would like.")
+
+    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
+    age_rule = AGE_RULES.get(age_profile, AGE_RULES["2-3 years"])
+    target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
+
+    prompt = f"""
+    Change this black-and-white colouring-book illustration as described, and
+    change nothing else.
+
+    Requested change: {instruction}
+
+    Leave every other part of the scene unchanged: the same characters, poses,
+    props, background and composition.
+
+    Visual rules, which the changed picture must still obey:
+    - Pure white background.
+    - Black line work only: no colour, grey, shading, shadows, gradients, hatching or texture.
+    - Smooth rounded outlines, friendly expressions and coherent anatomy.
+    - Large, closed areas that are pleasant to colour with crayons.
+    - No border, words, letters, numbers, logos, signatures or watermark.
+    - Nothing important may be cropped by the image edge.
+
+    Style profile: {style.instruction}
+    Child profile: {age_rule}
+    Composition profile: {target_rule}
+    """
+
+    return dedent(prompt).strip()

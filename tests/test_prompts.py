@@ -1,4 +1,29 @@
-from colouring_factory.prompts import build_colouring_prompt
+import pytest
+
+from colouring_factory.prompts import build_colouring_prompt, build_refinement_prompt
+
+
+def test_a_refinement_keeps_the_colouring_book_rules() -> None:
+    prompt = build_refinement_prompt("give the bear a party hat")
+    assert "give the bear a party hat" in prompt
+    assert "Black line work only" in prompt
+    assert "Pure white background" in prompt
+
+
+def test_a_refinement_asks_for_everything_else_to_stay() -> None:
+    prompt = build_refinement_prompt("give the bear a party hat").lower()
+    assert "unchanged" in prompt or "leave everything else" in prompt
+
+
+def test_a_refinement_carries_the_style_and_age_profile() -> None:
+    toddler = build_refinement_prompt("add a hat", age_profile="2-3 years")
+    preschool = build_refinement_prompt("add a hat", age_profile="4-5 years")
+    assert toddler != preschool
+
+
+def test_a_refinement_with_an_empty_instruction_is_refused() -> None:
+    with pytest.raises(ValueError):
+        build_refinement_prompt("   ")
 
 
 def test_prompt_contains_concept_and_print_rules() -> None:
