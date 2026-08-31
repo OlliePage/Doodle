@@ -925,3 +925,86 @@ def test_a_non_image_portrait_file_also_degrades_rather_than_crashing() -> None:
     assert not at.exception
     assert any("could not be shown" in info.value.lower() for info in at.info)
     assert any(button.key == f"delete_character_{garbage_id}" for button in at.button)
+
+
+def _guidance_text(at: AppTest) -> str:
+    return " ".join(
+        str(element.value)
+        for group in (at.error, at.markdown, at.caption)
+        for element in group
+    )
+
+
+def test_a_declined_photo_while_drawing_a_scene_routes_home_not_to_connect(
+    monkeypatch,
+) -> None:
+    """FB-07: photo_declined is about the picture, not the connection.
+
+    Reachable only through a chosen cast (refine_with_provider, not
+    generate_with_provider), this used to fall into the generating screen's
+    default branch and land on the Connect screen, which has nothing to do
+    with a declined photograph and nothing for the parent to fix there."""
+
+    ida_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    def refuse(**kwargs):
+        raise GeneratorError(
+            "OpenAI would not draw from that picture.",
+            provider="OpenAI",
+            code="photo_declined",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", refuse)
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["chosen_characters"] = [ida_id]
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "having a picnic"
+    at.session_state["quick_mode"] = "ai"
+    at.run()
+
+    assert not at.exception
+    assert at.session_state["screen"] == "home"
+    assert not at.session_state["connection_error"]
+    assert "picture" in _guidance_text(at).lower()
+
+
+def test_too_many_characters_on_gemini_is_explained_not_silently_moved(
+    monkeypatch,
+) -> None:
+    """FB-07: on Google Gemini specifically, the Connect screen only shows a
+    connection_error whose recorded provider matches the radio's current
+    selection. Before this fix, too_many_references landed there anyway and,
+    because the radio still defaulted to OpenAI, the message was filtered
+    out entirely: a parent moved with no explanation at all. Routing this
+    code home instead means that filter is never reached."""
+
+    ida_id, bo_id = _save_two_characters()
+    save_settings({**load_settings(), "image_provider": "google"})
+    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
+
+    def refuse(**kwargs):
+        raise GeneratorError(
+            "Google Gemini can look at 1 picture at a time. Choose fewer characters.",
+            provider="Google Gemini",
+            code="too_many_references",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", refuse)
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["chosen_characters"] = [ida_id, bo_id]
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "at the park"
+    at.session_state["quick_mode"] = "ai"
+    at.run()
+
+    assert not at.exception
+    assert at.session_state["screen"] == "home"
+    assert not at.session_state["connection_error"]
+    guidance = _guidance_text(at).lower()
+    assert "fewer characters" in guidance or "untick" in guidance
+
+

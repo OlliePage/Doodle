@@ -274,6 +274,7 @@ def _initialise_state() -> None:
         "screen": "home",
         "home_prompt": "",
         "home_error": "",
+        "home_error_code": "",
         "generation_idea": "",
         "candidates": [],
         "current_raw": None,
@@ -361,6 +362,7 @@ def _submit_home_prompt() -> None:
         return
     st.session_state.generation_idea = prompt
     st.session_state.home_error = ""
+    st.session_state.home_error_code = ""
     st.session_state.connection_error = None
     st.session_state.connect_return = "generate"
     st.session_state.connect_replace = False
@@ -374,6 +376,7 @@ def _start_new_doodle() -> None:
     st.session_state.screen = "home"
     st.session_state.home_prompt = ""
     st.session_state.home_error = ""
+    st.session_state.home_error_code = ""
     st.session_state.generation_idea = ""
     st.session_state.candidates = []
     st.session_state.current_raw = None
@@ -565,7 +568,14 @@ def _render_homepage() -> None:
         if st.session_state.screen != "home":
             st.rerun()
     if st.session_state.get("home_error"):
-        st.error(st.session_state.home_error)
+        code = str(st.session_state.get("home_error_code") or "")
+        if code:
+            # A code carries the named control that owns the fix, not just
+            # the bare failure message: "Untick some characters and draw
+            # again," rather than a sentence naming no provider at all.
+            _show_guidance(code, detail=st.session_state.home_error)
+        else:
+            st.error(st.session_state.home_error)
 
     _render_home_options()
 
@@ -2303,16 +2313,13 @@ def _render_generating_screen() -> None:
     except GeneratorError as exc:
         provider_id = _active_provider_id()
         _key, source = _provider_key(provider_id)
-        if exc.code in {"content", "missing_prompt"}:
-            # Both are about what was typed, not about the connection: a
-            # missing idea used to fall into the branch below, landing on
-            # the Connect screen with a message that had nothing to do with
-            # any provider, alongside a success banner saying one was
-            # already connected.
+        if exc.code in _PICTURE_OR_CAST_CODES:
             st.session_state.home_error = str(exc)
+            st.session_state.home_error_code = exc.code
             st.session_state.home_prompt = st.session_state.generation_idea
             st.session_state.screen = "home"
         else:
+            st.session_state.home_error_code = ""
             st.session_state.connection_error = _provider_connection_message(exc)
             st.session_state.connect_return = "generate"
             st.session_state.connect_replace = exc.code in {
@@ -2334,6 +2341,7 @@ def _render_generating_screen() -> None:
         st.session_state.home_error = (
             f"That picture could not be prepared for printing: {exc}"
         )
+        st.session_state.home_error_code = ""
         st.session_state.home_prompt = st.session_state.generation_idea
         st.session_state.screen = "home"
         st.rerun()
