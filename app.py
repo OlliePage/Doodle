@@ -297,6 +297,8 @@ def _initialise_state() -> None:
         "pair_raw": None,
         "pair_processed": None,
         "pair_pdf": None,
+        "badge_preview": None,
+        "badge_raw": None,
         "colour_previews": {},
         "showing_colours": False,
         "session_provider_keys": {},
@@ -386,6 +388,8 @@ def _start_new_doodle() -> None:
     st.session_state.pair_raw = None
     st.session_state.pair_processed = None
     st.session_state.pair_pdf = None
+    st.session_state.badge_preview = None
+    st.session_state.badge_raw = None
     st.session_state.showing_colours = False
     st.session_state.connection_error = None
     st.session_state.quick_mode = "ai"
@@ -1845,6 +1849,7 @@ def _quick_generate() -> None:
 
     _prepare_quick_outputs()
     _prepare_pair_outputs()
+    _prepare_badge_outputs()
     st.session_state.screen = "result"
 
 
@@ -1886,6 +1891,10 @@ A4_SHEET = FullPageConfig(
     caption_area_mm=27.0,
 )
 
+BADGE_58MM = CircleSheetConfig(
+    finished_diameter_mm=58.0, cut_diameter_mm=58.0, safe_diameter_mm=50.0
+)
+
 
 def _prepare_pair_outputs() -> None:
     """Clean the grown-up sheet, gently, and build its A4 PDF.
@@ -1913,6 +1922,29 @@ def _prepare_pair_outputs() -> None:
     )
     st.session_state.pair_processed = processed
     st.session_state.pair_pdf = create_full_page_pdf(processed, A4_SHEET)
+
+
+def _prepare_badge_outputs() -> None:
+    """Fit the finished picture into a 58 mm badge, which costs nothing.
+
+    A separate function from the redraw: this one only re-lays-out what is
+    already drawn, so it is instant and free and can be shown without asking.
+    """
+
+    processed = st.session_state.get("quick_processed")
+    if not processed:
+        st.session_state.badge_preview = None
+        return
+
+    # The calibration profile is read only after the result screen's
+    # st.stop(), so this cannot borrow it and loads its own, falling back to
+    # an uncalibrated default when nothing has been saved yet.
+    calibration = CalibrationProfile.from_dict(load_settings().get("calibration"))
+    st.session_state.badge_preview = _cached_badge_preview(
+        processed,
+        json.dumps(asdict(BADGE_58MM), sort_keys=True),
+        json.dumps(calibration.to_dict(), sort_keys=True),
+    )
 
 
 def _render_grown_up_sheet() -> None:
@@ -1949,6 +1981,118 @@ def _render_grown_up_sheet() -> None:
             key="grown_up",
             scale_note=False,
         )
+
+
+# TARGET_RULES["Round badge"] already asks for a square, corners-empty
+# composition, but naming the crop explicitly is what actually keeps a model
+# from filling the corners anyway — the same lesson BADGE_CORNERS_RULE
+# records for the caricature prompt.
+_BADGE_REDRAW_EXTRA_INSTRUCTIONS = (
+    "This picture will be cut into a circle to make a badge, so keep the "
+    "four corners empty and fill the frame with one clear subject."
+)
+
+
+def _render_badge_strip() -> None:
+    """Every finished doodle, already fitted to a 58 mm badge for free.
+
+    Self-guarding like _render_grown_up_sheet: badge_preview is a plain
+    session key prepared eagerly by _prepare_badge_outputs, so there is
+    nothing to compute here, only nothing-to-show to detect.
+    """
+
+    preview = st.session_state.get("badge_preview")
+    if not preview:
+        return
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+
+    with st.container(border=True):
+        st.markdown("**Your badge**")
+        st.image(preview, width="stretch")
+        st.caption(
+            "Your doodle fitted to a 58 mm badge. Doodle can draw it again "
+            "composed for the circle instead, which costs one drawing."
+        )
+        if not st.button(
+            "Draw it for a badge",
+            width="stretch",
+            icon=":material/badge:",
+            key="draw_for_badge",
+            disabled=not api_key,
+        ):
+            return
+
+        idea = (
+            str(
+                st.session_state.get("current_metadata", {}).get("concept")
+                or st.session_state.get("current_title", "")
+            ).strip()
+            or "Doodle"
+        )
+        settings = load_settings()
+        options = quick_drawing_options(settings)
+        model = _model_for(provider_id, spec, settings)
+        quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
+        chosen = _cast_for_drawing()
+
+        try:
+            with st.spinner("Composing it for a badge…"):
+                if chosen:
+                    # A scene starring saved characters is redrawn the same
+                    # way _quick_generate draws one: from their reference
+                    # portraits, not a fresh reading of the idea alone,
+                    # because that is what keeps them themselves.
+                    references = tuple(
+                        load_character_image(character_id)
+                        for character_id, *_ in chosen
+                    )
+                    artwork = refine_with_provider(
+                        provider_id=provider_id,
+                        api_key=api_key,
+                        prompt=build_character_scene_prompt(
+                            idea,
+                            [(name, kind, marks) for _, name, kind, marks in chosen],
+                            age_profile=str(options["age_profile"]),
+                            style_name=str(options["style"]),
+                            target="Round badge",
+                            extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
+                        ),
+                        reference_images=references,
+                        model=model,
+                        size=spec.square_size,
+                        quality=quality,
+                    )
+                else:
+                    artworks = generate_with_provider(
+                        provider_id=provider_id,
+                        api_key=api_key,
+                        prompts=[
+                            build_colouring_prompt(
+                                idea,
+                                age_profile=str(options["age_profile"]),
+                                style_name=str(options["style"]),
+                                target="Round badge",
+                                extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
+                            )
+                        ],
+                        model=model,
+                        size=spec.square_size,
+                        quality=quality,
+                    )
+                    artwork = artworks[0]
+        except GeneratorError as exc:
+            _show_guidance(exc.code, detail=str(exc))
+            return
+
+        st.session_state.candidates = []
+        st.session_state.badge_raw = artwork.image_bytes
+        _adopt_artwork(artwork, idea)
+        _prepare_quick_outputs()
+        _prepare_badge_outputs()
+        st.rerun()
 
 
 def _render_generating_screen() -> None:
@@ -2097,6 +2241,7 @@ def _render_first_result() -> None:
     )
 
     _render_grown_up_sheet()
+    _render_badge_strip()
 
     # This box used to rewrite the original idea and draw a new picture from
     # scratch. Since alternatives started coming back genuinely different, that
