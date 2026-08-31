@@ -25,6 +25,27 @@ def test_each_character_is_named_and_matched_to_its_picture() -> None:
     assert "first" in prompt.lower() and "second" in prompt.lower()
 
 
+def test_the_ordinal_naming_each_character_matches_their_actual_order() -> None:
+    """The docstring calls this order "the only thing telling the model
+    which face is which": reference pictures are attached in the order
+    `characters` lists them, so the ordinal word introducing each one has to
+    name the same character its picture actually is. The previous test only
+    checks that "first" and "second" both appear somewhere in the prompt,
+    which would still pass if the mapping were reversed and two characters
+    swapped likenesses silently."""
+
+    prompt = build_character_scene_prompt(
+        "building a sandcastle",
+        [
+            ("Ida", "person", "Curly hair, round glasses."),
+            ("Bear", "toy", "A bald patch on one ear."),
+        ],
+    )
+
+    assert "The first picture is Ida" in prompt
+    assert "The second picture is Bear" in prompt
+
+
 def test_a_person_gets_the_face_exemption_and_a_toy_does_not() -> None:
     """A face at toddler detail comes back as a generic child.
 
