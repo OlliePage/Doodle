@@ -125,6 +125,15 @@ _ENTRIES: dict[str, Guidance] = {
         fix="Switch to OpenAI or Google Gemini for more varied alternatives.",
         control=_SETTINGS,
     ),
+    "appearance_failed": Guidance(
+        title="Their appearance could not be described",
+        cause="The provider did not return a usable description of the photograph.",
+        fix=(
+            "Type what they look like yourself — hair, eyes and skin are what "
+            "the drawing and colouring need most."
+        ),
+        control="How they really look, in your characters",
+    ),
     "no_circles_fit": Guidance(
         title="No badges fit on the sheet",
         cause="The cut diameter plus the outer margin is wider than the page.",

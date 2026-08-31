@@ -41,7 +41,7 @@ def _multipart_body(
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
-def _mime_for(payload: bytes) -> str:
+def mime_for(payload: bytes) -> str:
     """Name the format from the bytes rather than asserting one.
 
     Every picture Doodle used to send was one it had drawn, so the hardcoded
@@ -586,7 +586,7 @@ def refine_with_openai(
         raise ValueError("At least one picture is required.")
 
     def _part(index: int, payload: bytes) -> tuple[str, BytesIO, str]:
-        return (f"doodle{index}.png", BytesIO(payload), _mime_for(payload))
+        return (f"doodle{index}.png", BytesIO(payload), mime_for(payload))
 
     request_kwargs: dict[str, Any] = {
         "model": model,
@@ -607,7 +607,7 @@ def refine_with_openai(
         request_kwargs["mask"] = (
             "mask.png",
             BytesIO(mask_bytes),
-            _mime_for(mask_bytes),
+            mime_for(mask_bytes),
         )
 
     try:
@@ -666,7 +666,7 @@ def refine_with_google(
             *(
                 {
                     "type": "image",
-                    "mime_type": _mime_for(payload),
+                    "mime_type": mime_for(payload),
                     "data": base64.b64encode(payload).decode("ascii"),
                 }
                 for payload in pictures
@@ -760,7 +760,7 @@ def refine_with_recraft(
         fields["random_seed"] = str(int(random_seed))
 
     payload_bytes, content_type = _multipart_body(
-        fields, {"image": ("doodle.png", picture, _mime_for(picture))}
+        fields, {"image": ("doodle.png", picture, mime_for(picture))}
     )
     request = Request(
         RECRAFT_EDIT_ENDPOINT,
