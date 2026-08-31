@@ -24,10 +24,12 @@ from colouring_factory.characters import (
 )
 from colouring_factory.generators import GeneratorError
 from colouring_factory.models import GeneratedArtwork
+from colouring_factory.storage import load_settings, save_settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP = str(PROJECT_ROOT / "app.py")
 ARTWORK = (PROJECT_ROOT / "assets" / "demo_dinosaur.png").read_bytes()
+OTHER_ARTWORK = (PROJECT_ROOT / "assets" / "demo_robot_balloons.png").read_bytes()
 
 
 def _one_pixel_png() -> bytes:
@@ -337,6 +339,23 @@ def test_the_picker_label_is_a_count_never_a_list_of_names() -> None:
     assert "2 characters" in popover_labels
 
 
+def test_the_picker_carries_no_more_weight_than_its_siblings_on_the_line() -> None:
+    """The other three controls on the settings line pass type="tertiary" so
+    the row reads as plain grey text; this one must match or it will sit as
+    a visibly heavier, bordered pill against the rest of the line."""
+
+    _save_two_characters()
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+
+    picker = next(
+        popover
+        for popover in at.get("popover")
+        if popover.proto.popover.label == "nobody"
+    )
+    assert picker.proto.popover.type == "tertiary"
+
+
 def test_the_picker_is_hidden_until_a_character_exists() -> None:
     """The same rule the homepage already applies to Saved doodles (n)."""
 
@@ -423,3 +442,62 @@ def test_a_deleted_characters_name_is_dropped_rather_than_crashing_the_draw(
     assert len(captured["reference_images"]) == 1
     assert "Bo" in captured["prompt"]
     assert "Ida" not in captured["prompt"]
+
+
+def test_pairing_with_a_chosen_cast_draws_both_sheets_with_the_characters_in_both(
+    monkeypatch,
+) -> None:
+    """The grown-up pairing checkbox must not go silently ignored just
+    because a character is chosen. The reviewer proved that combination drew
+    one children's sheet, left the grown-up sheet's session keys empty and
+    kept the box ticked with nothing said about it. Pairing is one scene at
+    two detail levels, whether or not a cast is chosen, so the same reference
+    portraits and the same idea go through refine_with_provider a second
+    time, at grown-up detail."""
+
+    calls = []
+
+    def fake_refine(**kwargs):
+        calls.append(kwargs)
+        # Two distinguishable pictures, in call order, so the children's
+        # sheet and the grown-up sheet can be told apart afterwards.
+        image = ARTWORK if len(calls) == 1 else OTHER_ARTWORK
+        return GeneratedArtwork(
+            image_bytes=image,
+            prompt=kwargs["prompt"],
+            provider="OpenAI",
+            model="gpt-image-2",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    _save_two_characters()
+    save_settings(
+        {
+            **load_settings(),
+            "quick_pair_grown_up": True,
+            "quick_age_profile": "2-3 years",
+        }
+    )
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["chosen_characters"] = ["Ida"]
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "building a sandcastle"
+    at.run()
+
+    assert not at.exception
+    assert len(calls) == 2, "one sheet for them, one for the grown-up"
+    assert all("Ida" in call["prompt"] for call in calls), (
+        "the character must be in both readings of the scene, not just the first"
+    )
+    assert len(calls[0]["reference_images"]) == 1
+    assert len(calls[1]["reference_images"]) == 1
+
+    children_prompt, grown_up_prompt = calls[0]["prompt"], calls[1]["prompt"]
+    assert "6 to 12 large colouring regions" in children_prompt
+    assert "150 or more small colouring regions" in grown_up_prompt
+
+    assert at.session_state["current_raw"] == ARTWORK
+    assert at.session_state["pair_raw"] == OTHER_ARTWORK
+    assert at.session_state["pair_processed"] is not None
+    assert at.session_state["pair_pdf"] is not None

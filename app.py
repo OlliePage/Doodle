@@ -912,7 +912,7 @@ def _render_home_options() -> None:
                 if not count
                 else f"{count} character{'' if count == 1 else 's'}"
             )
-            with st.popover(label):
+            with st.popover(label, type="tertiary"):
                 st.caption("Doodle draws these characters into the picture.")
                 for character in cast:
                     st.checkbox(
@@ -1756,6 +1756,15 @@ def _quick_generate() -> None:
                 idea, wanted, provider_id=provider_id, api_key=api_key
             )
 
+        levels = [str(options["age_profile"])] * len(briefs)
+        if pairing:
+            # The same words describe the scene both times, so the two
+            # sheets show the same picture and only the drawing rules
+            # differ. True whether or not a cast is chosen: pairing is one
+            # scene drawn at two detail levels, never two different scenes.
+            levels.append(GROWN_UP_LEVEL)
+            briefs.append(briefs[0])
+
         model = _model_for(provider_id, spec, settings)
         # Medium rather than low: low quality renders more fine detail as pale
         # grey that the black/white pass then breaks up.
@@ -1768,8 +1777,9 @@ def _quick_generate() -> None:
             # references are the saved portraits, not the photographs: the
             # likeness survives that second hop, and it is what keeps the same
             # drawn character appearing in every picture instead of a fresh
-            # reading of their photo each time. Pairing with a grown-up sheet
-            # is not offered for a cast: one call per brief, nothing doubled.
+            # reading of their photo each time. refine_with_provider takes one
+            # prompt at a time, so pairing's second, grown-up-detail reading of
+            # the same scene is one more call in this list, not a second path.
             references = tuple(
                 load_character_image(character_id) for character_id, *_ in chosen
             )
@@ -1780,7 +1790,7 @@ def _quick_generate() -> None:
                     prompt=build_character_scene_prompt(
                         idea,
                         [(name, kind, marks) for _, name, kind, marks in chosen],
-                        age_profile=str(options["age_profile"]),
+                        age_profile=level,
                         style_name=str(options["style"]),
                         target="A4 page",
                         variation_brief=brief,
@@ -1790,15 +1800,8 @@ def _quick_generate() -> None:
                     size=spec.portrait_size,
                     quality=quality,
                 )
-                for brief in briefs
+                for level, brief in zip(levels, briefs)
             ]
-            for artwork, brief in zip(artworks, briefs):
-                artwork.metadata["brief"] = brief
-                artwork.metadata["detail_level"] = str(options["age_profile"])
-
-            st.session_state.candidates = artworks if len(artworks) > 1 else []
-            _adopt_artwork(artworks[0], idea)
-            st.session_state.pair_raw = None
         else:
 
             def _prompt_for(level: str, brief: str) -> str:
@@ -1811,17 +1814,9 @@ def _quick_generate() -> None:
                     variation_brief=brief,
                 )
 
-            levels = [str(options["age_profile"])] * len(briefs)
             prompts = [
                 _prompt_for(level, brief) for level, brief in zip(levels, briefs)
             ]
-            if pairing:
-                # The same words describe the scene both times, so the two
-                # sheets show the same picture and only the drawing rules
-                # differ.
-                levels.append(GROWN_UP_LEVEL)
-                briefs.append(briefs[0])
-                prompts.append(_prompt_for(GROWN_UP_LEVEL, briefs[0]))
             nonce = int(st.session_state.get("generation_nonce", 0))
             random_seed = int(
                 hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
@@ -1835,15 +1830,18 @@ def _quick_generate() -> None:
                 quality=quality,
                 random_seed=random_seed,
             )
-            for artwork, brief, level in zip(artworks, briefs, levels):
-                artwork.metadata["brief"] = brief
-                artwork.metadata["detail_level"] = level
 
-            grown_up = artworks[-1] if pairing else None
-            for_children = artworks[:-1] if pairing else artworks
-            st.session_state.candidates = for_children if len(for_children) > 1 else []
-            _adopt_artwork(for_children[0], idea)
-            st.session_state.pair_raw = grown_up.image_bytes if grown_up else None
+        for artwork, brief, level in zip(artworks, briefs, levels):
+            artwork.metadata["brief"] = brief
+            artwork.metadata["detail_level"] = level
+
+        # Shared by both paths above: the pair is the last artwork drawn at
+        # GROWN_UP_LEVEL, whichever mechanism drew it.
+        grown_up = artworks[-1] if pairing else None
+        for_children = artworks[:-1] if pairing else artworks
+        st.session_state.candidates = for_children if len(for_children) > 1 else []
+        _adopt_artwork(for_children[0], idea)
+        st.session_state.pair_raw = grown_up.image_bytes if grown_up else None
 
     _prepare_quick_outputs()
     _prepare_pair_outputs()
