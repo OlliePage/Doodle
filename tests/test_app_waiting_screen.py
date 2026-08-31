@@ -289,7 +289,7 @@ def test_the_screen_insists_on_its_own_centring(monkeypatch) -> None:
         assert declaration in container, f"{declaration} is not marked important"
 
 
-def test_the_shapes_cannot_be_clipped(monkeypatch) -> None:
+def test_the_craft_tools_cannot_be_clipped(monkeypatch) -> None:
     """They used to scroll past a window, and were sliced by it.
 
     A step of 2.4rem is 38.4 pixels while the window rounded to 38, and the
@@ -302,13 +302,38 @@ def test_the_shapes_cannot_be_clipped(monkeypatch) -> None:
     style = _generating_style(at)
 
     assert "drawing-reel__strip" not in style, "the scrolling strip is back"
-    assert "position:absolute" in style.split(".drawing-reelspan{", 1)[1][:120]
+    assert "position:absolute" in style.split(".drawing-reelsvg{", 1)[1][:140]
 
     markup = next(
         str(b.value) for b in at.markdown if 'class="drawing-reel"' in str(b.value)
     )
     assert "drawing-reel__strip" not in markup
-    assert markup.count("<span>") == 6, "six shapes, one per wordmark colour"
+    assert markup.count("<svg") == 6, "six tools, one per wordmark colour"
+
+
+def test_the_waiting_shapes_are_things_from_a_craft_table(monkeypatch) -> None:
+    """The shapes these replaced were circles, triangles and squares, which
+    moved but meant nothing in a drawing app. Each one carries the name a
+    screen reader reads out, which is also what makes this checkable."""
+
+    at = _frozen(monkeypatch)
+    markup = next(
+        str(b.value) for b in at.markdown if 'class="drawing-reel"' in str(b.value)
+    )
+
+    for tool in (
+        "a pencil",
+        "a pencil sharpener",
+        "a ruler",
+        "an eraser",
+        "a sheet of paper",
+        "a pair of scissors",
+    ):
+        assert f'aria-label="{tool}"' in markup, f"{tool} is missing"
+
+    # Drawn rather than typed, so nothing here can fall foul of the rule
+    # against emoji or land on a font that does not have the character.
+    assert "viewBox" in markup and "stroke" not in markup.split(">")[0]
 
 
 def test_the_charging_small_print_is_behind_a_question_mark(monkeypatch) -> None:

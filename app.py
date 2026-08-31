@@ -789,12 +789,19 @@ def _start_version_chain(artwork) -> None:
     st.session_state.current_version = 0
 
 
-def _render_top_bar(*, where: str) -> None:
-    """The logo and the two routes that must never be more than one click away.
+def _render_brand_home(where: str, *, centred: bool = False) -> None:
+    """The wordmark, and it goes home when pressed.
 
-    Starting a fresh doodle used to mean scrolling past the change box to a
-    button at the very bottom, and reaching the saved doodles meant finding
-    Doodle Studio first.
+    Every app with a logo in the corner has taught people that pressing it
+    goes home. Streamlit cannot make a markdown block clickable and an anchor
+    cannot be clicked in a test, so a real button is laid over the wordmark:
+    it carries the label a screen reader announces, and the styling below
+    makes it invisible.
+
+    This is a function rather than four copies because it was three copies,
+    and the two screens that drew the wordmark on their own — the saved
+    doodles and the connection screen — each drew a dead one. Any screen
+    wanting the wordmark now gets the route with it.
     """
 
     # The one place besides the homepage where injected styling is needed, and
@@ -816,21 +823,29 @@ def _render_top_bar(*, where: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+    with st.container(key=f"doodle-brand-{where}"):
+        st.markdown(
+            _doodle_logo("compact", centred=centred), unsafe_allow_html=True
+        )
+        if st.button(
+            "Doodle, back to the homepage",
+            key=f"top_brand_{where}",
+            type="tertiary",
+        ):
+            _start_new_doodle()
+
+
+def _render_top_bar(*, where: str) -> None:
+    """The logo and the two routes that must never be more than one click away.
+
+    Starting a fresh doodle used to mean scrolling past the change box to a
+    button at the very bottom, and reaching the saved doodles meant finding
+    Doodle Studio first.
+    """
+
     brand, saved, fresh = st.columns([3, 1.5, 1.3])
     with brand:
-        # The wordmark goes home, because every app with a logo in the corner
-        # has taught people that it does. Streamlit has no way to make a
-        # markdown block clickable, and an anchor cannot be clicked in a test,
-        # so a real button is laid over the logo instead: it carries the label
-        # a screen reader announces, and the CSS below makes it invisible.
-        with st.container(key=f"doodle-brand-{where}"):
-            st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
-            if st.button(
-                "Doodle, back to the homepage",
-                key=f"top_brand_{where}",
-                type="tertiary",
-            ):
-                _start_new_doodle()
+        _render_brand_home(where)
     with saved:
         count = _saved_doodle_count()
         if st.button(
@@ -1327,7 +1342,7 @@ def _render_library_grid() -> None:
 
 
 def _render_library_screen() -> None:
-    st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
+    _render_brand_home("library")
     st.header("Saved doodles")
     st.caption(f"Kept on this computer, in {data_root()}.")
 
@@ -2037,7 +2052,7 @@ def _render_connection_setup() -> None:
             st.session_state.connection_error = None
             st.rerun()
     with top_middle:
-        st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
+        _render_brand_home("connect", centred=True)
     with top_right:
         st.empty()
 
@@ -3005,6 +3020,58 @@ _WAITING_CHART_CSS = """
 """
 
 
+# The things on a craft table, drawn the way Doodle draws: black outlines on
+# white, nothing filled in. The shapes they replaced were circles, triangles
+# and squares, which moved but meant nothing here.
+#
+# Drawn rather than typed because most of these have no character to type. A
+# pencil and a pair of scissors exist as text symbols, but a sharpener, an
+# eraser and a ruler do not, and the emoji that come closest sit in the range
+# tests/test_ui_conventions.py refuses. Line art also matches the pages this
+# app makes, which a font glyph would not.
+_CRAFT_TOOLS = (
+    (
+        "a pencil",
+        '<path d="M12 52l3-11L41 15l8 8-26 26z"/>'
+        '<path d="M15 41l8 8"/><path d="M35 21l8 8"/>',
+    ),
+    (
+        "a pencil sharpener",
+        '<rect x="22" y="24" width="28" height="18" rx="3"/>'
+        '<path d="M22 28l-10 6 10 6"/><path d="M36 24v18"/>',
+    ),
+    (
+        "a ruler",
+        '<rect x="8" y="25" width="48" height="16" rx="2"/>'
+        '<path d="M18 25v6M28 25v4M38 25v6M48 25v4"/>',
+    ),
+    (
+        "an eraser",
+        '<path d="M16 45l8-20h22l-8 20z"/><path d="M21 33h22"/>',
+    ),
+    (
+        "a sheet of paper",
+        '<path d="M18 10h20l10 10v34H18z"/><path d="M38 10v10h10"/>'
+        '<path d="M25 30h14M25 38h14M25 46h9"/>',
+    ),
+    (
+        "a pair of scissors",
+        '<path d="M18 12l22 30"/><path d="M46 12L24 42"/>'
+        '<circle cx="20" cy="48" r="6"/><circle cx="44" cy="48" r="6"/>',
+    ),
+)
+
+
+def _craft_tools_html() -> str:
+    """The six tools as one block, each taking its turn."""
+
+    drawings = "".join(
+        f'<svg viewBox="0 0 64 64" role="img" aria-label="{label}">{paths}</svg>'
+        for label, paths in _CRAFT_TOOLS
+    )
+    return f'<div class="drawing-reel" aria-hidden="true">{drawings}</div>'
+
+
 def _current_settings_key() -> str:
     """What makes this drawing comparable with past ones."""
 
@@ -3113,42 +3180,40 @@ def _render_generating_screen() -> None:
              reads as this app's rather than as a stock loader. Three of them
              are PlayStation face buttons, which was the reference asked for.
              The cross is left out on purpose: a cross reads as an error. */
-          /* The six shapes sit on top of one another and take turns being
+          /* The six tools sit on top of one another and take turns being
              visible, rather than scrolling past a window. The scrolling version
              clipped: a step of 2.4rem is 38.4 pixels, the window rounded to 38,
              and the error accumulated until a slice of the next shape showed
              above the current one. Stacked, there is no window to be sliced by
-             and no arithmetic to drift. Each shape is centred in the box, so
-             Georgia's very different glyph widths no longer make them wander
-             from side to side either. */
+             and no arithmetic to drift. */
           .drawing-reel{
-            position:relative;height:44px;margin:.9rem auto .35rem;
-            font-family:Georgia,serif;font-size:26px;line-height:1;
+            position:relative;height:82px;width:82px;margin:1rem auto .45rem;
           }
-          .drawing-reel span{
-            position:absolute;inset:0;
-            display:flex;align-items:center;justify-content:center;
+          .drawing-reel svg{
+            position:absolute;inset:0;width:82px;height:82px;
+            fill:none;stroke-width:3.2;
+            stroke-linecap:round;stroke-linejoin:round;
             opacity:0;animation:drawing-reel 4.8s linear infinite;
           }
           @keyframes drawing-reel{
             0%,16.6%{opacity:1}
             16.7%,100%{opacity:0}
           }
-          .drawing-reel span:nth-child(1){animation-delay:0s}
-          .drawing-reel span:nth-child(2){animation-delay:.8s}
-          .drawing-reel span:nth-child(3){animation-delay:1.6s}
-          .drawing-reel span:nth-child(4){animation-delay:2.4s}
-          .drawing-reel span:nth-child(5){animation-delay:3.2s}
-          .drawing-reel span:nth-child(6){animation-delay:4s}
-          .drawing-reel span:nth-child(1){color:#4f46e5;rotate:-4deg;}
-          .drawing-reel span:nth-child(2){color:#f45b69;rotate:3deg;}
-          .drawing-reel span:nth-child(3){color:#f5a623;rotate:-2deg;}
-          .drawing-reel span:nth-child(4){color:#16a085;rotate:3deg;}
-          .drawing-reel span:nth-child(5){color:#8b5cf6;rotate:-3deg;}
-          .drawing-reel span:nth-child(6){color:#0ea5e9;rotate:2deg;}
+          .drawing-reel svg:nth-child(1){animation-delay:0s}
+          .drawing-reel svg:nth-child(2){animation-delay:.8s}
+          .drawing-reel svg:nth-child(3){animation-delay:1.6s}
+          .drawing-reel svg:nth-child(4){animation-delay:2.4s}
+          .drawing-reel svg:nth-child(5){animation-delay:3.2s}
+          .drawing-reel svg:nth-child(6){animation-delay:4s}
+          .drawing-reel svg:nth-child(1){stroke:#4f46e5;rotate:-4deg;}
+          .drawing-reel svg:nth-child(2){stroke:#f45b69;rotate:3deg;}
+          .drawing-reel svg:nth-child(3){stroke:#f5a623;rotate:-2deg;}
+          .drawing-reel svg:nth-child(4){stroke:#16a085;rotate:3deg;}
+          .drawing-reel svg:nth-child(5){stroke:#8b5cf6;rotate:-3deg;}
+          .drawing-reel svg:nth-child(6){stroke:#0ea5e9;rotate:2deg;}
           @media (prefers-reduced-motion: reduce){
-            .drawing-reel span{animation:none;opacity:0;}
-            .drawing-reel span:nth-child(1){opacity:1;}
+            .drawing-reel svg{animation:none;opacity:0;}
+            .drawing-reel svg:nth-child(1){opacity:1;}
           }
           /* The homepage's settings line answers questions this screen has
              already moved past; left on screen it renders beneath the
@@ -3164,13 +3229,7 @@ def _render_generating_screen() -> None:
     st.markdown(
         '<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True
     )
-    st.markdown(
-        '<div class="drawing-reel" aria-hidden="true">'
-        "<span>\u25cb</span><span>\u25b3</span><span>\u25a1</span>"
-        "<span>\u25c7</span><span>\u2726</span><span>\u2727</span>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown(_craft_tools_html(), unsafe_allow_html=True)
     safe_idea = html.escape(str(st.session_state.get("generation_idea", "")))
     st.markdown('<div class="drawing-label">Now drawing</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="drawing-idea">{safe_idea}</div>', unsafe_allow_html=True)

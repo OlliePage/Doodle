@@ -342,25 +342,57 @@ def test_the_result_screen_survives_unprepared_outputs() -> None:
     assert not at.exception
 
 
+# Screens that draw the wordmark and deliberately do not make it a route,
+# each with the reason. Anything not listed here must go home when pressed.
+BRAND_WITHOUT_A_ROUTE = {
+    "home": "already home",
+    "generate": "a drawing is in flight and has been paid for; leaving it "
+    "silently would waste the picture, and Stop drawing is the way out",
+}
+
+
+def _screens_that_draw_the_wordmark() -> list[str]:
+    """Read them out of the source rather than listing them by hand.
+
+    The earlier version of this test named two screens, so the saved doodles
+    screen and the connection screen each shipped a wordmark that did nothing
+    when pressed, and no test noticed. Anything calling _render_brand_home or
+    _render_top_bar is checked now, and a new screen joins automatically.
+    """
+
+    source = Path(APP).read_text()
+    where = set()
+    for call in ("_render_brand_home(", '_render_top_bar(where='):
+        for fragment in source.split(call)[1:]:
+            argument = fragment.split(")")[0].split(",")[0].strip()
+            if argument.startswith(("'", '"')):
+                where.add(argument.strip("'\""))
+    return sorted(where)
+
+
 def test_the_wordmark_goes_home_from_every_screen_that_carries_it() -> None:
     """The logo in the corner is a route, not decoration.
 
     Every app with a wordmark in the top-left has taught people that pressing
     it goes home, and this one did nothing. Streamlit cannot make a markdown
     block clickable and a plain anchor cannot be clicked in a test, so a real
-    button is laid over the logo — which means this test has to click it, or
-    the invisible button could sit there dead and nobody would know.
+    button is laid over the logo, which means this test has to click it or the
+    invisible button could sit there dead and nobody would know.
     """
 
-    for screen in ("result", "studio"):
+    screens = _screens_that_draw_the_wordmark()
+    assert len(screens) >= 5, f"only found {screens}; the scan has stopped working"
+
+    for screen in screens:
+        if screen in BRAND_WITHOUT_A_ROUTE:
+            continue
         at = AppTest.from_file(APP, default_timeout=120)
-        at.session_state["screen"] = screen
+        at.session_state["screen"] = "library" if screen == "library" else screen
         at.session_state["current_raw"] = ARTWORK
         at.session_state["current_title"] = "A blue dinosaur"
         at.session_state["current_metadata"] = {"source": "test"}
-        if screen == "result":
-            at.session_state["quick_processed"] = ARTWORK
-            at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+        at.session_state["quick_processed"] = ARTWORK
+        at.session_state["quick_pdf"] = b"%PDF-1.4 test"
         at.run()
 
         brand = [
@@ -368,11 +400,11 @@ def test_the_wordmark_goes_home_from_every_screen_that_carries_it() -> None:
             for button in at.button
             if button.label == "Doodle, back to the homepage"
         ]
-        assert brand, f"no wordmark button on the {screen} screen"
+        assert brand, f"the wordmark on the {screen} screen does nothing"
 
         brand[0].click().run()
 
-        assert not at.exception
+        assert not at.exception, f"{screen}: {[str(e.value) for e in at.exception]}"
         assert at.session_state["screen"] == "home", (
             f"the wordmark did not go home from the {screen} screen"
         )
