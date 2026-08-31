@@ -8,7 +8,11 @@ def test_homepage_is_branded_and_minimal() -> None:
 
     assert 'page_title="Doodle"' in app_source
     assert "doodle-logo--hero" in app_source
-    assert 'placeholder="What shall we draw?"' in app_source
+    # The bar asks a different question once a picture has been dropped onto
+    # it, so the placeholder is an expression rather than a literal keyword
+    # argument. Both readings are pinned here.
+    assert '"What shall we draw?"' in app_source
+    assert '"What shall we draw with it?"' in app_source
     assert '[data-testid="stSidebar"] {display: none !important;}' in app_source
     assert 'st.title("Colouring Factory")' not in app_source
 
