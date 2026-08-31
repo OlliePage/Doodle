@@ -83,3 +83,49 @@ def test_the_privacy_paragraph_does_not_claim_everything_else_stays_put() -> Non
 
     text = _about_tab_text().lower()
     assert "everything else stays on this computer" not in text
+
+
+def test_the_privacy_paragraph_discloses_the_appearance_description_being_sent() -> (
+    None
+):
+    """The same omission FB-10 fixed for `marks` recurred for `appearance`.
+
+    `describe_appearance` drafts a "how they really look" description from
+    the photo (colouring_factory/appearance.py), and build_caricature_prompt
+    / build_character_scene_prompt both interpolate it alongside `marks` on
+    every portrait, scene and badge (colouring_factory/prompts.py). The
+    paragraph enumerated only "what makes them recognisable" and stayed
+    silent about this second, newer description field.
+    """
+
+    sentences = re.split(r"(?<=[.!?])\s+", _about_tab_text())
+    assert any(
+        "photograph" in sentence.lower()
+        and ("sent" in sentence.lower() or "sends" in sentence.lower())
+        and "look" in sentence.lower()
+        for sentence in sentences
+    ), "no sentence discloses that how they look is sent alongside the photograph"
+
+
+def test_the_privacy_paragraph_explains_a_retried_request_is_ordinary() -> None:
+    """FB-14: the OpenAI client is built with `max_retries=2`
+
+    (colouring_factory/generators.py), so a busy or dropped connection can
+    resend the whole request, photograph included, up to three times, and
+    the parent sees an ordinary success throughout. The paragraph should say
+    this plainly rather than let "sent" imply exactly one transmission.
+    """
+
+    text = _about_tab_text().lower()
+    assert "again" in text and ("dropped connection" in text or "retr" in text), (
+        "no mention that a dropped connection can resend the same request"
+    )
+
+
+def test_the_privacy_paragraph_does_not_claim_the_request_is_sent_only_once() -> None:
+    """Regression guard: a retry is ordinary and must not be described as a
+    single guaranteed transmission."""
+
+    text = _about_tab_text().lower()
+    assert "sent once" not in text
+    assert "only once" not in text
