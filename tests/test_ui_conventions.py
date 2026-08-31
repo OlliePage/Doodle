@@ -156,6 +156,64 @@ def test_uploader_and_toggle_labels_are_checked() -> None:
     assert any("upload" in label.lower() for label in labels)
 
 
+class _FakeFamily(list):
+    """One widget family's worth of labelled stand-ins, from a fake AppTest."""
+
+
+class _FakeWidget:
+    def __init__(self, label: str) -> None:
+        self.label = label
+
+
+class _FakeAt:
+    """Stands in for AppTest so the sweep can be proven to visit every
+    family without app.py needing a real toggle or multiselect of its own —
+    neither widget type is used anywhere in the app today, so a sweep over
+    the real app can never prove those two lines of _all_labels still run."""
+
+    def __init__(self, families: dict[str, list[str]]) -> None:
+        self._families = families
+
+    def __getattr__(self, name: str) -> _FakeFamily:
+        return _FakeFamily(_FakeWidget(label) for label in self._families.get(name, []))
+
+    def get(self, name: str) -> _FakeFamily:
+        return _FakeFamily(_FakeWidget(label) for label in self._families.get(name, []))
+
+
+def test_the_label_sweep_visits_every_widget_family_it_names() -> None:
+    """On 2026-08-30 dropping file_uploader, toggle and multiselect from
+    _all_labels left every existing test green, because the only test
+    naming them (above) drives the real app, which has no toggle or
+    multiselect for the dropped lines to have ever caught. One label per
+    family, on a fake double, proves each accessor is actually reached:
+    drop any one of the three .get(...) calls this test names and this
+    test fails by the label going missing."""
+
+    fake = _FakeAt(
+        {
+            "button": ["real button"],
+            "link_button": ["real link button"],
+            "download_button": ["real download button"],
+            "text_input": ["real text input"],
+            "text_area": ["real text area"],
+            "number_input": ["real number input"],
+            "selectbox": ["real selectbox"],
+            "radio": ["real radio"],
+            "checkbox": ["real checkbox"],
+            "slider": ["real slider"],
+            "segmented_control": ["real segmented control"],
+            "file_uploader": ["Add a picture"],
+            "toggle": ["Show suggested colours"],
+            "multiselect": ["Choose several"],
+        }
+    )
+
+    labels = _all_labels(fake)
+    for expected in ("Add a picture", "Show suggested colours", "Choose several"):
+        assert expected in labels, f"{expected!r} missing from {labels}"
+
+
 def test_no_control_uses_a_typed_glyph_as_an_icon() -> None:
     offenders = []
     for at in _every_screen():
