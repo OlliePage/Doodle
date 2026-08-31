@@ -352,3 +352,26 @@ def test_a_killed_process_leaves_a_swept_orphan_not_a_permanent_one() -> None:
 
     assert names == ["Kept"]
     assert not orphan.exists()
+
+
+def test_a_character_json_whose_id_disagrees_with_its_folder_uses_the_folder() -> None:
+    """DATA-03: the folder name is what the filesystem — and delete_character,
+    which resolves by folder — actually guarantees. Trusting a JSON id that
+    disagrees with it is how a hand-edited record vanishes from every
+    listing with no error."""
+
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+    )
+    folder = characters_root() / character_id
+    path = folder / "character.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["id"] = "some-other-id-entirely"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    characters = list_characters()
+    assert [c.name for c in characters] == ["Ida"]
+    assert characters[0].id == character_id
+
+    loaded = load_character(character_id)
+    assert loaded.id == character_id

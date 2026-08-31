@@ -174,7 +174,12 @@ def _read(folder: Path) -> Character | None:
     # still yields something drawable rather than crashing the homepage.
     kind = str(payload.get("kind", "person"))
     return Character(
-        id=str(payload.get("id", folder.name)),
+        # The folder name, not the JSON's own "id" field: _folder_for,
+        # delete_character and every path lookup resolve by folder name, so
+        # a hand-edited id that disagrees with it must never be trusted —
+        # that disagreement is exactly how DATA-03 made a record vanish from
+        # every listing with no error.
+        id=folder.name,
         name=str(payload.get("name", "")).strip() or "Someone",
         kind=kind if kind in CHARACTER_KINDS else "person",
         marks=str(payload.get("marks", "")),
