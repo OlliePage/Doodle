@@ -69,10 +69,21 @@ def prepare_photo(photo_bytes: bytes, max_edge: int = MAX_PHOTO_EDGE_PX) -> byte
     return output.getvalue()
 
 
+_HIGH_BIT_DEPTH_MODES = ("I", "I;16", "I;16B", "I;16L", "I;16N")
+
+
 def _flatten_to_white(image: Image.Image) -> Image.Image:
     # Deliberately duplicated from image_processing._flatten_to_white: that copy
     # serves the colouring-page pipeline and this one serves photo intake, and
     # coupling them would let a change meant for one silently alter the other.
+    if image.mode in _HIGH_BIT_DEPTH_MODES:
+        # A 16-bit-per-channel greyscale PNG — routine output from a flatbed
+        # scanner — opens in one of these modes holding values up to 65535.
+        # Image.convert("RGB") on them clips anything above 255 instead of
+        # rescaling, so a genuine mid-tone photograph comes out solid white.
+        # Dividing down first, while the full range is still there, is what
+        # makes the later convert lossless rather than a clip.
+        image = image.point(lambda value: value / 257).convert("L")
     if image.mode in ("RGBA", "LA") or "transparency" in image.info:
         rgba = image.convert("RGBA")
         background = Image.new("RGBA", rgba.size, "white")

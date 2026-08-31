@@ -174,6 +174,51 @@ def test_an_implausibly_large_declared_size_is_refused() -> None:
         prepare_photo(_oversized_header_png())
 
 
+def _16bit_greyscale_png(size=(8, 8), fill=40000) -> bytes:
+    """A real 16-bit-per-pixel greyscale PNG, built by hand.
+
+    Pillow can decode this format but not encode it without triggering its
+    own deprecation warning for saving "I" mode as PNG, so the bytes are
+    assembled directly the way _oversized_header_png above does — this is
+    what a flatbed scanner or an image editor produces routinely, not an
+    exotic input.
+    """
+
+    width, height = size
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data))
+        )
+
+    signature = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", width, height, 16, 0, 0, 0, 0)
+    raw = b"".join(b"\x00" + struct.pack(">H", fill) * width for _row in range(height))
+    idat = zlib.compress(raw)
+    return signature + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+
+
+def test_a_16bit_photo_is_rescaled_not_clipped_to_white() -> None:
+    # Pillow opens a 16-bit greyscale PNG as mode I;16, holding values up to
+    # 65535; converting that straight to RGB clips anything over 255 instead
+    # of rescaling, so a genuine mid-tone photograph came out a blank white
+    # square while prepare_photo still reported success.
+    source = _16bit_greyscale_png(fill=40000)
+    assert Image.open(BytesIO(source)).mode in ("I", "I;16")
+
+    prepared = prepare_photo(source)
+    reopened = Image.open(BytesIO(prepared))
+
+    assert reopened.mode == "RGB"
+    pixel = reopened.getpixel((0, 0))
+    assert pixel != (255, 255, 255), "the photo came out a blank white square"
+    # 40000 / 257 == 155.6; allow a little slack for the floor division.
+    assert all(150 <= channel <= 160 for channel in pixel), pixel
+
+
 def test_a_heic_photograph_can_be_read() -> None:
     pillow_heif = pytest.importorskip("pillow_heif")
     source = Image.new("RGB", (120, 80), (200, 30, 40))
