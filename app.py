@@ -36,7 +36,7 @@ from colouring_factory.characters import (
     update_character,
     update_character_portrait,
 )
-from colouring_factory.demo import list_demo_artwork
+from colouring_factory.demo import assets_directory, list_demo_artwork
 from colouring_factory.credentials import (
     delete_provider_key,
     mask_key,
@@ -779,9 +779,21 @@ def _render_homepage() -> None:
              padding grows to make room. Nothing moves when there is no
              picture, because none of this renders. */
           div[data-testid="stForm"] {position: relative;}
+          /* Both of these are centred against the pill, not against the form.
+             The pill starts 16px below the form's top edge, so a fixed top
+             measured from the form left the thumbnail 16px high and the cross
+             12px high — visible as soon as a real photograph was dropped, and
+             invisible to a check that only measured left and right. Giving
+             each wrapper the pill's own height and centring inside it keeps
+             them true whatever the wrapped control turns out to measure. */
           .st-key-doodle-home-thumb {
             position: absolute;
-            top: 15px;
+            /* 16px down to the pill's top edge, then half the difference
+               between the pill's 64px and this 34px thumbnail. Streamlit
+               wraps an image in five nested containers that each shrink to
+               its height, so flex centring on this wrapper never reaches it
+               and the offset has to be stated. */
+            top: 31px;
             left: max(1rem, calc(50% - 365px + 1rem));
             z-index: 3;
             width: 34px;
@@ -809,7 +821,9 @@ def _render_homepage() -> None:
              not siblings and nth-of-type never matches either of them. */
           .st-key-doodle-home-clear {
             position: absolute;
-            top: 12px;
+            /* 16px to the pill's top, then half of 64px minus this button's
+               own 48px. */
+            top: 24px;
             right: max(1rem, calc(50% - 365px + 1rem));
             z-index: 3;
             width: auto;
@@ -920,6 +934,10 @@ def _render_homepage() -> None:
             }
             .doodle-logo--hero {font-size: clamp(4.1rem, 22vw, 6rem); margin-bottom: 1.9rem;}
             div[data-testid="stTextInput"] > div > div {min-height: 58px;}
+            /* The pill loses 6px on a narrow screen, so both things centred
+               against it come up 3px. */
+            .st-key-doodle-home-thumb {top: 28px;}
+            .st-key-doodle-home-clear {top: 21px;}
             div[data-testid="stTextInput"] input {height: 56px; font-size: 1rem; padding: 0 1.3rem !important;}
           }
         </style>
@@ -1359,6 +1377,83 @@ def _remember_chosen(character_id: str) -> None:
     )
 
 
+# What each style gives you, in one line, shown under its name. The example
+# pictures beside them were drawn by Doodle itself at that setting, so a parent
+# is looking at the real answer rather than a schematic of it.
+# Not a STYLE_PRESETS entry and never written to settings.json. It is a mode
+# with a session-scoped prerequisite — the dropped picture — dressed as a
+# style, so keeping it out of the persisted list is what stops the app booting
+# tomorrow into a caricature with nothing to caricature.
+CARICATURE_STYLE = "A caricature"
+
+STYLE_BLURBS = {
+    "A scene": "The subject doing something, somewhere.",
+    "Just the things": "One to three big objects, nothing behind them.",
+    CARICATURE_STYLE: "Your picture drawn the way a seaside artist would.",
+}
+
+STYLE_EXAMPLES = {
+    "A scene": "style_a_scene.png",
+    "Just the things": "style_just_the_things.png",
+    CARICATURE_STYLE: "style_a_caricature.png",
+}
+
+
+@st.cache_data(show_spinner=False)
+def _style_example(filename: str) -> bytes | None:
+    """The committed example drawing for a style, or nothing if it is missing.
+
+    Missing is survivable on purpose: the picker still lists the style by name
+    with its sentence, so a lost or not-yet-drawn example costs the illustration
+    and not the control.
+    """
+
+    path = assets_directory() / filename
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _render_style_picker(current: str, *, caricature: bool) -> str:
+    """One row per style: an example drawing, its name, and what it gives you.
+
+    `caricature` is the only style that cannot be chosen ahead of time, because
+    it needs a picture to work from. It is offered only while one is attached
+    and is never written to the settings file — a style saved to disk would
+    bring the app back tomorrow set to caricature with nothing to caricature.
+    """
+
+    offered = [*QUICK_STYLE_CHOICES]
+    if caricature:
+        offered.append(CARICATURE_STYLE)
+
+    chosen = current if current in offered else QUICK_STYLE_CHOICES[0]
+    if st.session_state.get("home_style") in offered:
+        chosen = str(st.session_state["home_style"])
+
+    st.caption("Drawing style")
+    for name in offered:
+        example = _style_example(STYLE_EXAMPLES.get(name, ""))
+        picture_col, words_col = st.columns([1, 3], vertical_alignment="center")
+        with picture_col:
+            if example is not None:
+                st.image(example, width=76)
+        with words_col:
+            picked = name == chosen
+            if st.button(
+                name,
+                key=f"home_style_pick_{_slug(name)}",
+                type="primary" if picked else "tertiary",
+                width="stretch",
+                disabled=picked,
+            ):
+                st.session_state.home_style = name
+                st.rerun()
+            st.caption(STYLE_BLURBS.get(name, ""))
+    return chosen
+
+
 def _render_home_options() -> None:
     """The questions the homepage asks before it draws anything.
 
@@ -1373,6 +1468,7 @@ def _render_home_options() -> None:
 
     settings = load_settings()
     options = quick_drawing_options(settings)
+    dropped = _dropped_picture()
 
     # Read the widgets' own state for the labels. The saved settings are one
     # rerun behind the control the user has just moved, so a label built from
@@ -1435,12 +1531,11 @@ def _render_home_options() -> None:
             else:
                 pair_grown_up = False
         with st.popover(str(shown_style).lower(), type="tertiary"):
-            style = st.selectbox(
-                "Drawing style",
-                list(QUICK_STYLE_CHOICES),
-                index=list(QUICK_STYLE_CHOICES).index(options["style"]),
-                key="home_style",
-            )
+            # A name and an example, not a name alone. "Simple objects" and
+            # "Badge portrait" told a parent nothing about what they would get,
+            # so the only way to find out was to buy a drawing and look at it.
+            # Each row is the picture Doodle actually returns at that setting.
+            style = _render_style_picker(options["style"], caricature=bool(dropped))
         # Rendered from the first run, unlike Saved doodles (n) in the
         # corner: hiding this until a cast existed left no control anywhere
         # that reached the characters screen, so a parent could never add
@@ -1519,7 +1614,16 @@ def _render_home_options() -> None:
     chosen = {
         "quick_alternatives": int(alternatives or options["alternatives"]),
         "quick_age_profile": str(age_profile or options["age_profile"]),
-        "quick_style": str(style or options["style"]),
+        # The caricature is deliberately excluded, so choosing it keeps
+        # whatever was saved before. It needs a dropped picture to mean
+        # anything, and a picture lives only in this session — saving it would
+        # bring the app back tomorrow set to a style it cannot honour, with
+        # the badge redraw and Studio's own profile list inheriting it too.
+        "quick_style": str(
+            options["style"]
+            if style == CARICATURE_STYLE
+            else (style or options["style"])
+        ),
         "quick_pair_grown_up": bool(pair_grown_up),
     }
     if any(settings.get(key) != value for key, value in chosen.items()):
@@ -2275,7 +2379,18 @@ def _render_refine_controls(*, key_prefix: str) -> None:
     model = _model_for(provider_id, spec, settings)
 
     try:
-        prompt = build_refinement_prompt(instruction)
+        # Passed rather than left to default. The defaults are the toddler
+        # ones, so every change to every picture was re-rendered at "2-3 years"
+        # however the picture had been drawn: asking a grown-up mandala for a
+        # party hat told the model to aim for 6 to 12 large regions and use
+        # very thick outlines. Nothing on screen said so, and the picture came
+        # back coarser than it went in.
+        refine_options = quick_drawing_options(settings)
+        prompt = build_refinement_prompt(
+            instruction,
+            style_name=str(refine_options["style"]),
+            age_profile=str(refine_options["age_profile"]),
+        )
         with _mark_in_flight(refine_busy_key):
             with st.spinner("Making that change…"):
                 artwork = refine_with_provider(
@@ -2789,6 +2904,36 @@ def _build_generation_plan(idea: str) -> None:
 
     chosen = _cast_for_drawing()
     dropped = _dropped_picture()
+
+    # A caricature is one picture of one thing, not a scene, so it takes the
+    # short road out of here before any of the scene machinery runs. Several
+    # alternatives would be identical, because the caricature builder takes no
+    # variation brief; pairing would draw the same face twice; and the picture
+    # is composed for a square rather than an A4 page.
+    if dropped and str(st.session_state.get("home_style", "")) == CARICATURE_STYLE:
+        st.session_state.generation_jobs = [
+            {
+                "prompt": build_caricature_prompt(
+                    "",
+                    "object",
+                    "",
+                    str(st.session_state.get("dropped_picture_appearance", "")),
+                    age_profile=str(options["age_profile"]),
+                ),
+                "level": str(options["age_profile"]),
+                "brief": "",
+                "square": True,
+            }
+        ]
+        st.session_state.generation_collected = []
+        st.session_state.generation_seconds = []
+        st.session_state.generation_uses_references = True
+        st.session_state.generation_references = (dropped,)
+        st.session_state.generation_chosen_ids = []
+        st.session_state.generation_pairing = False
+        st.session_state.generation_random_seed_base = 0
+        return
+
     if dropped and chosen:
         # The cast picker gives a slot back while a picture is attached, but
         # only by disabling further ticks — an already-ticked box stays enabled
@@ -2914,7 +3059,10 @@ def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
             prompt=job["prompt"],
             reference_images=st.session_state.generation_references,
             model=model,
-            size=spec.portrait_size,
+            # A caricature is framed with clear space all round rather than
+            # composed for a portrait page, and the characters screen already
+            # draws its own on a square for the same reason.
+            size=spec.square_size if job.get("square") else spec.portrait_size,
             quality=quality,
         )
     else:
@@ -3143,8 +3291,10 @@ def _render_badge_strip() -> None:
     spec = get_provider(provider_id)
     api_key, _source = _provider_key(provider_id)
 
-    with st.container(border=True):
-        st.markdown("**Your badge**")
+    # Collapsed by default. The preview is a full-width circle, and left open
+    # it was the tallest thing on the result screen for a parent who only
+    # wanted the A4 sheet.
+    with st.expander("Your badge"):
         st.image(preview, width="stretch")
         st.caption(
             "Your doodle fitted to a 58 mm badge. Doodle can draw it again "
@@ -3859,13 +4009,18 @@ def _render_first_result() -> None:
     )
 
     _render_grown_up_sheet()
-    _render_badge_strip()
 
     # This box used to rewrite the original idea and draw a new picture from
     # scratch. Since alternatives started coming back genuinely different, that
     # no longer returned anything like what was on screen; it now changes the
     # picture itself.
     _render_refine_controls(key_prefix="result")
+
+    # Below changing the picture, not above it. Changing what is on screen is
+    # the thing a parent reaches for next; the badge is an extra errand, and
+    # a full-width circle between the sheet and the change box pushed that box
+    # off the screen on a laptop.
+    _render_badge_strip()
 
     with st.expander("Other sizes & advanced options"):
         st.caption(

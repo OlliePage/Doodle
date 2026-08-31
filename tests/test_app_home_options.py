@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from tests.homepage_shape import buttons_in_popovers
+
 from colouring_factory import generators, variations
 from colouring_factory.models import GeneratedArtwork
 from colouring_factory.storage import (
@@ -95,7 +97,14 @@ def test_the_homepage_offers_the_drawing_options_before_it_draws() -> None:
     labels = [control.label for control in at.segmented_control]
     assert "How many to draw" in labels
     assert "Who it is for" in labels
-    assert any(box.label == "Drawing style" for box in at.selectbox)
+    # The style control stopped being a dropdown on 2026-08-31: a name alone
+    # ("Simple objects", "Badge portrait") told a parent nothing about what
+    # they would get, so it became a row per style with the example picture
+    # Doodle actually returns at that setting.
+    captions = [str(caption.value) for caption in at.caption]
+    assert "Drawing style" in captions
+    assert "A scene" in buttons_in_popovers(at)
+    assert "Just the things" in buttons_in_popovers(at)
 
 
 def test_the_number_of_pictures_is_remembered_between_visits() -> None:
@@ -131,7 +140,7 @@ def test_the_settings_line_says_what_will_happen() -> None:
     at = at.segmented_control(key="home_alternatives").set_value(3).run()
     assert "3 pictures" in _settings_line(at)
     assert "2-3 years" in _settings_line(at)
-    assert "toddler bold" in _settings_line(at)
+    assert "a scene" in _settings_line(at)
 
 
 def test_the_homepage_stacks_nothing_below_the_button() -> None:

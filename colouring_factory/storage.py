@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .prompts import STYLE_PRESETS
+
 
 def data_root() -> Path:
     override = os.getenv("DOODLE_DATA_DIR") or os.getenv("COLOURING_FACTORY_DATA_DIR")
@@ -127,12 +129,12 @@ def save_settings(settings: dict[str, Any]) -> None:
 QUICK_ALTERNATIVE_CHOICES = (1, 2, 3, 4)
 QUICK_AGE_CHOICES = ("2-3 years", "4-5 years", "6-9 years", "Grown-up")
 GROWN_UP_LEVEL = "Grown-up"
-QUICK_STYLE_CHOICES = (
-    "Toddler bold",
-    "Preschool detailed",
-    "Badge portrait",
-    "Simple objects",
-)
+# Derived, never re-typed. This tuple used to duplicate the STYLE_PRESETS keys
+# by hand with nothing keeping the two in step, so a rename in one file offered
+# a style the prompt builder silently ignored in favour of its fallback. The
+# first entry matters twice over: it is the homepage default, and it is what an
+# unrecognised saved style is quietly rewritten to.
+QUICK_STYLE_CHOICES = tuple(STYLE_PRESETS)
 
 
 def quick_drawing_options(settings: dict[str, Any] | None = None) -> dict[str, Any]:

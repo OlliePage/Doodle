@@ -38,7 +38,9 @@ def test_fit_contain_centres_source() -> None:
 
 
 def test_invalid_safe_area_is_rejected() -> None:
-    config = CircleSheetConfig(safe_diameter_mm=60, finished_diameter_mm=58, cut_diameter_mm=58)
+    config = CircleSheetConfig(
+        safe_diameter_mm=60, finished_diameter_mm=58, cut_diameter_mm=58
+    )
     try:
         compute_circle_sheet_plan(config, CalibrationProfile())
     except ValueError as exc:

@@ -28,6 +28,7 @@ from colouring_factory.models import GeneratedArtwork
 from colouring_factory.providers import get_provider
 from colouring_factory.storage import load_settings, save_settings
 from colouring_factory.prompts import DROPPED_PICTURE_RULE
+from tests.homepage_shape import buttons_in_popovers, buttons_on_the_page
 from tests.test_photos import GPS_IFD_POINTER, _photo_with_gps
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -236,10 +237,10 @@ def test_the_homepage_keeps_its_two_buttons_until_a_picture_arrives() -> None:
     on it. Remove picture may only exist when there is one to remove."""
 
     at = _homepage()
-    assert [button.label for button in at.button] == ["Draw it", "Add a character"]
+    assert buttons_on_the_page(at) == ["Draw it"]
 
     at = _drop(at)
-    assert "Remove picture" in [button.label for button in at.button]
+    assert buttons_on_the_page(at) == ["Draw it", "Remove picture"]
 
 
 # --- drawing with it -------------------------------------------------------
@@ -532,3 +533,82 @@ def test_a_picture_dropped_before_connecting_is_still_described(monkeypatch) -> 
         "the drawing was planned from the placeholder rather than the picture"
     )
     assert DRAFT_APPEARANCE in seen["prompt"]
+
+
+# --- the caricature, which is a mode wearing a style's clothes -------------
+
+
+def test_the_caricature_is_offered_only_once_a_picture_is_attached() -> None:
+    """It has nothing to work from otherwise. The house rule is that the
+    interface never renders a control that can only fail."""
+
+    at = _homepage()
+    assert "A caricature" not in buttons_in_popovers(at)
+
+    at = _drop(at)
+    assert "A caricature" in buttons_in_popovers(at)
+
+
+def test_choosing_the_caricature_never_reaches_the_settings_file() -> None:
+    """A style is saved to disk; the picture it needs lives only in this
+    session and is cleared by New doodle. Saving it would bring Doodle back
+    tomorrow set to a caricature with nothing to caricature, and the badge
+    redraw and Studio's own profile list would inherit it too."""
+
+    from colouring_factory.storage import load_settings
+
+    at = _drop(_homepage())
+    before = load_settings().get("quick_style")
+
+    for button in at.button:
+        if button.label == "A caricature":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("the caricature was not offered")
+
+    assert not at.exception
+    assert at.session_state["home_style"] == "A caricature"
+    assert load_settings().get("quick_style") == before, (
+        "a session-only mode was written to the settings file"
+    )
+
+
+def test_a_caricature_draws_one_square_picture_from_the_dropped_photo(
+    monkeypatch,
+) -> None:
+    """Not a scene: no variation briefs, no grown-up pairing, and composed for
+    a square rather than a portrait page, because its framing rule asks for
+    clear space all round rather than an A4 composition."""
+
+    seen = _capture_refine(monkeypatch)
+    calls: list[int] = []
+    inner = generators.refine_with_provider
+
+    def counted(**kwargs):
+        calls.append(1)
+        return inner(**kwargs)
+
+    monkeypatch.setattr(generators, "refine_with_provider", counted)
+    save_settings({**load_settings(), "quick_alternatives": 3})
+
+    at = _drop(_homepage())
+    for button in at.button:
+        if button.label == "A caricature":
+            button.click().run()
+            break
+    _button(at, "Draw it").click().run()
+
+    assert not at.exception
+    assert seen, "no drawing was requested"
+    assert len(calls) == 1, (
+        "a caricature bought several alternatives, which would be identical "
+        "because its builder takes no variation brief"
+    )
+    assert at.session_state["dropped_picture"] in seen["reference_images"]
+    assert seen["size"] == get_provider("openai").square_size
+    assert "seaside caricature of a thing rather than a person" in seen["prompt"]
+    assert (
+        "Do not give it eyes, a mouth or a face it does not already have"
+        in (seen["prompt"])
+    )

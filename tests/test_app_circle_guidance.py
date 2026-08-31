@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from tests.homepage_shape import buttons_on_the_page
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP = str(PROJECT_ROOT / "app.py")
 
@@ -111,11 +113,12 @@ def test_the_homepage_shows_one_prompt_bar_and_a_button() -> None:
     assert len(at.text_input) == 1
     body = " ".join(block.value for block in at.markdown)
     assert "doodle-logo--hero" in body
-    # "Draw it" is the one button sitting directly on the page; "Add a character"
-    # lives inside the characters popover, one of the settings line's
-    # floating panels, which AppTest still renders (and so still counts)
-    # even though nothing has to be clicked open to see it.
-    assert [button.label for button in at.button] == ["Draw it", "Add a character"]
+    # The rule is about page flow: below the logo, one full-width element, the
+    # idea box, and the button that acts on it. What the settings line's
+    # popovers hold when opened is a separate question, and asserting the two
+    # together is what made this list read ["Draw it", "Add a character"] when
+    # "Add a character" has never been on the page.
+    assert buttons_on_the_page(at) == ["Draw it"]
 
 
 def _all_rendered(at: AppTest) -> str:
