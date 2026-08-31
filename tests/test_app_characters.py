@@ -1142,7 +1142,6 @@ def test_the_picker_label_is_a_count_never_a_list_of_names() -> None:
     assert "Ida" not in " ".join(labels)
 
     at.checkbox(key=f"character_pick_{bo_id}").set_value(True).run()
-    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
     assert _picker(at).proto.popover.label == "2"
 
 
@@ -1685,7 +1684,6 @@ def test_the_picker_disables_further_ticks_once_the_provider_limit_is_reached(
     # An already-ticked box stays enabled, so unticking back under the cap
     # is still possible.
     assert at.checkbox(key=f"character_pick_{ids[0]}").disabled is False
-    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
     assert _picker(at).proto.popover.label == "4"
 
 

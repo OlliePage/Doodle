@@ -362,7 +362,7 @@ def _screens_that_draw_the_wordmark() -> list[str]:
 
     source = Path(APP).read_text()
     where = set()
-    for call in ("_render_brand_home(", '_render_top_bar(where='):
+    for call in ("_render_brand_home(", "_render_top_bar(where="):
         for fragment in source.split(call)[1:]:
             argument = fragment.split(")")[0].split(",")[0].strip()
             if argument.startswith(("'", '"')):
