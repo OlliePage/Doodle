@@ -995,7 +995,7 @@ def _render_home_options() -> None:
                         "Save a person, toy or character once, then put them "
                         "in any picture Doodle draws."
                     )
-                if st.button("Add someone", width="stretch"):
+                if st.button("Add a character", width="stretch"):
                     st.session_state.screen = "characters"
                     st.rerun()
         else:
@@ -1242,7 +1242,7 @@ def _render_characters_screen() -> None:
 
     _render_top_bar(where="characters")
 
-    # The homepage's "Add someone" button is the only route here, so Back
+    # The homepage's "Add a character" button is the only route here, so Back
     # always has exactly one place to return to.
     if st.button("Back", width="stretch", icon=":material/arrow_back:"):
         st.session_state.screen = "home"
@@ -1262,7 +1262,7 @@ def _render_characters_screen() -> None:
 
     characters = list_characters()
     if not characters:
-        st.info("No characters yet. Add someone below to draw them into a scene.")
+        st.info("No characters yet. Add your first one below.")
     else:
         columns = st.columns(3)
         for index, character in enumerate(characters):

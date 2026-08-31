@@ -308,7 +308,7 @@ def test_a_character_with_no_name_is_not_drawn(monkeypatch) -> None:
 
 
 def test_the_back_button_returns_to_the_homepage() -> None:
-    """The homepage's "Add someone" button is the only route to this screen,
+    """The homepage's "Add a character" button is the only route to this screen,
     so Back has exactly one place to return to. An earlier version tracked
     a characters_return key that was only ever set to "home", making the
     branch that read it unreachable and covered only by a test that set
@@ -653,7 +653,7 @@ def test_the_picker_is_offered_even_with_no_characters_saved() -> None:
 
 def test_the_characters_screen_is_reachable_from_a_totally_empty_homepage() -> None:
     """CRITICAL: a parent who has never used this feature must be able to
-    find it. The whole popover, including "Add someone", used to be gated
+    find it. The whole popover, including "Add a character", used to be gated
     behind `if cast:`, so with nothing saved yet there was no control
     anywhere on the homepage that reached this screen at all."""
 
@@ -662,7 +662,7 @@ def test_the_characters_screen_is_reachable_from_a_totally_empty_homepage() -> N
     assert list_characters() == []
 
     for button in at.button:
-        if button.label == "Add someone":
+        if button.label == "Add a character":
             button.click().run()
             break
     else:
@@ -681,7 +681,7 @@ def test_the_add_someone_button_opens_the_characters_screen() -> None:
     at.run()
 
     for button in at.button:
-        if button.label == "Add someone":
+        if button.label == "Add a character":
             button.click().run()
             break
     else:
