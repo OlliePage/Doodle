@@ -411,3 +411,51 @@ def test_a_service_that_cannot_see_pictures_says_so(monkeypatch) -> None:
     assert not at.exception
     assert not at.session_state["dropped_picture"]
     assert at.session_state["home_error_code"] == "no_reference_support"
+
+
+def test_the_picture_is_held_before_the_service_is_asked_about_it(monkeypatch) -> None:
+    """Asking what is in a photograph takes a second or two. Doing it in the
+    same run as the drop holds the whole page still while a parent waits for
+    the thumbnail they just dropped to appear at all, so the picture is stored
+    and painted first and the asking happens on the run after."""
+
+    seen_state: list[bool] = []
+
+    def describe(photo, **kwargs):
+        import streamlit as st
+
+        seen_state.append(bool(st.session_state.get("dropped_picture")))
+        return DRAFT_APPEARANCE
+
+    monkeypatch.setattr(appearance, "describe_appearance", describe)
+
+    at = _drop(_homepage())
+
+    assert seen_state == [True], (
+        "the description was bought before the picture was stored, so the "
+        "thumbnail could not have been on screen yet"
+    )
+    assert at.session_state["dropped_picture_appearance"] == DRAFT_APPEARANCE
+    assert at.session_state["dropped_picture_described"] is True
+
+
+def test_the_service_is_asked_about_a_picture_only_once(monkeypatch) -> None:
+    """The flag, not the presence of a description, is what stops a second
+    call: a service that answered with an empty string would otherwise be
+    asked again on every rerun for the life of the picture."""
+
+    calls: list[int] = []
+    monkeypatch.setattr(
+        appearance,
+        "describe_appearance",
+        lambda *a, **k: calls.append(1) or "",
+    )
+
+    at = _drop(_homepage())
+    assert at.session_state["dropped_picture_appearance"] == ""
+    assert len(calls) == 1
+
+    at.text_input(key="home_prompt").set_value("a rocket").run()
+    at.text_input(key="home_prompt").set_value("a rocket ship").run()
+
+    assert len(calls) == 1, "an empty answer was treated as no answer at all"

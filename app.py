@@ -415,6 +415,10 @@ def _initialise_state() -> None:
         "dropped_picture_hash": "",
         "dropped_picture_appearance": "",
         "dropped_picture_name": "",
+        # False between a drop and the run that asks what is in the picture,
+        # which is one run later so the thumbnail appears without waiting on a
+        # network call. True once asked, whether or not the asking worked.
+        "dropped_picture_described": False,
         "drop_well_nonce": 0,
     }
     for key, value in defaults.items():
@@ -478,6 +482,7 @@ def _clear_dropped_picture() -> None:
     st.session_state.dropped_picture_hash = ""
     st.session_state.dropped_picture_appearance = ""
     st.session_state.dropped_picture_name = ""
+    st.session_state.dropped_picture_described = False
     st.session_state.drop_well_nonce = (
         int(st.session_state.get("drop_well_nonce", 0)) + 1
     )
@@ -525,6 +530,8 @@ def _render_drop_well() -> None:
         )
     if uploaded is not None:
         _adopt_dropped_picture(uploaded)
+    # On the run after a drop, with the thumbnail already painted above.
+    _describe_dropped_picture()
 
 
 def _adopt_dropped_picture(uploaded) -> None:
@@ -569,23 +576,48 @@ def _adopt_dropped_picture(uploaded) -> None:
     # without a word: _quick_generate_demo reads a picture off disk and never
     # looks at references.
     st.session_state.quick_mode = "ai"
+    # Deliberately not described here. Asking the service what is in the
+    # picture takes a second or two, and doing it in this run would hold the
+    # whole page still while a parent waits for the thumbnail they have just
+    # dropped to appear at all. This run ends now, the picture is in the bar
+    # immediately, and _describe_dropped_picture does the asking on the next
+    # one with something on screen to say so.
+    st.session_state.dropped_picture_described = False
+    st.rerun()
 
-    # One cheap call on the provider's text model, swallowed on failure exactly
-    # as the characters screen swallows its own. A two-tone line drawing throws
-    # away colour and tone, and words are the only channel left for them. It
-    # also gives the generating screen something to show, and the variation
-    # planner something to pull several drawings apart with, when the picture
-    # was dropped with nothing typed.
+
+def _describe_dropped_picture() -> None:
+    """Ask the service what is in the dropped picture. One call, once.
+
+    A two-tone line drawing throws away colour and tone, and words are the only
+    channel left for them, which is why the characters screen buys the same
+    sentence for a saved character. It earns its keep twice more here: it is
+    what the generating screen shows when a picture was dropped with nothing
+    typed, and it is what the variation planner reads to pull several drawings
+    of one picture apart from each other.
+
+    Failure is swallowed to an empty string. The picture is the point and the
+    sentence is a bonus, so a service having a bad minute must not cost a
+    parent the drop.
+    """
+
+    if not _dropped_picture() or st.session_state.get("dropped_picture_described"):
+        return
+
     api_key, _source = _provider_key()
-    appearance = ""
+    described = ""
     if api_key:
-        try:
-            appearance = describe_appearance(
-                prepared, provider_id=_active_provider_id(), api_key=api_key
-            )
-        except (GeneratorError, ValueError):
-            appearance = ""
-    st.session_state.dropped_picture_appearance = appearance
+        with st.spinner("Looking at your picture…"):
+            try:
+                described = describe_appearance(
+                    _dropped_picture(),
+                    provider_id=_active_provider_id(),
+                    api_key=api_key,
+                )
+            except (GeneratorError, ValueError):
+                described = ""
+    st.session_state.dropped_picture_appearance = described
+    st.session_state.dropped_picture_described = True
     st.rerun()
 
 
