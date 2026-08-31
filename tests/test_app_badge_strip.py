@@ -17,9 +17,11 @@ someone has to remember to update.
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 from colouring_factory import generators, history
@@ -179,7 +181,13 @@ def test_the_redraw_adopts_the_new_picture_as_the_doodle(monkeypatch) -> None:
 def test_a_chosen_cast_keeps_their_likeness_on_the_badge(monkeypatch) -> None:
     """A badge of a scene starring your daughter must still star your
     daughter, so the redraw uses the character scene builder and the saved
-    portraits, not the ordinary colouring prompt."""
+    portraits, not the ordinary colouring prompt.
+
+    The doodle on screen is recorded as having been drawn with Ida, the way
+    _quick_generate actually records it, rather than relied on by ticking
+    her live on the result screen — see the next test for why that
+    distinction matters.
+    """
 
     captured = {}
 
@@ -190,12 +198,15 @@ def test_a_chosen_cast_keeps_their_likeness_on_the_badge(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
-    save_character(
+    ida_id = save_character(
         photo=b"photo", portrait=ARTWORK, name="Ida", kind="person", marks=""
     )
 
     at = _result_screen()
-    at.session_state["chosen_characters"] = ["Ida"]
+    at.session_state["current_metadata"] = {
+        **at.session_state["current_metadata"],
+        "generation": {"characters": [ida_id]},
+    }
     at.run()
     at = _button(at, "Draw it for a badge").click().run()
 
@@ -204,6 +215,79 @@ def test_a_chosen_cast_keeps_their_likeness_on_the_badge(monkeypatch) -> None:
     assert captured["size"] == "1024x1024"
     assert "Ida" in captured["prompt"]
     assert "cut into a circle" in captured["prompt"]
+
+
+def test_ticking_a_character_now_does_not_put_them_in_a_picture_drawn_without_them(
+    monkeypatch,
+) -> None:
+    """IMPORTANT: app.py:2040 used to read the live tick list at redraw
+    time, so the badge strip under a picture drawn with no cast at all — a
+    built-in sample among them — would still draw whoever happened to be
+    ticked when the button was pressed. That is one paid drawing spent
+    putting someone into a picture that never had them. The redraw must use
+    who the doodle was actually drawn with (nobody, here), never who is
+    ticked now."""
+
+    def fail_if_called(**kwargs):
+        raise AssertionError(
+            "a picture drawn with no cast must not go through refine_with_provider"
+        )
+
+    captured = {}
+
+    def fake_generate(**kwargs):
+        captured.update(kwargs)
+        return [
+            GeneratedArtwork(
+                image_bytes=NEW_ARTWORK,
+                prompt="p",
+                provider="OpenAI",
+                model="gpt-image-2",
+            )
+        ]
+
+    monkeypatch.setattr(generators, "refine_with_provider", fail_if_called)
+    monkeypatch.setattr(generators, "generate_with_provider", fake_generate)
+    ida_id = save_character(
+        photo=b"photo", portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    # The sample dinosaur, drawn with no cast: current_metadata carries no
+    # "generation" -> "characters" entry, exactly what a real demo drawing
+    # produces.
+    at = _result_screen()
+    # Ticked after the fact, the sequence that used to leak a character into
+    # a picture that never had them.
+    at.session_state["chosen_characters"] = [ida_id]
+    at.run()
+    at = _button(at, "Draw it for a badge").click().run()
+
+    assert not at.exception
+    assert "Ida" not in captured["prompts"][0]
+
+
+def test_the_badge_is_actually_58_mm_not_just_captioned_as_one() -> None:
+    """The caption text ("a 58 mm badge") is a literal string, so nothing
+    before this test checked that the geometry Doodle actually draws
+    matches the number in it. Changing BADGE_58MM's diameters to 25 mm left
+    every existing test green because none of them measured the picture.
+
+    render_badge_preview sizes its page to the cut diameter plus a fixed
+    4 mm margin on each side plus a 0.1 mm fit allowance, then rasters it at
+    200 dpi (app.py's default): a real, independent check on the number
+    baked into the preview's own pixels.
+    """
+
+    at = _result_screen()
+    preview = next(iter(at.session_state["badge_previews"].values()))
+    image = Image.open(BytesIO(preview))
+
+    promised_mm = 58.0
+    page_mm = promised_mm + (2 * 4.0) + 0.1
+    expected_px = round(page_mm / 25.4 * 200)
+    assert abs(image.width - expected_px) <= 1, (
+        f"expected roughly {expected_px}px for a {promised_mm} mm badge, got {image.width}px"
+    )
 
 
 def test_a_failed_redraw_is_explained_rather_than_crashing(monkeypatch) -> None:
