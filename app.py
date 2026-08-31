@@ -3077,9 +3077,21 @@ def _render_generating_screen() -> None:
         <style>
           [data-testid="stHeader"], [data-testid="stToolbar"],
           [data-testid="collapsedControl"], [data-testid="stSidebar"] {display:none!important;}
+          /* Every declaration here is marked important, including the ones
+             that look as though they should not need it. Streamlit's own
+             stylesheet outranks a plain declaration on this container, so this
+             screen kept the 650px width that was marked and silently lost the
+             centring and the full height that were not: everything rendered
+             hard against the left edge with white space below it. */
           .block-container, [data-testid="stMainBlockContainer"] {
-            max-width:650px!important;min-height:100dvh;padding:3rem 1.25rem 5rem!important;
-            display:flex;flex-direction:column;justify-content:center;text-align:center;overflow:visible!important;
+            max-width:650px!important;
+            min-height:100dvh!important;
+            padding:3rem 1.25rem 5rem!important;
+            display:flex!important;
+            flex-direction:column!important;
+            justify-content:center!important;
+            text-align:center!important;
+            overflow:visible!important;
           }
           .drawing-title{font-size:1.35rem;font-weight:760;margin:.8rem 0 .35rem;}
           /* The child's own sentence, promoted from a grey caption to the
@@ -3099,24 +3111,42 @@ def _render_generating_screen() -> None:
              reads as this app's rather than as a stock loader. Three of them
              are PlayStation face buttons, which was the reference asked for.
              The cross is left out on purpose: a cross reads as an error. */
+          /* The six shapes sit on top of one another and take turns being
+             visible, rather than scrolling past a window. The scrolling version
+             clipped: a step of 2.4rem is 38.4 pixels, the window rounded to 38,
+             and the error accumulated until a slice of the next shape showed
+             above the current one. Stacked, there is no window to be sliced by
+             and no arithmetic to drift. Each shape is centred in the box, so
+             Georgia's very different glyph widths no longer make them wander
+             from side to side either. */
           .drawing-reel{
-            height:2.4rem;overflow:hidden;margin:.9rem auto .3rem;
-            font-family:Georgia,serif;font-size:1.55rem;
+            position:relative;height:44px;margin:.9rem auto .35rem;
+            font-family:Georgia,serif;font-size:26px;line-height:1;
           }
-          .drawing-reel span{display:block;height:2.4rem;line-height:2.4rem;}
-          .drawing-reel__strip{animation:drawing-reel 4.8s steps(6,end) infinite;}
+          .drawing-reel span{
+            position:absolute;inset:0;
+            display:flex;align-items:center;justify-content:center;
+            opacity:0;animation:drawing-reel 4.8s linear infinite;
+          }
           @keyframes drawing-reel{
-            from{transform:translateY(0)}
-            to{transform:translateY(-14.4rem)}
+            0%,16.6%{opacity:1}
+            16.7%,100%{opacity:0}
           }
-          .drawing-reel span:nth-child(1){color:#4f46e5;transform:rotate(-4deg);}
-          .drawing-reel span:nth-child(2){color:#f45b69;transform:rotate(3deg);}
-          .drawing-reel span:nth-child(3){color:#f5a623;transform:rotate(-2deg);}
-          .drawing-reel span:nth-child(4){color:#16a085;transform:rotate(3deg);}
-          .drawing-reel span:nth-child(5){color:#8b5cf6;transform:rotate(-3deg);}
-          .drawing-reel span:nth-child(6){color:#0ea5e9;transform:rotate(2deg);}
+          .drawing-reel span:nth-child(1){animation-delay:0s}
+          .drawing-reel span:nth-child(2){animation-delay:.8s}
+          .drawing-reel span:nth-child(3){animation-delay:1.6s}
+          .drawing-reel span:nth-child(4){animation-delay:2.4s}
+          .drawing-reel span:nth-child(5){animation-delay:3.2s}
+          .drawing-reel span:nth-child(6){animation-delay:4s}
+          .drawing-reel span:nth-child(1){color:#4f46e5;rotate:-4deg;}
+          .drawing-reel span:nth-child(2){color:#f45b69;rotate:3deg;}
+          .drawing-reel span:nth-child(3){color:#f5a623;rotate:-2deg;}
+          .drawing-reel span:nth-child(4){color:#16a085;rotate:3deg;}
+          .drawing-reel span:nth-child(5){color:#8b5cf6;rotate:-3deg;}
+          .drawing-reel span:nth-child(6){color:#0ea5e9;rotate:2deg;}
           @media (prefers-reduced-motion: reduce){
-            .drawing-reel__strip{animation:none;}
+            .drawing-reel span{animation:none;opacity:0;}
+            .drawing-reel span:nth-child(1){opacity:1;}
           }
           /* The homepage's settings line answers questions this screen has
              already moved past; left on screen it renders beneath the
@@ -3133,10 +3163,10 @@ def _render_generating_screen() -> None:
         '<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True
     )
     st.markdown(
-        '<div class="drawing-reel" aria-hidden="true"><div class="drawing-reel__strip">'
+        '<div class="drawing-reel" aria-hidden="true">'
         "<span>\u25cb</span><span>\u25b3</span><span>\u25a1</span>"
         "<span>\u25c7</span><span>\u2726</span><span>\u2727</span>"
-        "</div></div>",
+        "</div>",
         unsafe_allow_html=True,
     )
     safe_idea = html.escape(str(st.session_state.get("generation_idea", "")))
@@ -3168,11 +3198,19 @@ def _render_generating_screen() -> None:
                 "Doodle has not drawn at these settings before, so there is "
                 "nothing yet to say how long this should take."
             )
-        st.caption(
-            "A picture already sent to be drawn finishes and is charged "
-            "regardless — stopping only cancels the ones after it, and "
-            "takes you straight to whatever is already drawn."
-        )
+        # Tucked behind a question mark rather than printed. It answers a
+        # question a parent asks once and then knows the answer to for good,
+        # and until they ask it, it is four lines of grey between the child's
+        # own sentence and the button.
+        with st.popover(
+            "", type="tertiary", icon=":material/help:", width="content"
+        ):
+            st.markdown(
+                "**If you stop now**\n\nA picture already sent to be drawn "
+                "finishes and is charged regardless. Stopping only cancels the "
+                "ones after it, and takes you straight to whatever is already "
+                "drawn."
+            )
         if st.button(
             "Stop drawing",
             key="stop_drawing",

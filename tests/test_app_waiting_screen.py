@@ -252,3 +252,77 @@ def test_a_new_batch_does_not_inherit_the_last_one_s_clock(monkeypatch) -> None:
     assert at.session_state["generation_seconds"] == [], (
         "the previous batch's seconds survived into this one"
     )
+
+
+def _generating_style(at: AppTest) -> str:
+    """The generating screen's own stylesheet, flattened for matching."""
+
+    block = next(
+        str(b.value)
+        for b in at.markdown
+        if "<style>" in str(b.value) and ".drawing-title" in str(b.value)
+    )
+    return block.replace(" ", "").replace("\n", "")
+
+
+def test_the_screen_insists_on_its_own_centring(monkeypatch) -> None:
+    """Marked important because Streamlit's stylesheet outranks it otherwise.
+
+    This screen shipped with its width marked and its centring not, so it kept
+    the 650px column and lost both the horizontal and the vertical centring:
+    everything rendered hard against the left edge with white space below. The
+    rule reads correctly either way, which is why it went unnoticed, so the
+    marking itself is what this pins.
+    """
+
+    style = _generating_style(_frozen(monkeypatch))
+    container = style.split(".block-container,[data-testid=", 1)[1]
+
+    for declaration in (
+        "max-width:650px!important",
+        "min-height:100dvh!important",
+        "display:flex!important",
+        "flex-direction:column!important",
+        "justify-content:center!important",
+        "text-align:center!important",
+    ):
+        assert declaration in container, f"{declaration} is not marked important"
+
+
+def test_the_shapes_cannot_be_clipped(monkeypatch) -> None:
+    """They used to scroll past a window, and were sliced by it.
+
+    A step of 2.4rem is 38.4 pixels while the window rounded to 38, and the
+    error accumulated until a sliver of the next shape showed above the
+    current one. Stacking them removes the window entirely, so this checks
+    that the scrolling strip has not crept back.
+    """
+
+    at = _frozen(monkeypatch)
+    style = _generating_style(at)
+
+    assert "drawing-reel__strip" not in style, "the scrolling strip is back"
+    assert "position:absolute" in style.split(".drawing-reelspan{", 1)[1][:120]
+
+    markup = next(
+        str(b.value) for b in at.markdown if 'class="drawing-reel"' in str(b.value)
+    )
+    assert "drawing-reel__strip" not in markup
+    assert markup.count("<span>") == 6, "six shapes, one per wordmark colour"
+
+
+def test_the_charging_small_print_is_behind_a_question_mark(monkeypatch) -> None:
+    """It answers a question asked once, and until it is asked it is four grey
+    lines between the child's sentence and the button."""
+
+    at = _frozen(monkeypatch)
+
+    printed = [str(caption.value) for caption in at.caption]
+    assert not any("charged regardless" in text for text in printed), (
+        "the charging note is still printed in plain sight"
+    )
+
+    tucked = [str(block.value) for block in at.markdown]
+    assert any("charged regardless" in text for text in tucked), (
+        "the charging note has gone missing altogether"
+    )
