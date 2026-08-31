@@ -687,9 +687,40 @@ def _render_top_bar(*, where: str) -> None:
     Doodle Studio first.
     """
 
+    # The one place besides the homepage where injected styling is needed, and
+    # for the same reason recorded there: the defect lives inside Streamlit's
+    # own chrome and no native API reaches it. Nothing here changes what the
+    # button does, only whether the parent sees a button or the wordmark.
+    st.markdown(
+        """
+        <style>
+          [class*="st-key-doodle-brand-"] {position:relative;}
+          [class*="st-key-doodle-brand-"] [data-testid="stButton"] {
+            position:absolute; inset:0; margin:0;
+          }
+          [class*="st-key-doodle-brand-"] [data-testid="stButton"] button {
+            width:100%; height:100%; opacity:0; cursor:pointer;
+            padding:0; min-height:0; border:none; background:transparent;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     brand, saved, fresh = st.columns([3, 1.5, 1.3])
     with brand:
-        st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
+        # The wordmark goes home, because every app with a logo in the corner
+        # has taught people that it does. Streamlit has no way to make a
+        # markdown block clickable, and an anchor cannot be clicked in a test,
+        # so a real button is laid over the logo instead: it carries the label
+        # a screen reader announces, and the CSS below makes it invisible.
+        with st.container(key=f"doodle-brand-{where}"):
+            st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
+            if st.button(
+                "Doodle, back to the homepage",
+                key=f"top_brand_{where}",
+                type="tertiary",
+            ):
+                _start_new_doodle()
     with saved:
         count = _saved_doodle_count()
         if st.button(

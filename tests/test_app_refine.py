@@ -290,3 +290,38 @@ def test_the_result_screen_survives_unprepared_outputs() -> None:
     at.run()
 
     assert not at.exception
+def test_the_wordmark_goes_home_from_every_screen_that_carries_it() -> None:
+    """The logo in the corner is a route, not decoration.
+
+    Every app with a wordmark in the top-left has taught people that pressing
+    it goes home, and this one did nothing. Streamlit cannot make a markdown
+    block clickable and a plain anchor cannot be clicked in a test, so a real
+    button is laid over the logo — which means this test has to click it, or
+    the invisible button could sit there dead and nobody would know.
+    """
+
+    for screen in ("result", "studio"):
+        at = AppTest.from_file(APP, default_timeout=120)
+        at.session_state["screen"] = screen
+        at.session_state["current_raw"] = ARTWORK
+        at.session_state["current_title"] = "A blue dinosaur"
+        at.session_state["current_metadata"] = {"source": "test"}
+        if screen == "result":
+            at.session_state["quick_processed"] = ARTWORK
+            at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+        at.run()
+
+        brand = [
+            button
+            for button in at.button
+            if button.label == "Doodle, back to the homepage"
+        ]
+        assert brand, f"no wordmark button on the {screen} screen"
+
+        brand[0].click().run()
+
+        assert not at.exception
+        assert at.session_state["screen"] == "home", (
+            f"the wordmark did not go home from the {screen} screen"
+        )
+        assert at.session_state["current_raw"] is None
