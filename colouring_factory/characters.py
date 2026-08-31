@@ -28,6 +28,11 @@ class Character:
     kind: str
     marks: str
     created_at: str
+    # What a model saw in the photograph the one time it was asked: hair,
+    # eyes, skin and the like. Kept apart from `marks`, which a parent types
+    # freely and which drives likeness (shape) rather than colour — see
+    # colouring_factory/appearance.py and build_colour_suggestion_prompt.
+    appearance: str = ""
 
 
 def characters_root() -> Path:
@@ -37,7 +42,13 @@ def characters_root() -> Path:
 
 
 def save_character(
-    *, photo: bytes, portrait: bytes, name: str, kind: str, marks: str
+    *,
+    photo: bytes,
+    portrait: bytes,
+    name: str,
+    kind: str,
+    marks: str,
+    appearance: str = "",
 ) -> str:
     name = name.strip()
     if not name:
@@ -65,6 +76,7 @@ def save_character(
                 "name": name,
                 "kind": kind,
                 "marks": marks.strip(),
+                "appearance": appearance.strip(),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             indent=2,
@@ -74,11 +86,17 @@ def save_character(
     return character_id
 
 
-def update_character(character_id: str, *, name: str, kind: str, marks: str) -> None:
+def update_character(
+    character_id: str, *, name: str, kind: str, marks: str, appearance: str = ""
+) -> None:
     """Correct a saved character's words without touching either picture.
 
     The id and created_at are read from the existing file and kept as they
-    are: this is a repair to what a parent typed, not a new character.
+    are: this is a repair to what a parent typed, not a new character. That
+    includes appearance: a model's guess about a child's colouring must be
+    as correctable as any word the parent typed themselves, and filling one
+    in for a character saved before this field existed is this same repair,
+    not a fresh upload.
     """
 
     name = name.strip()
@@ -97,6 +115,7 @@ def update_character(character_id: str, *, name: str, kind: str, marks: str) -> 
     payload["name"] = name
     payload["kind"] = kind
     payload["marks"] = marks.strip()
+    payload["appearance"] = appearance.strip()
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -132,6 +151,9 @@ def _read(folder: Path) -> Character | None:
         kind=kind if kind in CHARACTER_KINDS else "person",
         marks=str(payload.get("marks", "")),
         created_at=str(payload.get("created_at", "")),
+        # Missing on every character saved before this field existed, so a
+        # blank default is the ordinary case, not a corrupt record.
+        appearance=str(payload.get("appearance", "")),
     )
 
 

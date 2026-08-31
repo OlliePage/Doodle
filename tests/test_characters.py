@@ -1,3 +1,4 @@
+import json
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -39,14 +40,40 @@ def test_a_saved_character_comes_back_whole() -> None:
         name="Ida",
         kind="person",
         marks="Curly hair to her shoulders, round glasses.",
+        appearance="Brown eyes, dark wavy hair, light-brown skin.",
     )
 
     saved = load_character(character_id)
     assert saved.name == "Ida"
     assert saved.kind == "person"
     assert saved.marks == "Curly hair to her shoulders, round glasses."
+    assert saved.appearance == "Brown eyes, dark wavy hair, light-brown skin."
     assert load_character_image(character_id) == PORTRAIT
     assert load_character_image(character_id, portrait=False) == PHOTO
+
+
+def test_appearance_defaults_to_blank_when_not_given() -> None:
+    # A character saved before this feature existed, or through any caller
+    # that has not been taught about it, must still load rather than raise.
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+    )
+    assert load_character(character_id).appearance == ""
+
+
+def test_a_character_json_written_before_appearance_existed_reads_as_blank() -> None:
+    # A record from before this field existed has no "appearance" key at
+    # all, not merely a blank one — written here exactly that way, rather
+    # than through save_character, which now always writes the key.
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks="x"
+    )
+    path = characters_root() / character_id / "character.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    del payload["appearance"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert load_character(character_id).appearance == ""
 
 
 def test_characters_come_back_newest_first() -> None:
@@ -181,6 +208,50 @@ def test_update_character_persists_the_new_words() -> None:
     assert saved.marks == "New marks."
     # Neither picture is touched by a word-only edit.
     assert load_character_image(character_id) == PORTRAIT
+    assert load_character_image(character_id, portrait=False) == PHOTO
+
+
+def test_update_character_corrects_a_wrong_appearance() -> None:
+    # A model's guess about a child's colouring must be as correctable as
+    # any other word a parent typed.
+    character_id = save_character(
+        photo=PHOTO,
+        portrait=PORTRAIT,
+        name="Ida",
+        kind="person",
+        marks="",
+        appearance="Blonde hair, blue eyes, pale skin.",
+    )
+    update_character(
+        character_id,
+        name="Ida",
+        kind="person",
+        marks="",
+        appearance="Brown hair, brown eyes, light-brown skin.",
+    )
+    assert load_character(character_id).appearance == (
+        "Brown hair, brown eyes, light-brown skin."
+    )
+
+
+def test_update_character_fills_in_a_blank_appearance_with_no_reupload() -> None:
+    # The exact repair an existing character with no description needs: the
+    # photograph is untouched, only the words are added.
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+    )
+    assert load_character(character_id).appearance == ""
+
+    update_character(
+        character_id,
+        name="Ida",
+        kind="person",
+        marks="",
+        appearance="Brown eyes, dark hair, light-brown skin.",
+    )
+
+    saved = load_character(character_id)
+    assert saved.appearance == "Brown eyes, dark hair, light-brown skin."
     assert load_character_image(character_id, portrait=False) == PHOTO
 
 
