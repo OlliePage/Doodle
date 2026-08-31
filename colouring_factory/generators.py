@@ -904,6 +904,21 @@ def refine_with_provider(
             code="too_many_references",
         )
 
+    # The design allows either argument to be empty, never both. Before this
+    # check existed, a caller that passed neither got three different
+    # answers depending on which provider happened to be active: OpenAI
+    # raised a bare ValueError with no code, Recraft raised an IndexError
+    # indexing into an empty list, and Google silently sent a text-only
+    # request. None of those is this app's own error type, so guidance()
+    # never even saw it. Checked once, here, because this function is the
+    # only door every real caller walks through.
+    if not image_bytes and not reference_images:
+        raise GeneratorError(
+            "This request carried no picture to draw from.",
+            provider=spec.label,
+            code="missing_picture",
+        )
+
     try:
         return _dispatch_refinement(
             provider=provider,

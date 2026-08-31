@@ -207,6 +207,15 @@ _ENTRIES: dict[str, Guidance] = {
         fix="Connect OpenAI or Google Gemini to draw your characters.",
         control="Change image provider, on the result screen",
     ),
+    "missing_picture": Guidance(
+        title="Nothing for Doodle to draw from",
+        cause=(
+            "This request carried neither a picture to change nor a "
+            "picture of a character to draw from."
+        ),
+        fix="This is a Doodle error rather than something you did. Try again, or start a new doodle.",
+        control=_SETTINGS,
+    ),
     "too_many_references": Guidance(
         title="That is more characters than this service will look at",
         cause="Each drawing service has its own limit on reference pictures.",
