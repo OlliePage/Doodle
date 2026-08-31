@@ -15,7 +15,7 @@ import pytest
 from PIL import Image
 from streamlit.testing.v1 import AppTest
 
-from colouring_factory import generators
+from colouring_factory import appearance, generators
 from colouring_factory.characters import (
     characters_root,
     delete_character,
@@ -27,6 +27,12 @@ from colouring_factory.characters import (
 from colouring_factory.generators import GeneratorError
 from colouring_factory.models import GeneratedArtwork
 from colouring_factory.storage import load_settings, save_settings
+
+# The default a photo's description resolves to unless a test overrides it.
+# Distinct enough from any test's own hand-typed marks that a test asserting
+# on this exact text cannot be satisfied by marks leaking into the wrong
+# field by accident.
+DRAFT_APPEARANCE = "Brown eyes, wavy dark-brown hair, light-brown skin."
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP = str(PROJECT_ROOT / "app.py")
@@ -57,6 +63,14 @@ def isolated(monkeypatch, tmp_path):
     for variable in ("GEMINI_API_KEY", "RECRAFT_API_TOKEN"):
         monkeypatch.delenv(variable, raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    # Choosing a photograph fires one describe_appearance call of its own,
+    # separate from the portrait drawing every test here already fakes —
+    # patched to a fixed answer by default so a test that does not care
+    # about appearance still makes no network call. A test about the call
+    # itself overrides this with its own monkeypatch.
+    monkeypatch.setattr(
+        appearance, "describe_appearance", lambda *a, **k: DRAFT_APPEARANCE
+    )
 
 
 def _characters_screen() -> AppTest:
@@ -150,6 +164,158 @@ def test_adding_a_character_draws_a_portrait_and_saves_it(monkeypatch) -> None:
     confirmations = " ".join(str(s.value) for s in at.success)
     assert "ida" in confirmations.lower()
     assert "characters" in confirmations.lower()
+
+
+def test_choosing_a_photo_drafts_an_appearance_from_it(monkeypatch) -> None:
+    """The bug this whole feature exists for: colour lives only in the
+    photograph, and is gone forever once a black-and-white drawing exists.
+    A description has to be drafted as soon as the photo is chosen, before
+    the parent has typed anything else, so there is something to correct
+    rather than nothing to build from."""
+
+    calls = []
+
+    def fake_describe(photo, *, provider_id, api_key):
+        calls.append(photo)
+        return DRAFT_APPEARANCE
+
+    monkeypatch.setattr(appearance, "describe_appearance", fake_describe)
+
+    at = _characters_screen()
+    at = (
+        at.get("file_uploader")[0]
+        .set_value(("ida.png", PHOTO_BYTES, "image/png"))
+        .run()
+    )
+
+    assert not at.exception
+    assert len(calls) == 1
+    assert at.text_area(key="character_appearance").value == DRAFT_APPEARANCE
+
+
+def test_the_draft_is_not_refetched_on_every_unrelated_rerun(monkeypatch) -> None:
+    """Every widget interaction reruns the whole script. Refetching on each
+    one would mean a paid text call for every keystroke typed into the name
+    box after a photo is already chosen."""
+
+    calls = []
+    monkeypatch.setattr(
+        appearance,
+        "describe_appearance",
+        lambda *a, **k: calls.append(1) or DRAFT_APPEARANCE,
+    )
+
+    at = _characters_screen()
+    at = (
+        at.get("file_uploader")[0]
+        .set_value(("ida.png", PHOTO_BYTES, "image/png"))
+        .run()
+    )
+    at = at.text_input(key="character_name").set_value("Ida").run()
+    at = at.text_area(key="character_marks").set_value("Curly hair.").run()
+
+    assert len(calls) == 1
+
+
+def test_the_parent_can_correct_the_drafted_appearance_before_saving(
+    monkeypatch,
+) -> None:
+    """A model's guess about a child's colouring must be as correctable as
+    every other word on this form, before it is ever saved."""
+
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _characters_screen()
+    at = (
+        at.get("file_uploader")[0]
+        .set_value(("ida.png", PHOTO_BYTES, "image/png"))
+        .run()
+    )
+    at.text_input(key="character_name").set_value("Ida").run()
+    at.text_area(key="character_appearance").set_value(
+        "Brown eyes, dark hair, light-brown skin."
+    ).run()
+
+    for button in at.button:
+        if button.label == "Draw them":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    saved = list_characters()[0]
+    assert saved.appearance == "Brown eyes, dark hair, light-brown skin."
+
+
+def test_the_drafted_appearance_is_saved_with_the_character(monkeypatch) -> None:
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _characters_screen()
+    at = (
+        at.get("file_uploader")[0]
+        .set_value(("ida.png", PHOTO_BYTES, "image/png"))
+        .run()
+    )
+    at.text_input(key="character_name").set_value("Ida").run()
+
+    for button in at.button:
+        if button.label == "Draw them":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    saved = list_characters()[0]
+    assert saved.appearance == DRAFT_APPEARANCE
+
+
+def test_a_failed_description_still_lets_the_character_be_saved(monkeypatch) -> None:
+    """The drawing already spent one generation by the time this could fail:
+    a photograph that cannot be described is not a reason to lose the
+    portrait and the name too."""
+
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    def failing_describe(*a, **k):
+        raise GeneratorError(
+            "OpenAI could not describe the photograph.", code="network"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    monkeypatch.setattr(appearance, "describe_appearance", failing_describe)
+
+    at = _characters_screen()
+    at = (
+        at.get("file_uploader")[0]
+        .set_value(("ida.png", PHOTO_BYTES, "image/png"))
+        .run()
+    )
+    at.text_input(key="character_name").set_value("Ida").run()
+
+    for button in at.button:
+        if button.label == "Draw them":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    saved = list_characters()[0]
+    assert saved.name == "Ida"
+    assert saved.appearance == ""
 
 
 def test_drawing_the_idea_again_after_opening_a_portrait_does_not_trap_on_connect(
@@ -410,6 +576,114 @@ def test_editing_a_characters_words_persists_with_no_redraw(monkeypatch) -> None
     # The photograph and the portrait are untouched by an edit of the words.
     assert load_character_image(ida_id, portrait=False) == PHOTO_BYTES
     assert load_character_image(ida_id) == ARTWORK
+
+
+def test_editing_a_characters_appearance_persists_with_no_redraw(monkeypatch) -> None:
+    """A model's guess about a child's colouring must be as correctable as
+    the name, kind or marks beside it — the exact repair the bug this
+    feature exists for needs."""
+
+    def fail_if_called(**kwargs):
+        raise AssertionError("editing the words must not draw anything")
+
+    monkeypatch.setattr(generators, "refine_with_provider", fail_if_called)
+    ida_id = save_character(
+        photo=PHOTO_BYTES,
+        portrait=ARTWORK,
+        name="Ida",
+        kind="person",
+        marks="",
+        appearance="Blonde hair, blue eyes, pale skin.",
+    )
+
+    at = _characters_screen()
+    at.text_area(key=f"edit_appearance_{ida_id}").set_value(
+        "Brown hair, brown eyes, light-brown skin."
+    ).run()
+
+    for button in at.button:
+        if button.key == f"save_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Save changes button not found")
+
+    assert not at.exception
+    assert (
+        load_character(ida_id).appearance == "Brown hair, brown eyes, light-brown skin."
+    )
+
+
+def test_an_existing_character_can_be_described_from_their_stored_photo(
+    monkeypatch,
+) -> None:
+    """A character saved before this feature existed has no appearance, and
+    the redraw path already loads their stored photograph — proof that the
+    same material is here to fill it in without asking for a fresh upload."""
+
+    captured = {}
+
+    def fake_describe(photo, *, provider_id, api_key):
+        captured["photo"] = photo
+        return DRAFT_APPEARANCE
+
+    monkeypatch.setattr(appearance, "describe_appearance", fake_describe)
+    ida_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _characters_screen()
+    for button in at.button:
+        if button.key == f"describe_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Fill in from their photo button not found")
+
+    assert not at.exception
+    assert captured["photo"] == PHOTO_BYTES
+    assert load_character(ida_id).appearance == DRAFT_APPEARANCE
+
+
+def test_the_fill_in_button_is_not_offered_once_a_character_has_a_description() -> None:
+    ida_id = save_character(
+        photo=PHOTO_BYTES,
+        portrait=ARTWORK,
+        name="Ida",
+        kind="person",
+        marks="",
+        appearance="Brown hair, brown eyes, light-brown skin.",
+    )
+
+    at = _characters_screen()
+    assert not any(button.key == f"describe_character_{ida_id}" for button in at.button)
+
+
+def test_a_failed_description_leaves_the_button_pressable_again(monkeypatch) -> None:
+    def failing_describe(*a, **k):
+        raise GeneratorError(
+            "OpenAI could not describe the photograph.", code="network"
+        )
+
+    monkeypatch.setattr(appearance, "describe_appearance", failing_describe)
+    ida_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _characters_screen()
+    for button in at.button:
+        if button.key == f"describe_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Fill in from their photo button not found")
+
+    assert not at.exception
+    assert load_character(ida_id).appearance == ""
+    redo = next(
+        button for button in at.button if button.key == f"describe_character_{ida_id}"
+    )
+    assert redo.disabled is False
 
 
 def test_editing_a_character_rejects_a_blank_name() -> None:

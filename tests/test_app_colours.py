@@ -13,7 +13,23 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from colouring_factory import generators
+from colouring_factory.characters import save_character
 from colouring_factory.models import GeneratedArtwork
+
+APPEARANCE = "Brown eyes, wavy dark-brown hair to her shoulders, light-brown skin."
+PHOTO = b"\x89PNG\r\n\x1a\n" + b"photo bytes"
+
+
+def _save_ida() -> str:
+    return save_character(
+        photo=PHOTO,
+        portrait=COLOURED,
+        name="Ida",
+        kind="person",
+        marks="",
+        appearance=APPEARANCE,
+    )
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP = str(PROJECT_ROOT / "app.py")
@@ -179,3 +195,61 @@ def test_a_failed_attempt_leaves_the_control_pressable_again(monkeypatch) -> Non
 
     assert not at.exception
     assert at.session_state["busy_colour_result"] is False
+
+
+def test_a_recorded_characters_appearance_reaches_the_colouring_instruction(
+    coloured,
+) -> None:
+    """The bug this whole feature exists for: a picture drawn with a saved
+    character must be coloured using their real hair, eyes and skin — read
+    from the artwork's own recorded cast, the same source the badge redraw
+    uses, never from whichever characters happen to be ticked now."""
+
+    ida_id = _save_ida()
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = LINE_ART
+    at.session_state["quick_processed"] = LINE_ART
+    at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+    at.session_state["current_title"] = "Ida in the garden"
+    at.session_state["current_metadata"] = {
+        "source": "test",
+        "generation": {"characters": [ida_id]},
+    }
+    at.run()
+
+    at = _button(at, "colour it in for me").click().run()
+
+    assert not at.exception
+    instruction = coloured[0]["prompt"]
+    assert "Ida" in instruction
+    assert APPEARANCE in instruction
+
+
+def test_ticking_a_character_now_does_not_colour_a_picture_drawn_without_them(
+    coloured,
+) -> None:
+    """The tick list on the homepage is not the source: a picture with no
+    recorded cast (an ordinary idea, or a sample) must colour exactly as it
+    always has, whoever happens to be ticked at the moment the button is
+    pressed."""
+
+    ida_id = _save_ida()
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = LINE_ART
+    at.session_state["quick_processed"] = LINE_ART
+    at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+    at.session_state["current_title"] = "Blue dinosaur"
+    at.session_state["current_metadata"] = {"source": "test"}
+    at.session_state["chosen_characters"] = [ida_id]
+    at.run()
+
+    at = _button(at, "colour it in for me").click().run()
+
+    assert not at.exception
+    instruction = coloured[0]["prompt"]
+    assert "Ida" not in instruction
+    assert APPEARANCE not in instruction
