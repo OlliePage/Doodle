@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from colouring_factory.characters import (
+    Character,
     character_portrait_mtime,
     characters_root,
     characters_signature,
@@ -15,7 +16,9 @@ from colouring_factory.characters import (
     load_character,
     load_character_image,
     load_character_portrait,
+    resolve_cast,
     save_character,
+    toggle_chosen,
     update_character,
     update_character_portrait,
 )
@@ -420,3 +423,57 @@ def test_the_portrait_mtime_changes_only_for_the_character_that_was_redrawn() ->
     update_character_portrait(redrawn_id, PORTRAIT + b"-redrawn")
 
     assert character_portrait_mtime(kept_id) == kept_before
+
+
+def _character(character_id: str, name: str = "Ida", **overrides) -> Character:
+    fields = {
+        "id": character_id,
+        "name": name,
+        "kind": "person",
+        "marks": "",
+        "created_at": "",
+        "appearance": "",
+    }
+    fields.update(overrides)
+    return Character(**fields)
+
+
+def test_resolve_cast_keeps_the_requested_order() -> None:
+    ida = _character("a", "Ida", marks="curly hair", appearance="brown eyes")
+    bo = _character("b", "Bo", kind="toy")
+
+    resolved = resolve_cast(["b", "a"], [ida, bo])
+
+    assert resolved == [
+        ("b", "Bo", "toy", "", ""),
+        ("a", "Ida", "person", "curly hair", "brown eyes"),
+    ]
+
+
+def test_resolve_cast_drops_an_id_that_no_longer_matches_anyone() -> None:
+    ida = _character("a", "Ida")
+    assert resolve_cast(["a", "deleted-id"], [ida]) == [("a", "Ida", "person", "", "")]
+
+
+def test_resolve_cast_with_no_ids_is_empty() -> None:
+    assert resolve_cast([], [_character("a")]) == []
+
+
+def test_toggle_chosen_adds_a_ticked_id() -> None:
+    assert toggle_chosen([], "a", ticked=True) == ["a"]
+
+
+def test_toggle_chosen_does_not_duplicate_an_already_chosen_id() -> None:
+    assert toggle_chosen(["a"], "a", ticked=True) == ["a"]
+
+
+def test_toggle_chosen_removes_an_unticked_id() -> None:
+    assert toggle_chosen(["a", "b"], "a", ticked=False) == ["b"]
+
+
+def test_toggle_chosen_unticking_an_id_not_present_is_a_no_op() -> None:
+    assert toggle_chosen(["b"], "a", ticked=False) == ["b"]
+
+
+def test_toggle_chosen_preserves_the_order_of_untouched_ids() -> None:
+    assert toggle_chosen(["a", "b", "c"], "b", ticked=True) == ["a", "b", "c"]

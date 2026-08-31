@@ -23,7 +23,9 @@ from colouring_factory.characters import (
     list_characters,
     load_character_image,
     load_character_portrait,
+    resolve_cast,
     save_character,
+    toggle_chosen,
     update_character,
     update_character_portrait,
 )
@@ -969,18 +971,14 @@ def _remember_chosen(character_id: str) -> None:
     """Widget keys vanish when their widget is not rendered, so the answer
     lives in a plain key and each box is told its value on the way in.
 
-    Keyed by id, not name: two characters can share a name (a girl and her
-    teddy both called Ida), and a name-keyed widget key raised a duplicate-
-    key error that took the whole homepage down with it.
+    toggle_chosen (colouring_factory.characters) is the pure add-or-remove
+    logic; this is only the session-state read and write around it.
     """
 
-    chosen = list(st.session_state.get("chosen_characters", []))
-    if st.session_state.get(f"character_pick_{character_id}"):
-        if character_id not in chosen:
-            chosen.append(character_id)
-    elif character_id in chosen:
-        chosen.remove(character_id)
-    st.session_state.chosen_characters = chosen
+    ticked = bool(st.session_state.get(f"character_pick_{character_id}"))
+    st.session_state.chosen_characters = toggle_chosen(
+        st.session_state.get("chosen_characters", []), character_id, ticked=ticked
+    )
 
 
 def _render_home_options() -> None:
@@ -2219,26 +2217,11 @@ def _render_connection_setup() -> None:
 
 
 def _resolve_cast(character_ids) -> list[tuple[str, str, str, str, str]]:
-    """Character ids resolved against who is actually still saved.
+    """Wiring only: resolve_cast (colouring_factory.characters) is the pure
+    lookup; this just supplies it with the cached cast rather than reading
+    from disk directly."""
 
-    Read-through, the same discipline quick_drawing_options applies to the
-    saved settings: an id that no longer matches a character (because it was
-    deleted since) is dropped here rather than reaching load_character_image
-    and breaking the caller.
-    """
-
-    by_id = {character.id: character for character in _characters()}
-    return [
-        (
-            character.id,
-            character.name,
-            character.kind,
-            character.marks,
-            character.appearance,
-        )
-        for character_id in character_ids
-        if (character := by_id.get(character_id)) is not None
-    ]
+    return resolve_cast(character_ids, _characters())
 
 
 def _cast_for_drawing() -> list[tuple[str, str, str, str, str]]:

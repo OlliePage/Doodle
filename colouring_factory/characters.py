@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
@@ -292,6 +293,51 @@ def delete_character(character_id: str) -> None:
     folder = _folder_for(character_id)
     if folder.exists():
         shutil.rmtree(folder)
+
+
+def resolve_cast(
+    character_ids: Sequence[str], characters: Sequence[Character]
+) -> list[tuple[str, str, str, str, str]]:
+    """Character ids resolved against who is actually still saved.
+
+    Read-through, the same discipline quick_drawing_options applies to the
+    saved settings: an id that no longer matches a character (because it was
+    deleted since) is dropped here rather than reaching load_character_image
+    and breaking the caller. `characters` is supplied by the caller rather
+    than read here, so a cached or uncached list works identically.
+    """
+
+    by_id = {character.id: character for character in characters}
+    return [
+        (
+            character.id,
+            character.name,
+            character.kind,
+            character.marks,
+            character.appearance,
+        )
+        for character_id in character_ids
+        if (character := by_id.get(character_id)) is not None
+    ]
+
+
+def toggle_chosen(
+    chosen: Sequence[str], character_id: str, *, ticked: bool
+) -> list[str]:
+    """One id added or removed from a chosen list, order otherwise kept.
+
+    Keyed by id, not name: two characters can share a name (a girl and her
+    teddy both called Ida), and a name-keyed widget key raised a duplicate-
+    key error that took the whole homepage down with it.
+    """
+
+    updated = list(chosen)
+    if ticked:
+        if character_id not in updated:
+            updated.append(character_id)
+    elif character_id in updated:
+        updated.remove(character_id)
+    return updated
 
 
 def _folder_for(character_id: str) -> Path:
