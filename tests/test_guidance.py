@@ -173,3 +173,16 @@ def test_a_badge_only_too_large_once_calibrated_is_reported_as_such() -> None:
         largest_margin_that_fits(config, CalibrationProfile(x_scale=1.05, y_scale=1.05))
         is None
     )
+
+
+def test_the_rate_limit_guidance_names_nothing_absent_from_the_characters_screen() -> (
+    None
+):
+    """FB-20/ACC-11: rate_limit can fire from adding a character, which
+    always draws exactly one picture and has no Alternatives control and
+    never reaches the generation form the old wording pointed at."""
+
+    entry = guidance_for("rate_limit")
+    assert "alternatives" not in entry.fix.lower()
+    assert "alternatives" not in entry.control.lower()
+    assert "generation form" not in entry.control.lower()

@@ -64,8 +64,12 @@ _ENTRIES: dict[str, Guidance] = {
     "rate_limit": Guidance(
         title="The provider is asking you to slow down",
         cause="Too many requests arrived in a short time.",
-        fix="Wait a minute and draw again. Asking for fewer alternatives at once also helps.",
-        control="Alternatives, on the generation form",
+        # Reachable from adding a character, redrawing a portrait, colouring,
+        # a badge redraw and every ordinary drawing screen — nowhere near
+        # only the generation form's Alternatives count, which is what this
+        # used to name and which does not exist on most of those screens.
+        fix="Wait a minute, then press the same button again.",
+        control="The button you just pressed",
     ),
     "content": Guidance(
         title="The provider declined that description",

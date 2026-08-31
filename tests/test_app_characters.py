@@ -1852,3 +1852,36 @@ def test_deleting_a_character_directly_is_invisible_on_the_very_next_rerun() -> 
     at.text_input(key="character_name").set_value("").run()
 
     assert not any("Ida" in str(block.value) for block in at.markdown)
+
+
+def test_a_rate_limit_while_adding_a_character_does_not_point_at_alternatives(
+    monkeypatch,
+) -> None:
+    """FB-20/ACC-11: the guidance shown here used to name "Alternatives, on
+    the generation form" — a control this screen does not have and never
+    reaches, since adding a character always draws exactly one picture."""
+
+    def rate_limited(**kwargs):
+        raise GeneratorError(
+            "OpenAI's rate limit was reached.",
+            provider="OpenAI",
+            code="rate_limit",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", rate_limited)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("ida.png", PHOTO_BYTES, "image/png")).run()
+    at.text_input(key="character_name").set_value("Ida").run()
+
+    for button in at.button:
+        if button.label == "Draw them":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    captions = " ".join(str(caption.value) for caption in at.caption).lower()
+    assert "alternatives" not in captions
+    assert "generation form" not in captions
