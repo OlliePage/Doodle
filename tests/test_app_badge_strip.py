@@ -6,16 +6,23 @@ already drawn, and offers a redraw composed for the circle as a button that
 names its cost. A drawing made for an A4 page puts a small figure in a
 landscape the circle then crops the interest out of; a drawing asked for a
 badge fills the frame instead, so the redraw is worth its one generation.
+
+The fit is cached by a hash of the picture it was made from, the same shape
+colour_previews already uses, so a redraw, a refinement or a swapped
+alternative cannot leave a stale one behind: whatever quick_processed now is
+gets looked up (or computed) fresh, rather than a separately-tracked value
+someone has to remember to update.
 """
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from colouring_factory import generators
+from colouring_factory import generators, history
 from colouring_factory.characters import save_character
 from colouring_factory.generators import GeneratorError
 from colouring_factory.models import GeneratedArtwork
@@ -25,7 +32,6 @@ APP = str(PROJECT_ROOT / "app.py")
 ASSETS = PROJECT_ROOT / "assets"
 ARTWORK = (ASSETS / "demo_dinosaur.png").read_bytes()
 NEW_ARTWORK = (ASSETS / "demo_bear_astronaut.png").read_bytes()
-BADGE_PREVIEW = (ASSETS / "demo_robot_balloons.png").read_bytes()
 PDF = b"%PDF-1.4\ntest sheet\n%%EOF\n"
 
 
@@ -35,6 +41,12 @@ def isolated(monkeypatch, tmp_path):
     for variable in ("GEMINI_API_KEY", "RECRAFT_API_TOKEN"):
         monkeypatch.delenv(variable, raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+
+def _content_key(image_bytes: bytes) -> str:
+    """Mirrors app.py's private _colour_key: sha256 hex of the picture."""
+
+    return hashlib.sha256(image_bytes).hexdigest()
 
 
 def _result_screen() -> AppTest:
@@ -48,11 +60,6 @@ def _result_screen() -> AppTest:
         "source": "test",
         "concept": "Blue dinosaur",
     }
-    # Already-prepared, the same convention test_app_print.py's quick_pdf
-    # fake follows: this file's job is the strip's render and wiring, not
-    # re-proving the fitting maths _cached_badge_preview already owns.
-    at.session_state["badge_preview"] = BADGE_PREVIEW
-    at.session_state["badge_raw"] = ARTWORK
     at.run()
     return at
 
@@ -64,6 +71,13 @@ def _button(at: AppTest, label: str):
     raise AssertionError(f"{label!r} not found; saw {[b.label for b in at.button]}")
 
 
+def _change_box(at: AppTest):
+    for widget in at.text_input:
+        if widget.label == "Make a change":
+            return widget
+    raise AssertionError("the refine box is missing")
+
+
 def test_the_result_screen_shows_the_doodle_as_a_badge() -> None:
     at = _result_screen()
     assert not at.exception
@@ -72,21 +86,23 @@ def test_the_result_screen_shows_the_doodle_as_a_badge() -> None:
     # already contains the word "Badges", so that substring alone would pass
     # with no strip at all. The exact size is what only this feature says.
     assert "58 mm badge" in captions.lower()
-    assert at.session_state["badge_preview"]
+    assert at.session_state["badge_previews"]
 
 
 def test_the_redraw_names_its_cost_before_it_is_clicked() -> None:
     at = _result_screen()
     captions = " ".join(str(caption.value) for caption in at.caption)
-    assert "costs one drawing" in captions.lower()
+    # "costs one generation" is the house phrase: the refine box ("Each
+    # change costs one generation.") and the colour button both use it.
+    assert "costs one generation" in captions.lower()
 
 
 def test_a_freshly_drawn_doodle_gets_a_free_badge_preview() -> None:
-    """_prepare_badge_outputs must actually be wired into _quick_generate.
+    """The badge cache must actually be reachable from a real drawing.
 
-    A strip that only renders when a test hand-feeds it badge_preview would
+    A strip that only renders when a test hand-feeds it a picture would
     never appear for a real doodle, so this drives the demo generation path
-    end to end and checks the key is populated without being preset.
+    end to end and checks a cache entry exists without anything preset.
     """
 
     at = AppTest.from_file(APP, default_timeout=120)
@@ -97,7 +113,7 @@ def test_a_freshly_drawn_doodle_gets_a_free_badge_preview() -> None:
 
     assert not at.exception
     assert at.session_state["screen"] == "result"
-    assert at.session_state["badge_preview"]
+    assert at.session_state["badge_previews"]
 
 
 def test_drawing_it_for_a_badge_asks_for_a_square_composed_picture(monkeypatch) -> None:
@@ -148,11 +164,12 @@ def test_the_redraw_adopts_the_new_picture_as_the_doodle(monkeypatch) -> None:
 
     assert not at.exception
     assert at.session_state["current_raw"] == NEW_ARTWORK
-    assert at.session_state["badge_raw"] == NEW_ARTWORK
     assert at.session_state["quick_processed"] is not None
-    # The strip below the new doodle must be its own, not the old picture's
-    # fit left on screen.
-    assert at.session_state["badge_preview"] != BADGE_PREVIEW
+    assert at.session_state["quick_processed"] != ARTWORK
+    # The strip below the new doodle must be its own: a cache entry keyed by
+    # the new picture, not the old picture's fit left on screen.
+    new_key = _content_key(at.session_state["quick_processed"])
+    assert new_key in at.session_state["badge_previews"]
     # A redraw starts a fresh doodle rather than appending to the picture it
     # replaced, the same rule _adopt_artwork already applies everywhere else.
     assert len(at.session_state["doodle_versions"]) == 1
@@ -203,15 +220,76 @@ def test_a_failed_redraw_is_explained_rather_than_crashing(monkeypatch) -> None:
     assert not at.exception
     # A declined redraw must not touch the doodle already on screen.
     assert at.session_state["current_raw"] == ARTWORK
-    assert at.session_state["badge_raw"] == ARTWORK
     errors = " ".join(str(e.value) for e in at.error)
     assert errors
 
 
-def test_starting_a_new_doodle_clears_the_badge_strip() -> None:
+def test_a_new_doodle_shows_no_badge_strip() -> None:
     at = _result_screen()
     at = _button(at, "New doodle").click().run()
 
     assert not at.exception
-    assert at.session_state["badge_preview"] is None
-    assert at.session_state["badge_raw"] is None
+    assert at.session_state["quick_processed"] is None
+    captions = " ".join(str(c.value) for c in at.caption)
+    assert "58 mm badge" not in captions.lower()
+
+
+def test_a_change_moves_the_picture_and_its_badge(monkeypatch) -> None:
+    """ "Change it" must move the picture on screen, and the badge with it.
+
+    _render_refine_controls used to call _set_current_artwork and nothing
+    else, so quick_processed (what the result screen and the badge strip
+    both read) never moved: the picture on screen looked untouched and any
+    badge below it kept showing the rejected original.
+    """
+
+    changed = ARTWORK + b"-changed"
+
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=changed, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _result_screen()
+    at.session_state["doodle_versions"] = history.start(
+        GeneratedArtwork(
+            image_bytes=ARTWORK,
+            prompt="original",
+            provider="OpenAI",
+            model="gpt-image-2",
+        )
+    )
+    at.session_state["current_version"] = 0
+    at.run()
+
+    _change_box(at).set_value("give it a hat")
+    at = _button(at, "Change it").click().run()
+
+    assert not at.exception
+    assert at.session_state["current_raw"] == changed
+    assert at.session_state["quick_processed"] is not None
+    assert at.session_state["quick_processed"] != ARTWORK
+    new_key = _content_key(at.session_state["quick_processed"])
+    assert new_key in at.session_state["badge_previews"]
+
+
+def test_swapping_an_alternative_moves_the_badge_too() -> None:
+    at = _result_screen()
+    at.session_state["candidates"] = [
+        GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        ),
+        GeneratedArtwork(
+            image_bytes=NEW_ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        ),
+    ]
+    at.run()
+
+    at = _button(at, "Use this one").click().run()
+
+    assert not at.exception
+    assert at.session_state["current_raw"] == NEW_ARTWORK
+    new_key = _content_key(at.session_state["quick_processed"])
+    assert new_key in at.session_state["badge_previews"]

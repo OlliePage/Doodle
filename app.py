@@ -297,8 +297,7 @@ def _initialise_state() -> None:
         "pair_raw": None,
         "pair_processed": None,
         "pair_pdf": None,
-        "badge_preview": None,
-        "badge_raw": None,
+        "badge_previews": {},
         "colour_previews": {},
         "showing_colours": False,
         "session_provider_keys": {},
@@ -388,8 +387,9 @@ def _start_new_doodle() -> None:
     st.session_state.pair_raw = None
     st.session_state.pair_processed = None
     st.session_state.pair_pdf = None
-    st.session_state.badge_preview = None
-    st.session_state.badge_raw = None
+    # badge_previews is deliberately left alone, the same rule colour_previews
+    # already follows: both are content-addressed caches, so an entry for a
+    # picture no longer on screen is just unused, never wrong.
     st.session_state.showing_colours = False
     st.session_state.connection_error = None
     st.session_state.quick_mode = "ai"
@@ -1382,6 +1382,11 @@ def _render_refine_controls(*, key_prefix: str) -> None:
         title=st.session_state.current_title,
         metadata={**st.session_state.current_metadata, "instruction": instruction},
     )
+    # _set_current_artwork only sets current_raw: without rebuilding
+    # quick_processed/quick_pdf here too, the result screen kept showing the
+    # picture from before the change, so pressing "Change it" appeared to do
+    # nothing at all.
+    _prepare_quick_outputs()
     st.rerun()
 
 
@@ -1849,7 +1854,6 @@ def _quick_generate() -> None:
 
     _prepare_quick_outputs()
     _prepare_pair_outputs()
-    _prepare_badge_outputs()
     st.session_state.screen = "result"
 
 
@@ -1924,29 +1928,6 @@ def _prepare_pair_outputs() -> None:
     st.session_state.pair_pdf = create_full_page_pdf(processed, A4_SHEET)
 
 
-def _prepare_badge_outputs() -> None:
-    """Fit the finished picture into a 58 mm badge, which costs nothing.
-
-    A separate function from the redraw: this one only re-lays-out what is
-    already drawn, so it is instant and free and can be shown without asking.
-    """
-
-    processed = st.session_state.get("quick_processed")
-    if not processed:
-        st.session_state.badge_preview = None
-        return
-
-    # The calibration profile is read only after the result screen's
-    # st.stop(), so this cannot borrow it and loads its own, falling back to
-    # an uncalibrated default when nothing has been saved yet.
-    calibration = CalibrationProfile.from_dict(load_settings().get("calibration"))
-    st.session_state.badge_preview = _cached_badge_preview(
-        processed,
-        json.dumps(asdict(BADGE_58MM), sort_keys=True),
-        json.dumps(calibration.to_dict(), sort_keys=True),
-    )
-
-
 def _render_grown_up_sheet() -> None:
     """The matching intricate sheet, when one was drawn.
 
@@ -1996,14 +1977,32 @@ _BADGE_REDRAW_EXTRA_INSTRUCTIONS = (
 def _render_badge_strip() -> None:
     """Every finished doodle, already fitted to a 58 mm badge for free.
 
-    Self-guarding like _render_grown_up_sheet: badge_preview is a plain
-    session key prepared eagerly by _prepare_badge_outputs, so there is
-    nothing to compute here, only nothing-to-show to detect.
+    Keyed by a hash of the picture actually on screen, the same shape
+    colour_previews already uses for the coloured-copy cache: a redraw, a
+    refinement or a swapped alternative all just change quick_processed, and
+    whatever that now is gets looked up (or computed and cached) fresh here.
+    Nothing has to remember to call a separate "keep the badge in sync"
+    function, so no path can leave a stale one behind.
     """
 
-    preview = st.session_state.get("badge_preview")
-    if not preview:
+    processed = st.session_state.get("quick_processed")
+    if not processed:
         return
+
+    cache = st.session_state.setdefault("badge_previews", {})
+    key = _colour_key(processed)
+    preview = cache.get(key)
+    if preview is None:
+        # The calibration profile is read only after the result screen's
+        # st.stop(), so this cannot borrow it and loads its own, falling
+        # back to an uncalibrated default when nothing has been saved yet.
+        calibration = CalibrationProfile.from_dict(load_settings().get("calibration"))
+        preview = _cached_badge_preview(
+            processed,
+            json.dumps(asdict(BADGE_58MM), sort_keys=True),
+            json.dumps(calibration.to_dict(), sort_keys=True),
+        )
+        cache[key] = preview
 
     provider_id = _active_provider_id()
     spec = get_provider(provider_id)
@@ -2014,7 +2013,7 @@ def _render_badge_strip() -> None:
         st.image(preview, width="stretch")
         st.caption(
             "Your doodle fitted to a 58 mm badge. Doodle can draw it again "
-            "composed for the circle instead, which costs one drawing."
+            "composed for the circle instead, which costs one generation."
         )
         if not st.button(
             "Draw it for a badge",
@@ -2088,10 +2087,8 @@ def _render_badge_strip() -> None:
             return
 
         st.session_state.candidates = []
-        st.session_state.badge_raw = artwork.image_bytes
         _adopt_artwork(artwork, idea)
         _prepare_quick_outputs()
-        _prepare_badge_outputs()
         st.rerun()
 
 
