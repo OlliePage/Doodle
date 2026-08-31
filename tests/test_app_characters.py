@@ -1008,3 +1008,77 @@ def test_too_many_characters_on_gemini_is_explained_not_silently_moved(
     assert "fewer characters" in guidance or "untick" in guidance
 
 
+def test_the_picker_disables_further_ticks_once_the_provider_limit_is_reached(
+    monkeypatch,
+) -> None:
+    """FB-07: the picker let a parent tick more characters than the
+    connected service will accept, with no cap and no count shown. Google
+    Gemini looks at 4 pictures at a time (colouring_factory/providers.py)."""
+
+    ids = [
+        save_character(
+            photo=PHOTO_BYTES,
+            portrait=ARTWORK,
+            name=f"Character {i}",
+            kind="person",
+            marks="",
+        )
+        for i in range(5)
+    ]
+    save_settings({**load_settings(), "image_provider": "google"})
+    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+
+    for character_id in ids[:4]:
+        at.checkbox(key=f"character_pick_{character_id}").set_value(True).run()
+
+    assert at.session_state["chosen_characters"] == ids[:4]
+    # The fifth, unticked box must be disabled: ticking it would build a
+    # request refine_with_provider can only reject with too_many_references.
+    assert at.checkbox(key=f"character_pick_{ids[4]}").disabled is True
+    # An already-ticked box stays enabled, so unticking back under the cap
+    # is still possible.
+    assert at.checkbox(key=f"character_pick_{ids[0]}").disabled is False
+    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
+    assert "4 characters" in popover_labels
+
+
+def test_the_picker_shows_a_distinct_portrait_for_each_character() -> None:
+    """FB-12: name and a tick box only cannot tell two same-named characters
+    apart. Save a girl called Ida and her teddy also called Ida — the exact
+    collision _remember_chosen's own docstring names — and the picker must
+    show two different pictures, not two identical rows."""
+
+    ida_person_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+    ida_teddy_id = save_character(
+        photo=PHOTO_BYTES, portrait=OTHER_ARTWORK, name="Ida", kind="toy", marks=""
+    )
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+
+    # Not just "a popover with a checkbox": the grown-up-detail popover has
+    # one too ("Also draw one for me, at grown-up detail"), and it renders
+    # before the characters popover.
+    picker = next(
+        popover
+        for popover in at.get("popover")
+        if any(
+            (checkbox.key or "").startswith("character_pick_")
+            for checkbox in popover.get("checkbox")
+        )
+    )
+    images = picker.get("image")
+    assert len(images) == 2
+    # Each st.image is served from a content-hashed URL, so two different
+    # portraits produce two different URLs; two identical rows (the defect)
+    # would have produced the same one twice, or none at all.
+    urls = {tuple(image.value) for image in images}
+    assert len(urls) == 2
+    assert ida_person_id and ida_teddy_id  # both saved; ids only needed above
+
+

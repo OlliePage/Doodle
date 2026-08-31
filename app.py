@@ -931,22 +931,48 @@ def _render_home_options() -> None:
         if active_spec.max_reference_images >= 1:
             cast_ids = {character.id for character in cast}
             count = len(chosen_ids & cast_ids)
+            limit = active_spec.max_reference_images
             label = (
                 "nobody"
                 if not count
                 else f"{count} character{'' if count == 1 else 's'}"
             )
+            # The trigger label above stays a count, never a list of names: the
+            # settings line it sits on cannot shrink or ellipsise. The portrait
+            # is what tells two same-named characters apart (a girl and her
+            # teddy both called Ida), so it lives inside the panel instead.
             with st.popover(label, type="tertiary"):
                 if cast:
-                    st.caption("Doodle draws these characters into the picture.")
+                    st.caption(
+                        "Doodle draws these characters into the picture. "
+                        f"{active_spec.label} looks at up to {limit} at once."
+                    )
                     for character in cast:
-                        st.checkbox(
-                            character.name,
-                            key=f"character_pick_{character.id}",
-                            value=character.id in chosen_ids,
-                            on_change=_remember_chosen,
-                            args=(character.id,),
+                        ticked = character.id in chosen_ids
+                        portrait_col, tick_col = st.columns(
+                            [1, 4], vertical_alignment="center"
                         )
+                        with portrait_col:
+                            portrait = load_character_portrait(character.id)
+                            if portrait is not None:
+                                st.image(portrait, width=36)
+                            else:
+                                st.markdown(":material/broken_image:")
+                        with tick_col:
+                            st.checkbox(
+                                character.name,
+                                key=f"character_pick_{character.id}",
+                                value=ticked,
+                                on_change=_remember_chosen,
+                                args=(character.id,),
+                                # Ticking past what the connected service will
+                                # look at builds a request that cannot
+                                # succeed, so the box is disabled once the cap
+                                # is reached rather than left to fail later.
+                                # An already-ticked box stays enabled, so
+                                # unticking back under the cap is possible.
+                                disabled=not ticked and count >= limit,
+                            )
                 else:
                     st.caption(
                         "Save a person, toy or character once, then put them "
