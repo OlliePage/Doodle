@@ -283,9 +283,7 @@ def _initialise_state() -> None:
         "library_notice": "",
         "library_return": "home",
         "pending_delete": "",
-        "characters_return": "home",
-        "character_draft": {},
-        # The picker's ticks live here rather than in per-name widget keys.
+        # The picker's ticks live here rather than in per-character widget keys.
         # Streamlit garbage-collects a widget key the moment its widget is not
         # rendered, so ticking someone, visiting this screen and coming back
         # would silently lose every tick.
@@ -398,7 +396,6 @@ def _start_new_doodle() -> None:
     # refinement quietly edits a doodle that is no longer on screen.
     st.session_state.doodle_versions = ()
     st.session_state.current_version = 0
-    st.session_state.character_draft = {}
     # chosen_characters is deliberately left alone: a parent drawing for the
     # same children wants the same cast next time, the same reasoning the
     # homepage settings already follow.
@@ -811,16 +808,21 @@ def _render_alternatives_picker() -> None:
             )
 
 
-def _remember_chosen(name: str) -> None:
+def _remember_chosen(character_id: str) -> None:
     """Widget keys vanish when their widget is not rendered, so the answer
-    lives in a plain key and each box is told its value on the way in."""
+    lives in a plain key and each box is told its value on the way in.
+
+    Keyed by id, not name: two characters can share a name (a girl and her
+    teddy both called Ida), and a name-keyed widget key raised a duplicate-
+    key error that took the whole homepage down with it.
+    """
 
     chosen = list(st.session_state.get("chosen_characters", []))
-    if st.session_state.get(f"character_pick_{name}"):
-        if name not in chosen:
-            chosen.append(name)
-    elif name in chosen:
-        chosen.remove(name)
+    if st.session_state.get(f"character_pick_{character_id}"):
+        if character_id not in chosen:
+            chosen.append(character_id)
+    elif character_id in chosen:
+        chosen.remove(character_id)
     st.session_state.chosen_characters = chosen
 
 
@@ -854,10 +856,11 @@ def _render_home_options() -> None:
     age_label = f"{shown_age} + grown-up" if pairing else str(shown_age)
 
     # Read-through against the current cast, the same discipline
-    # quick_drawing_options applies to the saved settings: a name left over
+    # quick_drawing_options applies to the saved settings: an id left over
     # from a character who has since been deleted must not be counted.
-    chosen_names = list(st.session_state.get("chosen_characters", []))
+    chosen_ids = set(st.session_state.get("chosen_characters", []))
     cast = list_characters()
+    active_spec = get_provider(_active_provider_id())
 
     with st.container(
         key="doodle-home-settings",
@@ -905,31 +908,44 @@ def _render_home_options() -> None:
                 index=list(QUICK_STYLE_CHOICES).index(options["style"]),
                 key="home_style",
             )
-        # Offered only once there is a cast to put in the picture, the same
-        # rule the homepage already applies to Saved doodles (n).
-        if cast:
-            count = len(
-                [name for name in chosen_names if name in {c.name for c in cast}]
-            )
+        # Rendered from the first run, unlike Saved doodles (n) in the
+        # corner: hiding this until a cast existed left no control anywhere
+        # that reached the characters screen, so a parent could never add
+        # their first character. Hidden only when the active service cannot
+        # look at a reference picture at all, in which case nothing here
+        # could work regardless of what is saved.
+        if active_spec.max_reference_images >= 1:
+            cast_ids = {character.id for character in cast}
+            count = len(chosen_ids & cast_ids)
             label = (
                 "nobody"
                 if not count
                 else f"{count} character{'' if count == 1 else 's'}"
             )
             with st.popover(label, type="tertiary"):
-                st.caption("Doodle draws these characters into the picture.")
-                for character in cast:
-                    st.checkbox(
-                        character.name,
-                        key=f"character_pick_{character.name}",
-                        value=character.name in chosen_names,
-                        on_change=_remember_chosen,
-                        args=(character.name,),
+                if cast:
+                    st.caption("Doodle draws these characters into the picture.")
+                    for character in cast:
+                        st.checkbox(
+                            character.name,
+                            key=f"character_pick_{character.id}",
+                            value=character.id in chosen_ids,
+                            on_change=_remember_chosen,
+                            args=(character.id,),
+                        )
+                else:
+                    st.caption(
+                        "Save a person, toy or character once, then put them "
+                        "in any picture Doodle draws."
                     )
                 if st.button("Add someone", width="stretch"):
-                    st.session_state.characters_return = "home"
                     st.session_state.screen = "characters"
                     st.rerun()
+        else:
+            st.caption(
+                f"{active_spec.label} cannot draw from a picture of someone. "
+                "Connect OpenAI or Google Gemini to add characters."
+            )
 
     # A segmented control returns None when its selection is cleared, which
     # would otherwise write a null into the settings file.
@@ -1159,9 +1175,10 @@ def _render_characters_screen() -> None:
 
     _render_top_bar(where="characters")
 
-    target = str(st.session_state.get("characters_return", "home"))
+    # The homepage's "Add someone" button is the only route here, so Back
+    # always has exactly one place to return to.
     if st.button("Back", width="stretch", icon=":material/arrow_back:"):
-        st.session_state.screen = target if target != "characters" else "home"
+        st.session_state.screen = "home"
         st.rerun()
 
     st.header("Your characters")
@@ -1225,6 +1242,7 @@ def _render_characters_screen() -> None:
     st.subheader("Add a character")
 
     provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
     api_key, _source = _provider_key(provider_id)
 
     uploaded = st.file_uploader(
@@ -1247,12 +1265,23 @@ def _render_characters_screen() -> None:
         placeholder="Curly hair, round glasses, a gap in her front teeth.",
     )
 
+    if spec.max_reference_images < 1:
+        # The same rule as "Colour it in for me": read the capability and do
+        # not offer a button that can only fail, rather than let the parent
+        # press it and be told to change provider on a screen they are not on.
+        st.caption(
+            f"{spec.label} cannot draw from a picture of someone. Connect "
+            "OpenAI or Google Gemini to add a character."
+        )
+        return
+
     if st.button(
         "Draw them",
         type="primary",
         width="stretch",
         icon=":material/auto_awesome:",
         disabled=not api_key,
+        help="Draws their portrait and saves them to your cast. Costs one generation.",
     ):
         if not uploaded:
             st.error("Add a picture first.")
@@ -1692,21 +1721,46 @@ def _render_connection_setup() -> None:
     )
 
 
-def _cast_for_drawing() -> list[tuple[str, str, str, str]]:
-    """The ticked names, resolved against who is actually still saved.
+def _resolve_cast(character_ids) -> list[tuple[str, str, str, str]]:
+    """Character ids resolved against who is actually still saved.
 
     Read-through, the same discipline quick_drawing_options applies to the
-    saved settings: a name that no longer matches a character (because it was
-    deleted after being ticked) is dropped here rather than reaching
-    load_character_image and breaking the homepage.
+    saved settings: an id that no longer matches a character (because it was
+    deleted since) is dropped here rather than reaching load_character_image
+    and breaking the caller.
     """
 
-    by_name = {character.name: character for character in list_characters()}
+    by_id = {character.id: character for character in list_characters()}
     return [
         (character.id, character.name, character.kind, character.marks)
-        for name in st.session_state.get("chosen_characters", [])
-        if (character := by_name.get(name)) is not None
+        for character_id in character_ids
+        if (character := by_id.get(character_id)) is not None
     ]
+
+
+def _cast_for_drawing() -> list[tuple[str, str, str, str]]:
+    """The ticked ids, resolved against who is actually still saved."""
+
+    return _resolve_cast(st.session_state.get("chosen_characters", []))
+
+
+def _recorded_cast() -> list[tuple[str, str, str, str]]:
+    """Who a doodle was actually drawn with, not who is ticked now.
+
+    _quick_generate records the cast a scene was drawn with on the artwork's
+    own metadata, under "generation" -> "characters". Reading that back here,
+    rather than the live tick list _cast_for_drawing reads, is what stops a
+    redraw putting a character into a picture — a sample, or an ordinary
+    idea drawn with no cast at all — that never had them. A picture drawn
+    without a recorded cast falls back to none, whatever is ticked now.
+    """
+
+    recorded_ids = (
+        st.session_state.get("current_metadata", {})
+        .get("generation", {})
+        .get("characters", [])
+    )
+    return _resolve_cast(recorded_ids)
 
 
 def _quick_generate() -> None:
@@ -1847,6 +1901,12 @@ def _quick_generate() -> None:
         for artwork, brief, level in zip(artworks, briefs, levels):
             artwork.metadata["brief"] = brief
             artwork.metadata["detail_level"] = level
+            # Recorded so a later badge redraw draws whoever was actually in
+            # this picture, never whoever happens to be ticked when that
+            # button is pressed — see _recorded_cast.
+            artwork.metadata["characters"] = [
+                character_id for character_id, *_ in chosen
+            ]
 
         # Shared by both paths above: the pair is the last artwork drawn at
         # GROWN_UP_LEVEL, whichever mechanism drew it.
@@ -2039,7 +2099,11 @@ def _render_badge_strip() -> None:
         options = quick_drawing_options(settings)
         model = _model_for(provider_id, spec, settings)
         quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
-        chosen = _cast_for_drawing()
+        # The cast this doodle was actually drawn with, not whoever is
+        # ticked right now: ticking someone after the fact must not put
+        # them into a picture — a sample, or an ordinary idea drawn with no
+        # cast — that never had them.
+        chosen = _recorded_cast()
 
         try:
             with st.spinner("Composing it for a badge…"):

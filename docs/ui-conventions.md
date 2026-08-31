@@ -169,3 +169,16 @@ change has to argue with them rather than quietly undo them.
   the version strip all pass through that one door; nothing sets the badge
   preview directly, so nothing can leave it pointing at a picture no longer
   on screen.
+- Unlike `Saved doodles (n)` in the corner, the characters popover is not
+  hidden until there is something to show. Copying that rule here once left
+  no control anywhere on a clean install that reached the characters screen,
+  so a parent could never add their first character. It renders from the
+  first run, inviting the parent to add someone, and is hidden only when the
+  active drawing service declares it cannot look at a reference picture at
+  all — in which case nothing behind the control could work regardless of
+  what is saved.
+- A doodle records which characters it was actually drawn with, on the
+  artwork's own metadata, rather than the badge redraw reading whoever
+  happens to be ticked when that button is pressed. Ticking someone after a
+  picture is drawn — a sample, or an ordinary idea drawn with no cast — must
+  never put them into a redraw of a picture that never had them.
