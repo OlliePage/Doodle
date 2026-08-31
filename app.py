@@ -619,6 +619,23 @@ def _cached_badge_preview(
     return render_badge_preview(image_bytes, config, calibration)
 
 
+@st.cache_data(show_spinner=False, max_entries=32)
+def _cached_badge_sheet_pdf(
+    image_bytes: bytes, config_payload: str, calibration_payload: str
+) -> bytes:
+    """The actual A4 sheet of badges the strip's preview only shows a hint of.
+
+    Built through the same create_circle_sheet_pdf every other circle-sheet
+    export uses, so a printed sheet cannot drift from what Doodle Studio's own
+    "A4 circle sheet" layout would produce from the identical config.
+    """
+
+    config = CircleSheetConfig(**json.loads(config_payload))
+    calibration = CalibrationProfile.from_dict(json.loads(calibration_payload))
+    pdf_bytes, _count = create_circle_sheet_pdf(image_bytes, config, calibration)
+    return pdf_bytes
+
+
 @st.cache_data(show_spinner=False)
 def _calibration_pdf() -> bytes:
     return create_calibration_pdf()
@@ -2225,14 +2242,15 @@ def _render_badge_strip() -> None:
     if not processed:
         return
 
+    # Read once per run, whether or not the preview cache hits: the badge
+    # sheet built below needs the same profile, and loading it only on a
+    # cache miss left it undefined the rest of the time.
+    calibration = CalibrationProfile.from_dict(load_settings().get("calibration"))
+
     cache = st.session_state.setdefault("badge_previews", {})
     key = _colour_key(processed)
     preview = cache.get(key)
     if preview is None:
-        # The calibration profile is read only after the result screen's
-        # st.stop(), so this cannot borrow it and loads its own, falling
-        # back to an uncalibrated default when nothing has been saved yet.
-        calibration = CalibrationProfile.from_dict(load_settings().get("calibration"))
         preview = _cached_badge_preview(
             processed,
             json.dumps(asdict(BADGE_58MM), sort_keys=True),
@@ -2251,87 +2269,133 @@ def _render_badge_strip() -> None:
             "Your doodle fitted to a 58 mm badge. Doodle can draw it again "
             "composed for the circle instead, which costs one generation."
         )
-        if not st.button(
+        if st.button(
             "Draw it for a badge",
             width="stretch",
             icon=":material/badge:",
             key="draw_for_badge",
             disabled=not api_key,
         ):
-            return
+            idea = (
+                str(
+                    st.session_state.get("current_metadata", {}).get("concept")
+                    or st.session_state.get("current_title", "")
+                ).strip()
+                or "Doodle"
+            )
+            settings = load_settings()
+            options = quick_drawing_options(settings)
+            model = _model_for(provider_id, spec, settings)
+            quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
+            # The cast this doodle was actually drawn with, not whoever is
+            # ticked right now: ticking someone after the fact must not put
+            # them into a picture — a sample, or an ordinary idea drawn
+            # with no cast — that never had them.
+            chosen = _recorded_cast()
 
-        idea = (
-            str(
-                st.session_state.get("current_metadata", {}).get("concept")
-                or st.session_state.get("current_title", "")
-            ).strip()
-            or "Doodle"
-        )
-        settings = load_settings()
-        options = quick_drawing_options(settings)
-        model = _model_for(provider_id, spec, settings)
-        quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
-        # The cast this doodle was actually drawn with, not whoever is
-        # ticked right now: ticking someone after the fact must not put
-        # them into a picture — a sample, or an ordinary idea drawn with no
-        # cast — that never had them.
-        chosen = _recorded_cast()
-
-        try:
-            with st.spinner("Composing it for a badge…"):
-                if chosen:
-                    # A scene starring saved characters is redrawn the same
-                    # way _quick_generate draws one: from their stored
-                    # photographs, not from the drawn (deliberately
-                    # exaggerated) portrait — see the matching comment there.
-                    references = tuple(
-                        load_character_image(character_id, portrait=False)
-                        for character_id, *_ in chosen
-                    )
-                    artwork = refine_with_provider(
-                        provider_id=provider_id,
-                        api_key=api_key,
-                        prompt=build_character_scene_prompt(
-                            idea,
-                            [(name, kind, marks) for _, name, kind, marks in chosen],
-                            age_profile=str(options["age_profile"]),
-                            style_name=str(options["style"]),
-                            target="Round badge",
-                            extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
-                        ),
-                        reference_images=references,
-                        model=model,
-                        size=spec.square_size,
-                        quality=quality,
-                    )
-                else:
-                    artworks = generate_with_provider(
-                        provider_id=provider_id,
-                        api_key=api_key,
-                        prompts=[
-                            build_colouring_prompt(
+            try:
+                with st.spinner("Composing it for a badge…"):
+                    if chosen:
+                        # A scene starring saved characters is redrawn the
+                        # same way _quick_generate draws one: from their
+                        # stored photographs, not from the drawn
+                        # (deliberately exaggerated) portrait — see the
+                        # matching comment there.
+                        references = tuple(
+                            load_character_image(character_id, portrait=False)
+                            for character_id, *_ in chosen
+                        )
+                        artwork = refine_with_provider(
+                            provider_id=provider_id,
+                            api_key=api_key,
+                            prompt=build_character_scene_prompt(
                                 idea,
+                                [
+                                    (name, kind, marks)
+                                    for _, name, kind, marks in chosen
+                                ],
                                 age_profile=str(options["age_profile"]),
                                 style_name=str(options["style"]),
                                 target="Round badge",
                                 extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
-                            )
-                        ],
-                        model=model,
-                        size=spec.square_size,
-                        quality=quality,
-                    )
-                    artwork = artworks[0]
-        except GeneratorError as exc:
-            _show_guidance(exc.code, detail=str(exc))
-            return
+                            ),
+                            reference_images=references,
+                            model=model,
+                            size=spec.square_size,
+                            quality=quality,
+                        )
+                    else:
+                        artworks = generate_with_provider(
+                            provider_id=provider_id,
+                            api_key=api_key,
+                            prompts=[
+                                build_colouring_prompt(
+                                    idea,
+                                    age_profile=str(options["age_profile"]),
+                                    style_name=str(options["style"]),
+                                    target="Round badge",
+                                    extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
+                                )
+                            ],
+                            model=model,
+                            size=spec.square_size,
+                            quality=quality,
+                        )
+                        artwork = artworks[0]
+            except GeneratorError as exc:
+                _show_guidance(exc.code, detail=str(exc))
+            else:
+                st.session_state.candidates = []
+                _adopt_artwork(
+                    artwork,
+                    idea,
+                    characters=[character_id for character_id, *_ in chosen],
+                )
+                _prepare_quick_outputs()
+                st.rerun()
 
-        st.session_state.candidates = []
-        _adopt_artwork(
-            artwork, idea, characters=[character_id for character_id, *_ in chosen]
+        # The strip previewed a badge and, above, can charge a generation to
+        # compose one, so it has to be able to produce an actual badge too:
+        # the same circle-sheet layout Doodle Studio's "A4 circle sheet"
+        # export uses, at the 58 mm size this strip already advertises.
+        sheet_pdf = _cached_badge_sheet_pdf(
+            processed,
+            json.dumps(asdict(BADGE_58MM), sort_keys=True),
+            json.dumps(calibration.to_dict(), sort_keys=True),
         )
-        _prepare_quick_outputs()
-        st.rerun()
+        st.caption("An A4 sheet of these badges, ready to cut out.")
+        if st.button(
+            "Print your badges",
+            type="primary",
+            width="stretch",
+            icon=":material/print:",
+            key="print_badges",
+        ):
+            _send_to_printer(sheet_pdf)
+        _render_print_help(
+            sheet_pdf,
+            file_name=f"{_slug(st.session_state.current_title)}-58mm-badges.pdf",
+            key="badges",
+            scale_note=False,
+        )
+
+
+# A failure about the picture or the cast Doodle was asked to draw, not
+# about the connection: routing these to the Connect screen showed "such-
+# and-such is connected" next to a message naming no provider at all, and
+# on a provider the Connect screen's stale-provider filter did not match
+# (Google Gemini, reached only through this feature's reference-image
+# call), the parent was moved there with nothing shown at all.
+_PICTURE_OR_CAST_CODES = frozenset(
+    {
+        "content",
+        "missing_prompt",
+        "photo_declined",
+        "too_many_references",
+        "no_reference_support",
+        "missing_picture",
+    }
+)
 
 
 def _render_generating_screen() -> None:

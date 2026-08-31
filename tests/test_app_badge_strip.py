@@ -556,3 +556,55 @@ def test_swapping_an_alternative_moves_the_badge_too() -> None:
     assert at.session_state["current_raw"] == NEW_ARTWORK
     new_key = _content_key(at.session_state["quick_processed"])
     assert new_key in at.session_state["badge_previews"]
+
+
+def _emitted_html(at: AppTest) -> str:
+    return " ".join(str(element.proto.body) for element in at.get("html"))
+
+
+def test_printing_your_badges_emits_a_genuine_a4_badge_sheet() -> None:
+    """FB-11: the strip previewed a badge and could charge a generation to
+    compose one, but the only controls on the screen ("Print this doodle",
+    "Download the PDF") produced the A4 full page, never an actual badge.
+
+    Driven against the real exporter (create_circle_sheet_pdf is not
+    byte-stable between two calls with identical arguments, confirmed
+    separately, so this checks structure rather than an exact byte match):
+    a genuine PDF, distinct from the A4 full-page fixture, sized as an A4
+    sheet rather than the ~66 mm square the free single-badge preview uses."""
+
+    import base64
+    import re
+
+    import fitz
+
+    at = _result_screen()
+    assert "doodle-print-frame" not in _emitted_html(at)
+
+    at = _button(at, "Print your badges").click().run()
+
+    assert not at.exception
+    emitted = _emitted_html(at)
+    assert "doodle-print-frame" in emitted
+
+    match = re.search(r'atob\("([A-Za-z0-9+/=]+)"\)', emitted)
+    assert match, "no base64 PDF payload found in the print trigger"
+    decoded = base64.b64decode(match.group(1))
+    assert decoded.startswith(b"%PDF")
+    # Not the same output as the A4 full-page print: a badge sheet must be
+    # its own, different PDF, not the same button under a new label.
+    assert decoded != PDF
+
+    document = fitz.open(stream=decoded, filetype="pdf")
+    assert document.page_count == 1
+    page_rect = document[0].rect
+    # A4 is 595 x 842 pt; the free preview's own single-badge page is a ~66
+    # mm square (~187 pt). Only a genuine sheet is this large.
+    assert page_rect.width > 500
+    assert page_rect.height > 700
+
+
+def test_the_badge_sheet_is_downloadable_too() -> None:
+    at = _result_screen()
+    labels_and_keys = [(button.label, button.key) for button in at.download_button]
+    assert ("Download the PDF", "download_pdf_badges") in labels_and_keys
