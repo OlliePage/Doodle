@@ -637,3 +637,59 @@ def test_a_real_heic_photo_can_be_dropped() -> None:
     assert at.session_state["dropped_picture"], "an iPhone photo was refused"
     with Image.open(BytesIO(at.session_state["dropped_picture"])) as prepared:
         assert prepared.format == "PNG", "a HEIC was stored without re-encoding"
+
+
+def test_the_photo_is_sent_and_its_description_is_not_the_scene(monkeypatch) -> None:
+    """Reported 2026-08-31: a photograph of a child came back as a pen-and-ink
+    etching, hair rendered as thousands of strokes.
+
+    The photograph was reaching the model all along — this asserts that too —
+    but the sentence describing it was being used as the Scene as well as being
+    read out in the introduction. That sentence answers "what colour is her
+    hair and skin", so handed over as the scene it was drawn literally, and it
+    arrived twice, doubling the weight of the very words that did the damage.
+    """
+
+    seen = _capture_refine(monkeypatch)
+    monkeypatch.setattr(
+        appearance,
+        "describe_appearance",
+        lambda *a, **k: "Fine light-brown hair with wispy flyaways.",
+    )
+
+    at = _drop(_homepage())
+    _button(at, "Draw it").click().run()
+
+    assert not at.exception
+    assert at.session_state["dropped_picture"] in seen["reference_images"], (
+        "the photograph itself never reached the drawing service"
+    )
+
+    prompt = seen["prompt"]
+    scene = prompt.split("Scene:", 1)[1].split("\n", 1)[0].strip()
+    assert "wispy flyaways" not in scene, (
+        "the appearance description is being handed over as the scene to draw"
+    )
+    assert prompt.count("wispy flyaways") == 1, (
+        "the description reached the model twice in one request"
+    )
+    # It still travels, in the one place it belongs.
+    assert "wispy flyaways" in prompt
+
+
+def test_a_detailed_page_still_refuses_to_engrave(monkeypatch) -> None:
+    """Grown-up is a perfectly good setting for a photograph. What broke was
+    density being rendered as darker drawing rather than as more regions to
+    put a pencil into."""
+
+    seen = _capture_refine(monkeypatch)
+    save_settings({**load_settings(), "quick_age_profile": "Grown-up"})
+
+    at = _drop(_homepage())
+    _button(at, "Draw it").click().run()
+
+    prompt = seen["prompt"]
+    assert "no stippling" in prompt
+    assert "no strokes standing in for texture" in prompt
+    assert "never darker drawing" in prompt
+    assert "strands and facets" not in prompt

@@ -1378,7 +1378,7 @@ def test_a_chosen_character_is_sent_as_a_reference(monkeypatch) -> None:
     assert not at.exception
     assert len(captured["reference_images"]) == 1
     assert "Ida" in captured["prompt"]
-    assert "never as many fine separate strands" in captured["prompt"]
+    assert "never as separate fine strands" in captured["prompt"]
     # The likeness instructions have to reach the drawing call in the order
     # that makes them work, not merely be present somewhere in the prompt.
     prompt = captured["prompt"]

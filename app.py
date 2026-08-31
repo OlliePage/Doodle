@@ -640,16 +640,40 @@ DROPPED_PICTURE_IDEA = "the picture you dropped"
 
 
 def _dropped_picture_idea() -> str:
-    """What to call a drawing made from a picture and no words.
+    """What to show a parent while a picture with no words is being drawn.
 
-    The generating screen renders the idea as the largest words on the page and
-    the connection screen shows it on the "your idea is waiting" card, so an
-    empty string would leave a parent staring at a blank wait with no sign
-    their picture was still held.
+    The generating screen renders this as the largest words on the page and the
+    connection screen shows it on the "your idea is waiting" card, so an empty
+    string would leave a parent staring at a blank wait with no sign their
+    picture was still held.
+
+    Shown, not sent. It used to be both, and the scene the model was given was
+    this same sentence — a description of hair colour, eye colour and skin
+    tone, written to travel alongside the photograph rather than to be drawn
+    from. Handed over as the scene it was drawn literally: "fine hair pulled
+    back with wispy flyaways" came back as thousands of separate strokes.
+    It also reached the model twice, once here and once in the character
+    introduction, which doubled the weight of exactly the wrong words.
+    _dropped_picture_scene is what is sent now.
     """
 
     described = str(st.session_state.get("dropped_picture_appearance", "")).strip()
     return described or DROPPED_PICTURE_IDEA
+
+
+def _dropped_picture_scene(idea: str) -> str:
+    """The Scene line for a drawing made from a picture and no typed words.
+
+    The photograph itself is attached to the request, and the introduction
+    already reads the description out. What the scene slot needs is the errand,
+    not a second copy of the appearance: draw the thing in the picture.
+    """
+
+    return (
+        idea
+        if idea and idea != _dropped_picture_idea()
+        else "the subject of the attached picture, drawn as it is"
+    )
 
 
 def _submit_home_prompt() -> None:
@@ -2980,7 +3004,10 @@ def _build_generation_plan(idea: str) -> None:
             references = (*references, dropped)
         prompts = [
             build_character_scene_prompt(
-                idea,
+                # The photograph is attached to this request and its
+                # description is read out in the introduction below. The scene
+                # slot gets the errand instead of a second copy of the words.
+                _dropped_picture_scene(idea) if dropped else idea,
                 [
                     (name, kind, marks, appearance)
                     for _, name, kind, marks, appearance in chosen

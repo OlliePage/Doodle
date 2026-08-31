@@ -3,6 +3,7 @@ import pytest
 from colouring_factory.prompts import (
     BADGE_CORNERS_RULE,
     CAST_FOREGROUND_RULE,
+    DETAIL_LEVELS,
     DROPPED_PICTURE_RULE,
     POSE_FREEDOM_RULE,
     FACE_DETAIL_EXEMPTION,
@@ -89,7 +90,21 @@ def test_hair_keeps_its_real_shape_without_becoming_fine_strands() -> None:
         "walking in a forest", [("Ida", "person", "Curly hair.", "")]
     )
     assert "real hair length, parting and wave" in prompt
-    assert "never as many fine separate strands" in prompt
+    assert "never as separate fine strands" in prompt
+    # The refusal has to survive a detailed page as well as a simple one. The
+    # density rule used to ask for "strands" by name while this rule banned
+    # them, and on 2026-08-31 a Grown-up drawing resolved that fight the wrong
+    # way: hair came back as a black mass of strokes nobody could colour.
+    detailed = build_character_scene_prompt(
+        "walking in a forest",
+        [("Ida", "person", "", "")],
+        age_profile="Grown-up",
+    )
+    assert "never as separate fine strands" in detailed
+    assert "however wispy the reference is and however detailed the page" in detailed
+    assert "strands" not in DETAIL_LEVELS["Grown-up"].regions, (
+        "the density rule is asking for the very thing the likeness rule refuses"
+    )
 
 
 def test_the_face_exemption_is_read_after_the_rules_it_overrides() -> None:
