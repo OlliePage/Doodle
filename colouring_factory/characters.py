@@ -5,8 +5,11 @@ import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+
+from PIL import Image, UnidentifiedImageError
 
 from .storage import data_root
 
@@ -113,6 +116,31 @@ def load_character_image(character_id: str, *, portrait: bool = True) -> bytes:
     if not chosen.exists():
         raise FileNotFoundError(f"Character {character_id} has no such picture.")
     return chosen.read_bytes()
+
+
+def load_character_portrait(character_id: str) -> bytes | None:
+    """The portrait's bytes, or None when they cannot be shown as a picture.
+
+    A cloud-sync client can leave a zero-byte placeholder for a file it has
+    not finished downloading, and a disk fault can truncate one outright.
+    Either way the bytes exist but Pillow cannot decode them, and that
+    decode used to happen for the first time deep inside st.image, where the
+    resulting exception took the whole characters screen down with it —
+    every character sorted after the bad one, and the add form, gone. This
+    is the one place that check belongs, so the screen can degrade one card
+    to a placeholder instead.
+    """
+
+    try:
+        data = load_character_image(character_id)
+    except FileNotFoundError:
+        return None
+    try:
+        with Image.open(BytesIO(data)) as image:
+            image.load()
+    except (UnidentifiedImageError, OSError):
+        return None
+    return data
 
 
 def delete_character(character_id: str) -> None:

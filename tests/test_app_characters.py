@@ -17,6 +17,7 @@ from streamlit.testing.v1 import AppTest
 
 from colouring_factory import generators
 from colouring_factory.characters import (
+    characters_root,
     delete_character,
     list_characters,
     save_character,
@@ -671,3 +672,53 @@ def test_pairing_with_a_chosen_cast_draws_both_sheets_with_the_characters_in_bot
     assert at.session_state["pair_raw"] == OTHER_ARTWORK
     assert at.session_state["pair_processed"] is not None
     assert at.session_state["pair_pdf"] is not None
+
+
+def test_a_corrupted_portrait_does_not_take_down_the_whole_screen() -> None:
+    """FB-02: st.image raising deep inside the render loop used to take the
+    whole screen with it. Three characters, sorted alphabetically-reversed by
+    save order below since list_characters returns newest first: the good
+    one saved last must still render, and so must the add form beneath the
+    loop, even though the corrupted one sorts between them."""
+
+    save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="EarlyGood", kind="person", marks=""
+    )
+    zero_byte_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="ZeroByteMid", kind="person", marks=""
+    )
+    (characters_root() / zero_byte_id / "portrait.png").write_bytes(b"")
+    save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="LateGood", kind="person", marks=""
+    )
+
+    at = _characters_screen()
+
+    assert not at.exception
+    names = " ".join(str(m.value) for m in at.markdown)
+    assert "LateGood" in names
+    assert "ZeroByteMid" in names
+    assert "EarlyGood" in names
+    assert any("could not be shown" in info.value.lower() for info in at.info)
+    # The add form beneath the grid must still be reachable.
+    assert any(button.label == "Draw them" for button in at.button)
+    # The bad record's own delete button must still be on the page.
+    assert any(button.key == f"delete_character_{zero_byte_id}" for button in at.button)
+
+
+def test_a_non_image_portrait_file_also_degrades_rather_than_crashing() -> None:
+    """Not just zero bytes: garbage bytes that pass no image-format check
+    at all must degrade the same way."""
+
+    garbage_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Garbage", kind="person", marks=""
+    )
+    (characters_root() / garbage_id / "portrait.png").write_bytes(
+        b"this is not a png at all, just some bytes"
+    )
+
+    at = _characters_screen()
+
+    assert not at.exception
+    assert any("could not be shown" in info.value.lower() for info in at.info)
+    assert any(button.key == f"delete_character_{garbage_id}" for button in at.button)

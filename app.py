@@ -17,6 +17,7 @@ from colouring_factory.characters import (
     delete_character,
     list_characters,
     load_character_image,
+    load_character_portrait,
     save_character,
 )
 from colouring_factory.demo import list_demo_artwork
@@ -1191,14 +1192,20 @@ def _render_characters_screen() -> None:
         for index, character in enumerate(characters):
             with columns[index % 3]:
                 with st.container(border=True):
-                    # list_characters only confirms a portrait exists, not a
-                    # photograph, so a half-written folder is skipped here
-                    # rather than crashing the whole grid.
-                    try:
-                        portrait = load_character_image(character.id)
-                    except FileNotFoundError:
-                        continue
-                    st.image(portrait, width="stretch")
+                    # A zero-byte or truncated portrait.png (a cloud-sync
+                    # placeholder, a disk fault) used to raise deep inside
+                    # st.image and take the whole screen down with it — every
+                    # character after the bad one, and the add form, gone
+                    # with no control left on the page to reach it. Degrading
+                    # to a placeholder keeps the name and the delete button.
+                    portrait = load_character_portrait(character.id)
+                    if portrait is not None:
+                        st.image(portrait, width="stretch")
+                    else:
+                        st.info(
+                            "This picture could not be shown.",
+                            icon=":material/broken_image:",
+                        )
                     st.markdown(f"**{character.name}**")
 
                     if st.session_state.get("pending_character_delete") == character.id:

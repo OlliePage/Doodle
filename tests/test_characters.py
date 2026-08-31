@@ -1,6 +1,8 @@
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from colouring_factory.characters import (
     characters_root,
@@ -8,11 +10,18 @@ from colouring_factory.characters import (
     list_characters,
     load_character,
     load_character_image,
+    load_character_portrait,
     save_character,
 )
 
 PHOTO = b"\x89PNG\r\n\x1a\n" + b"photo bytes"
 PORTRAIT = b"\x89PNG\r\n\x1a\n" + b"portrait bytes"
+
+
+def _real_png(colour=(180, 90, 40)) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (2, 2), colour).save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 @pytest.fixture(autouse=True)
@@ -156,3 +165,21 @@ def test_a_look_alike_traversal_is_contained_not_touching_anything(guard) -> Non
     assert guard.sentinel.read_bytes() == guard.sentinel_bytes
     assert guard.sibling_secret.exists()
     assert guard.sibling_secret.read_bytes() == guard.sibling_bytes
+
+
+def test_load_character_portrait_returns_none_for_a_corrupt_file() -> None:
+    # FB-02's storage-layer half: a decode failure must come back as None,
+    # not as an exception the caller has to know to catch.
+    character_id = save_character(
+        photo=PHOTO, portrait=_real_png(), name="Ida", kind="person", marks=""
+    )
+    (characters_root() / character_id / "portrait.png").write_bytes(b"")
+    assert load_character_portrait(character_id) is None
+
+
+def test_load_character_portrait_returns_the_bytes_for_a_real_image() -> None:
+    real_portrait = _real_png()
+    character_id = save_character(
+        photo=PHOTO, portrait=real_portrait, name="Ida", kind="person", marks=""
+    )
+    assert load_character_portrait(character_id) == real_portrait
