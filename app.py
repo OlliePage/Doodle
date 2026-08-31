@@ -19,6 +19,8 @@ from colouring_factory.characters import (
     load_character_image,
     load_character_portrait,
     save_character,
+    update_character,
+    update_character_portrait,
 )
 from colouring_factory.demo import list_demo_artwork
 from colouring_factory.credentials import (
@@ -1195,6 +1197,11 @@ def _render_characters_screen() -> None:
 
     st.header("Your characters")
 
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+    kind_label_for_kind = {kind: label for label, kind in CHARACTER_KIND_LABELS.items()}
+
     characters = list_characters()
     if not characters:
         st.info("No characters yet. Add someone below to draw them into a scene.")
@@ -1256,12 +1263,87 @@ def _render_characters_screen() -> None:
                         st.session_state.pending_character_delete = character.id
                         st.rerun()
 
+                    with st.expander("Edit"):
+                        # The repair for a typo or a bad likeness: change the
+                        # words with no redraw, or redraw from the photograph
+                        # already on disk with no fresh upload. Delete was
+                        # the only control before this, and it destroys the
+                        # photograph, so fixing a spelling mistake used to
+                        # cost a re-upload and a paid drawing.
+                        edit_name = st.text_input(
+                            "Name",
+                            value=character.name,
+                            key=f"edit_name_{character.id}",
+                        )
+                        edit_kind_label = st.segmented_control(
+                            "What are they",
+                            list(CHARACTER_KIND_LABELS),
+                            default=kind_label_for_kind.get(character.kind, "A person"),
+                            key=f"edit_kind_{character.id}",
+                        )
+                        edit_marks = st.text_area(
+                            "What makes them recognisable",
+                            value=character.marks,
+                            key=f"edit_marks_{character.id}",
+                            height=90,
+                        )
+                        if st.button(
+                            "Save changes",
+                            key=f"save_character_{character.id}",
+                            width="stretch",
+                            icon=":material/save:",
+                        ):
+                            if not edit_name.strip():
+                                st.error("Give them a name.")
+                            else:
+                                update_character(
+                                    character.id,
+                                    name=edit_name,
+                                    kind=CHARACTER_KIND_LABELS.get(
+                                        edit_kind_label or "A person", "person"
+                                    ),
+                                    marks=edit_marks,
+                                )
+                                st.rerun()
+
+                        if st.button(
+                            "Redraw their portrait",
+                            key=f"redraw_character_{character.id}",
+                            width="stretch",
+                            icon=":material/auto_awesome:",
+                            disabled=not api_key,
+                            help=(
+                                "Draws a fresh portrait from the photo "
+                                "already on file. Costs one generation."
+                            ),
+                        ):
+                            try:
+                                stored_photo = load_character_image(
+                                    character.id, portrait=False
+                                )
+                                new_portrait = _draw_character_portrait(
+                                    stored_photo,
+                                    character.name,
+                                    character.kind,
+                                    character.marks,
+                                )
+                            except GeneratorError as exc:
+                                _show_guidance(exc.code, detail=str(exc))
+                            else:
+                                update_character_portrait(
+                                    character.id, new_portrait.image_bytes
+                                )
+                                concept = f"{character.name}, drawn by Doodle"
+                                st.session_state.generation_idea = concept
+                                _adopt_artwork(
+                                    new_portrait, concept, characters=[character.id]
+                                )
+                                _prepare_quick_outputs()
+                                st.session_state.screen = "result"
+                                st.rerun()
+
     st.divider()
     st.subheader("Add a character")
-
-    provider_id = _active_provider_id()
-    spec = get_provider(provider_id)
-    api_key, _source = _provider_key(provider_id)
 
     uploaded = st.file_uploader(
         "Add a picture",

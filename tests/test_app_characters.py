@@ -20,6 +20,8 @@ from colouring_factory.characters import (
     characters_root,
     delete_character,
     list_characters,
+    load_character,
+    load_character_image,
     save_character,
 )
 from colouring_factory.generators import GeneratorError
@@ -336,6 +338,116 @@ def test_deleting_a_character_needs_a_second_click() -> None:
         raise AssertionError("Confirm delete button not found")
 
     assert [c.name for c in list_characters()] == ["Bo"]
+
+
+def test_editing_a_characters_words_persists_with_no_redraw(monkeypatch) -> None:
+    """FB-05: the only control on a saved character used to be Delete, which
+    also destroys the photograph, so fixing a typo cost a fresh upload and a
+    paid drawing. Save changes must correct the name, the kind and the
+    marks sentence the design calls the repair, without spending a
+    generation."""
+
+    def fail_if_called(**kwargs):
+        raise AssertionError("editing the words must not draw anything")
+
+    monkeypatch.setattr(generators, "refine_with_provider", fail_if_called)
+    ida_id = save_character(
+        photo=PHOTO_BYTES,
+        portrait=ARTWORK,
+        name="Ida",
+        kind="person",
+        marks="Old marks.",
+    )
+
+    at = _characters_screen()
+    at.text_input(key=f"edit_name_{ida_id}").set_value("Ida-Rose").run()
+    at.segmented_control(key=f"edit_kind_{ida_id}").set_value("A toy").run()
+    at.text_area(key=f"edit_marks_{ida_id}").set_value("A missing button eye.").run()
+
+    for button in at.button:
+        if button.key == f"save_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Save changes button not found")
+
+    assert not at.exception
+    saved = load_character(ida_id)
+    assert saved.name == "Ida-Rose"
+    assert saved.kind == "toy"
+    assert saved.marks == "A missing button eye."
+    # The photograph and the portrait are untouched by an edit of the words.
+    assert load_character_image(ida_id, portrait=False) == PHOTO_BYTES
+    assert load_character_image(ida_id) == ARTWORK
+
+
+def test_editing_a_character_rejects_a_blank_name() -> None:
+    ida_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _characters_screen()
+    at.text_input(key=f"edit_name_{ida_id}").set_value("   ").run()
+
+    for button in at.button:
+        if button.key == f"save_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Save changes button not found")
+
+    assert not at.exception
+    assert load_character(ida_id).name == "Ida"
+    errors = " ".join(str(e.value) for e in at.error)
+    assert "name" in errors.lower()
+
+
+def test_redrawing_a_portrait_uses_the_stored_photo_with_no_new_upload(
+    monkeypatch,
+) -> None:
+    """FB-05: the redraw must use the photograph already saved on disk — no
+    file_uploader is offered here — and must replace only that one
+    character's portrait rather than creating a second character."""
+
+    captured = {}
+
+    def fake_refine(**kwargs):
+        captured.update(kwargs)
+        return GeneratedArtwork(
+            image_bytes=OTHER_ARTWORK,
+            prompt="p",
+            provider="OpenAI",
+            model="gpt-image-2",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    ida_id = save_character(
+        photo=PHOTO_BYTES,
+        portrait=ARTWORK,
+        name="Ida",
+        kind="person",
+        marks="Curly hair.",
+    )
+
+    at = _characters_screen()
+    for button in at.button:
+        if button.key == f"redraw_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Redraw their portrait button not found")
+
+    assert not at.exception
+    assert captured["reference_images"] == (PHOTO_BYTES,)
+    assert "Ida" in captured["prompt"]
+    assert [c.id for c in list_characters()] == [ida_id], (
+        "a redraw must not create a second character"
+    )
+    assert load_character_image(ida_id) == OTHER_ARTWORK
+    assert load_character_image(ida_id, portrait=False) == PHOTO_BYTES
+    # A redraw is a doodle like any other, so it becomes the current picture.
+    assert at.session_state["screen"] == "result"
+    assert at.session_state["current_metadata"]["generation"]["characters"] == [ida_id]
 
 
 def test_starting_a_new_doodle_keeps_the_chosen_cast() -> None:

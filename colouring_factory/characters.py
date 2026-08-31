@@ -71,6 +71,45 @@ def save_character(
     return character_id
 
 
+def update_character(character_id: str, *, name: str, kind: str, marks: str) -> None:
+    """Correct a saved character's words without touching either picture.
+
+    The id and created_at are read from the existing file and kept as they
+    are: this is a repair to what a parent typed, not a new character.
+    """
+
+    name = name.strip()
+    if not name:
+        raise ValueError("A character needs a name.")
+    if kind not in CHARACTER_KINDS:
+        raise ValueError(f"Unknown kind of character: {kind}")
+
+    folder = _folder_for(character_id)
+    path = folder / "character.json"
+    try:
+        payload: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise FileNotFoundError(f"Character {character_id} was not found.") from exc
+
+    payload["name"] = name
+    payload["kind"] = kind
+    payload["marks"] = marks.strip()
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def update_character_portrait(character_id: str, portrait: bytes) -> None:
+    """Replace a character's portrait, the photograph and everything else
+    about them left untouched — the redraw half of the repair, for when a
+    drawing misses rather than the words describing it."""
+
+    if not portrait:
+        raise ValueError("A character needs a portrait.")
+    folder = _folder_for(character_id)
+    if not folder.exists():
+        raise FileNotFoundError(f"Character {character_id} was not found.")
+    (folder / "portrait.png").write_bytes(portrait)
+
+
 def _read(folder: Path) -> Character | None:
     try:
         payload: dict[str, Any] = json.loads(

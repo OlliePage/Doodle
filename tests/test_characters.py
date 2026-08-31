@@ -12,6 +12,8 @@ from colouring_factory.characters import (
     load_character_image,
     load_character_portrait,
     save_character,
+    update_character,
+    update_character_portrait,
 )
 
 PHOTO = b"\x89PNG\r\n\x1a\n" + b"photo bytes"
@@ -165,6 +167,51 @@ def test_a_look_alike_traversal_is_contained_not_touching_anything(guard) -> Non
     assert guard.sentinel.read_bytes() == guard.sentinel_bytes
     assert guard.sibling_secret.exists()
     assert guard.sibling_secret.read_bytes() == guard.sibling_bytes
+
+
+def test_update_character_persists_the_new_words() -> None:
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks="Old."
+    )
+    update_character(character_id, name="Ida-Rose", kind="toy", marks="New marks.")
+
+    saved = load_character(character_id)
+    assert saved.name == "Ida-Rose"
+    assert saved.kind == "toy"
+    assert saved.marks == "New marks."
+    # Neither picture is touched by a word-only edit.
+    assert load_character_image(character_id) == PORTRAIT
+    assert load_character_image(character_id, portrait=False) == PHOTO
+
+
+def test_update_character_rejects_a_blank_name() -> None:
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+    )
+    with pytest.raises(ValueError):
+        update_character(character_id, name="   ", kind="person", marks="")
+    assert load_character(character_id).name == "Ida"
+
+
+def test_update_character_rejects_an_unknown_kind() -> None:
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+    )
+    with pytest.raises(ValueError):
+        update_character(character_id, name="Ida", kind="dragon", marks="")
+    assert load_character(character_id).kind == "person"
+
+
+def test_update_character_portrait_replaces_only_the_portrait() -> None:
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+    )
+    new_portrait = PORTRAIT + b"-redrawn"
+    update_character_portrait(character_id, new_portrait)
+
+    assert load_character_image(character_id) == new_portrait
+    assert load_character_image(character_id, portrait=False) == PHOTO
+    assert [c.id for c in list_characters()] == [character_id]
 
 
 def test_load_character_portrait_returns_none_for_a_corrupt_file() -> None:
