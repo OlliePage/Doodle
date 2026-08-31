@@ -198,6 +198,11 @@ VISUAL_RULES = (
     "- Black line work only: no colour, grey, shading, shadows, gradients or hatching.\n"
     "- Every enclosed shape must be left white, so it can be coloured in.\n"
     "- Coherent anatomy and friendly expressions.\n"
+    "- Skin is left plain: no dots, speckles, stipple, cross-hatching, "
+    "freckles, blemishes or pattern of any kind on a face, a neck, an arm, a "
+    "hand or any other bare skin, however detailed the rest of the page is. A "
+    "cheek, a forehead and the back of a hand are each one clear white shape "
+    "to colour.\n"
     "- No border, words, letters, numbers, logos, signatures or watermark.\n"
     "- Nothing important may be cropped by the image edge."
 )
@@ -212,8 +217,10 @@ CHARACTER_LIKENESS_RULE = (
     "large ones on a simple page, many smaller ones on a detailed one — and "
     "never as separate fine strands, flyaway wisps or hairline texture, "
     "however wispy the reference is and however detailed the page. Hair drawn "
-    "as strokes is a black mass nobody can colour. Show markings, worn "
-    "patches and freckles as outlined shapes to colour, never as shading."
+    "as strokes is a black mass nobody can colour. Show a toy's markings and "
+    "worn patches as outlined shapes to colour, never as shading. Leave skin "
+    "itself plain: a face scattered with drawn-in freckles reads as a rash "
+    "rather than a likeness."
 )
 
 # Flattening hair into "one or two large closed shapes" was written to protect
@@ -342,7 +349,10 @@ CAST_FOREGROUND_RULE = (
 FACE_DETAIL_EXEMPTION = (
     "Detail exception, which overrides the reader profile for one part of the "
     "picture only: each person's head — the face, the hair and the glasses — may "
-    "carry as much fine line work as it takes to be recognisably them. "
+    "carry as much fine line work as it takes to be recognisably them. That "
+    "line work goes into the features themselves — the shape of the eyes, the "
+    "brows, the lips, the parting and fall of the hair — and never onto the "
+    "skin between them, which stays plain. "
     "Everything else in the picture, including bodies, clothes and the whole "
     "setting, obeys the reader profile exactly, whatever that profile asks for. "
     "Clothing is part of everything else: a dress at the toddler "

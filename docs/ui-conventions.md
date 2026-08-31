@@ -72,9 +72,14 @@ route onward, so the library it wrote to was effectively invisible. The rules:
 - The result screen's save button becomes the route to what it just saved.
 - The homepage offers `Saved doodles (n)` in the top-right corner once there is
   at least one, out of the centre column, and shows nothing there before that.
-- Opening a saved doodle always lands in Doodle Studio's Create tab, with a
-  confirmation naming the doodle, because laying it out is the reason to reopen
-  one.
+- One picture, one screen. Opening a saved doodle lands exactly where a freshly
+  drawn one does, on the result screen, ready to print. It used to open Doodle
+  Studio instead, so the same doodle wore two entirely different interfaces
+  depending on how it was reached: a friendly page with the drawing and four
+  buttons, or a numbered form with a black/white threshold slider and a
+  despeckle menu. Doodle Studio is where the millimetres and the sliders live
+  and is one click away under "Other sizes & advanced options"; it is not the
+  front door to a picture.
 - Adding someone to the cast, and redrawing an existing character's portrait,
   both stay on the characters screen with a confirmation naming who changed.
   Neither is a doodle: a saved character with no route back to a printable

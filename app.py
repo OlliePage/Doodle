@@ -1852,11 +1852,22 @@ def _render_library_grid() -> None:
                                 "library_id": item["id"],
                             },
                         )
-                        st.session_state.library_notice = (
-                            f"{item.get('title', 'Your doodle')} is open. "
-                            "Lay it out below, then build the PDF."
-                        )
-                        st.session_state.screen = "studio"
+                        # The same screen a freshly drawn doodle lands on. It
+                        # used to open Doodle Studio instead, so the same
+                        # picture had two entirely different interfaces
+                        # depending on how you reached it — one a friendly page
+                        # with the drawing and four buttons, the other a
+                        # numbered form with threshold sliders and a despeckle
+                        # menu. Studio is still one click away, under "Other
+                        # sizes & advanced options", for the times those
+                        # controls are what you came for.
+                        _prepare_quick_outputs()
+                        st.session_state.quick_saved = True
+                        st.session_state.pair_raw = None
+                        st.session_state.pair_processed = None
+                        st.session_state.pair_pdf = None
+                        st.session_state.library_notice = ""
+                        st.session_state.screen = "result"
                         st.rerun()
                 with delete_col:
                     if st.button(
