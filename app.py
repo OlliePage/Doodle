@@ -4,6 +4,7 @@ import html
 import hashlib
 import json
 import re
+import time
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
@@ -44,6 +45,15 @@ from colouring_factory.generators import (
 )
 from colouring_factory import history
 from colouring_factory.guidance import guidance_for
+from colouring_factory.timings import (
+    MIN_RECORDS_FOR_CHART,
+    bar_heights,
+    durations_for,
+    histogram,
+    load_timings,
+    record_timing,
+    settings_key,
+)
 from colouring_factory.version import build_label
 from colouring_factory.image_processing import analyse_line_art, normalise_line_art
 from colouring_factory.layouts import (
@@ -2334,6 +2344,7 @@ def _clear_generation_plan() -> None:
 
     st.session_state.generation_jobs = []
     st.session_state.generation_collected = []
+    st.session_state.generation_seconds = []
     st.session_state.generation_uses_cast = False
     st.session_state.generation_references = ()
     st.session_state.generation_chosen_ids = []
@@ -2436,6 +2447,7 @@ def _build_generation_plan(idea: str) -> None:
         for prompt, level, brief in zip(prompts, levels, briefs)
     ]
     st.session_state.generation_collected = []
+    st.session_state.generation_seconds = []
     st.session_state.generation_uses_cast = bool(chosen)
     st.session_state.generation_references = references
     st.session_state.generation_chosen_ids = [
@@ -2465,6 +2477,7 @@ def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
     job = st.session_state.generation_jobs[job_index]
     chosen_ids = list(st.session_state.generation_chosen_ids)
 
+    started = time.monotonic()
     if st.session_state.generation_uses_cast:
         artwork = refine_with_provider(
             provider_id=provider_id,
@@ -2490,6 +2503,27 @@ def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
             random_seed=random_seed,
         )
         artwork = artworks[0]
+
+    # Timed around the paid call alone. Timing the whole script run would fold
+    # in the planning call that only the first picture of a batch carries and
+    # the two PDF builds only the last one carries, and neither is time spent
+    # waiting for this picture. Recorded before anything below can raise, so a
+    # slow drawing still teaches the next wait what to expect.
+    drawn_in = time.monotonic() - started
+    record_timing(
+        seconds=drawn_in,
+        settings_key=settings_key(
+            provider=provider_id,
+            model=model,
+            quality=quality,
+            size=spec.portrait_size,
+            with_references=bool(st.session_state.generation_uses_cast),
+        ),
+    )
+    st.session_state.generation_seconds = [
+        *st.session_state.get("generation_seconds", []),
+        drawn_in,
+    ]
 
     artwork.metadata["brief"] = job["brief"]
     artwork.metadata["detail_level"] = job["level"]
@@ -2901,6 +2935,142 @@ def _keep_partial_batch_progress(message: str) -> bool:
     return True
 
 
+# Every keyframe name carries __I__, replaced with the picture's index, for
+# the reason given in _waiting_chart_html. `width:100%` beside the max-width
+# rather than relying on the auto margins alone: an automatic cross-axis margin
+# on a flex child cancels the stretch that gives it its width, and the bars
+# then share out nothing between them.
+_WAITING_CHART_CSS = """
+  .wait-hist{width:100%;max-width:520px;margin:1.15rem auto .2rem}
+  .wait-hist__bars{display:flex;align-items:flex-end;gap:4px;height:104px;padding-top:6px}
+  .wait-hist__bars i{
+    flex:1 1 0;min-width:0;min-height:10px;
+    border-radius:10px 10px 4px 4px;
+    background:#fff;border:2.5px solid #e6e9ee;
+    display:block;box-sizing:border-box;
+    animation:wait-fill-__I__ 5s ease-out forwards;
+    animation-delay:calc(var(--i) * 5s);
+  }
+  @keyframes wait-fill-__I__{
+    0%{background:#fff;border-color:#e6e9ee;transform:translateY(0)}
+    8%{background:var(--c);border-color:var(--c);transform:translateY(-6px)}
+    56%{background:var(--c);border-color:var(--c);transform:translateY(-6px)}
+    100%{background:var(--c);border-color:var(--c);transform:translateY(0)}
+  }
+  .wait-hist__bars i:nth-child(6n+1){--c:#4f46e5}
+  .wait-hist__bars i:nth-child(6n+2){--c:#f45b69}
+  .wait-hist__bars i:nth-child(6n+3){--c:#f5a623}
+  .wait-hist__bars i:nth-child(6n+4){--c:#16a085}
+  .wait-hist__bars i:nth-child(6n+5){--c:#8b5cf6}
+  .wait-hist__bars i:nth-child(6n){--c:#0ea5e9}
+  .wait-hist__rail{position:relative;height:20px;margin-top:4px}
+  .wait-hist__spark{
+    position:absolute;top:0;left:0;width:calc((100% + 4px)/18);
+    text-align:center;line-height:1;font-family:Georgia,serif;
+    font-size:1.15rem;color:#f5a623;
+    animation:wait-spark-__I__ 90s steps(18,end) forwards;
+  }
+  @keyframes wait-spark-__I__{to{transform:translateX(1800%)}}
+  .wait-hist__axis{display:flex;font-size:.72rem;color:#a9adb5;margin-top:-4px}
+  .wait-hist__axis span{flex:1;text-align:center}
+  .wait-hist__axis span:first-child{text-align:left}
+  .wait-hist__axis span:last-child{text-align:right}
+  .wait-hist__cap{
+    font-size:.82rem;color:#8a8e94;margin:.55rem auto 0;
+    max-width:420px;line-height:1.45;
+  }
+  /* Opening from no height at all, so a note that has not fired yet leaves no
+     reserved gap under the chart waiting to be filled. */
+  .wait-note{
+    opacity:0;max-height:0;overflow:hidden;
+    color:#8a4a3f;font-size:.86rem;max-width:440px;margin:0 auto;line-height:1.45;
+    animation:wait-note-__I__ .45s ease forwards;
+  }
+  @keyframes wait-note-__I__{
+    from{opacity:0;max-height:0}
+    to{opacity:1;max-height:7rem}
+  }
+  .wait-note--slow{animation-delay:__SLOWEST__s}
+  .wait-note--stuck{animation-delay:240s}
+  /* The marching is information rather than decoration, so it keeps going for
+     a reader who asks for less motion; only the bounce is dropped. */
+  @media (prefers-reduced-motion: reduce){
+    @keyframes wait-fill-__I__{
+      0%{background:#fff;border-color:#e6e9ee}
+      8%,100%{background:var(--c);border-color:var(--c)}
+    }
+  }
+"""
+
+
+def _current_settings_key() -> str:
+    """What makes this drawing comparable with past ones."""
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    settings = load_settings()
+    return settings_key(
+        provider=provider_id,
+        model=_model_for(provider_id, spec, settings),
+        quality=str(settings.get("openai_quality", DEFAULT_QUALITY)),
+        size=spec.portrait_size,
+        with_references=bool(st.session_state.get("generation_uses_cast")),
+    )
+
+
+def _waiting_chart_html(job_index: int) -> str:
+    """Past drawings as a distribution, with a marker that walks along it.
+
+    Every bit of movement here is CSS. While a picture is being drawn the
+    script is inside a network call and sends the browser nothing at all, so a
+    bar that lights every five seconds has to be a keyframe with a delay per
+    bar; anything that asks Python for the time would sit frozen with the rest
+    of the page. A bar ahead of the marker is an empty outline, the way a shape
+    on an uncoloured page is, and fills in as the marker reaches it.
+
+    Every keyframe name carries the picture's index. The markup is otherwise
+    identical between pictures of a batch, so the browser would reuse the old
+    animation timeline and picture two would open with its chart already
+    coloured in and its "taking a while" note already showing.
+    """
+
+    durations = durations_for(load_timings(), _current_settings_key())
+    if len(durations) < MIN_RECORDS_FOR_CHART:
+        return ""
+
+    counts = histogram(durations)
+    heights = bar_heights(counts, tallest_px=104, floor_px=10)
+    slowest = max(durations)
+
+    bars = "".join(
+        f'<i style="--i:{index};height:{height}px"></i>'
+        for index, height in enumerate(heights)
+    )
+    caption = (
+        f"Your last {len(durations)} drawings at these settings, "
+        "and where this one has got to."
+    )
+
+    css = _WAITING_CHART_CSS.replace("__I__", str(job_index))
+    css = css.replace("__SLOWEST__", f"{slowest:.0f}")
+    return (
+        f"<style>{css}</style>"
+        f'<div class="wait-hist" aria-hidden="true">'
+        f'<div class="wait-hist__bars">{bars}</div>'
+        f'<div class="wait-hist__rail"><div class="wait-hist__spark">\u2726</div></div>'
+        f'<div class="wait-hist__axis"><span>straight away</span>'
+        f"<span>45 seconds</span><span>a minute and a half</span></div>"
+        f"</div>"
+        f'<div class="wait-hist__cap">{html.escape(caption)}</div>'
+        f'<div class="wait-note wait-note--slow">This one is taking longer than '
+        f"any of those. It is still going, and the screen will move on by "
+        f"itself.</div>"
+        f'<div class="wait-note wait-note--stuck">Doodle allows four minutes for '
+        f"each attempt and then tries again, up to three attempts in all. It "
+        f"will say what happened rather than sitting here.</div>"
+    )
+
+
 def _render_generating_screen() -> None:
     st.markdown(
         """
@@ -2912,8 +3082,42 @@ def _render_generating_screen() -> None:
             display:flex;flex-direction:column;justify-content:center;text-align:center;overflow:visible!important;
           }
           .drawing-title{font-size:1.35rem;font-weight:760;margin:.8rem 0 .35rem;}
-          .drawing-idea{color:#676b70;max-width:520px;margin:0 auto 1rem;}
+          /* The child's own sentence, promoted from a grey caption to the
+             largest words on the screen. She is the one standing here waiting
+             for it, and she can hear it read back. */
+          .drawing-idea{
+            font-size:1.5rem;font-weight:720;color:#171717;
+            max-width:520px;margin:0 auto 1.1rem;line-height:1.3;
+          }
+          .drawing-label{
+            font-size:.73rem;font-weight:760;letter-spacing:.055em;color:#73777d;
+            text-transform:uppercase;margin:.1rem 0 .35rem;
+          }
           .drawing-progress{color:#676b70;font-weight:600;margin:0 0 .15rem;}
+          /* Six shapes, one every eight tenths of a second, each rotated by
+             the same angle as the matching letter of the wordmark so the reel
+             reads as this app's rather than as a stock loader. Three of them
+             are PlayStation face buttons, which was the reference asked for.
+             The cross is left out on purpose: a cross reads as an error. */
+          .drawing-reel{
+            height:2.4rem;overflow:hidden;margin:.9rem auto .3rem;
+            font-family:Georgia,serif;font-size:1.55rem;
+          }
+          .drawing-reel span{display:block;height:2.4rem;line-height:2.4rem;}
+          .drawing-reel__strip{animation:drawing-reel 4.8s steps(6,end) infinite;}
+          @keyframes drawing-reel{
+            from{transform:translateY(0)}
+            to{transform:translateY(-14.4rem)}
+          }
+          .drawing-reel span:nth-child(1){color:#4f46e5;transform:rotate(-4deg);}
+          .drawing-reel span:nth-child(2){color:#f45b69;transform:rotate(3deg);}
+          .drawing-reel span:nth-child(3){color:#f5a623;transform:rotate(-2deg);}
+          .drawing-reel span:nth-child(4){color:#16a085;transform:rotate(3deg);}
+          .drawing-reel span:nth-child(5){color:#8b5cf6;transform:rotate(-3deg);}
+          .drawing-reel span:nth-child(6){color:#0ea5e9;transform:rotate(2deg);}
+          @media (prefers-reduced-motion: reduce){
+            .drawing-reel__strip{animation:none;}
+          }
           /* The homepage's settings line answers questions this screen has
              already moved past; left on screen it renders beneath the
              spinner with Streamlit's default label clipping, since only the
@@ -2928,7 +3132,15 @@ def _render_generating_screen() -> None:
     st.markdown(
         '<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True
     )
+    st.markdown(
+        '<div class="drawing-reel" aria-hidden="true"><div class="drawing-reel__strip">'
+        "<span>\u25cb</span><span>\u25b3</span><span>\u25a1</span>"
+        "<span>\u25c7</span><span>\u2726</span><span>\u2727</span>"
+        "</div></div>",
+        unsafe_allow_html=True,
+    )
     safe_idea = html.escape(str(st.session_state.get("generation_idea", "")))
+    st.markdown('<div class="drawing-label">Now drawing</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="drawing-idea">{safe_idea}</div>', unsafe_allow_html=True)
 
     is_demo = st.session_state.get("quick_mode") == "demo"
@@ -2945,6 +3157,17 @@ def _render_generating_screen() -> None:
             f'<div class="drawing-progress">Drawing {min(done + 1, total)} of {total}</div>',
             unsafe_allow_html=True,
         )
+        # Left out entirely rather than drawn empty when there is too little
+        # history to have a shape, because a hill of one bar reads as an
+        # expectation and is not one.
+        chart = _waiting_chart_html(done)
+        if chart:
+            st.markdown(chart, unsafe_allow_html=True)
+        else:
+            st.caption(
+                "Doodle has not drawn at these settings before, so there is "
+                "nothing yet to say how long this should take."
+            )
         st.caption(
             "A picture already sent to be drawn finishes and is charged "
             "regardless — stopping only cancels the ones after it, and "
@@ -2970,15 +3193,25 @@ def _render_generating_screen() -> None:
     try:
         idea = _current_generation_idea()
         if is_demo:
-            with st.spinner("Creating clean colouring-book line art"):
+            # No elapsed clock: this reads a picture off the disk.
+            with st.spinner("Opening the sample picture…"):
                 _quick_generate_demo(idea)
             st.session_state.screen = "result"
         else:
             if not st.session_state.get("generation_jobs"):
-                _build_generation_plan(idea)
+                # Its own spinner because planning several alternatives makes a
+                # text-model call of its own, and it happens before the drawing
+                # spinner exists — so the first thing a parent waited through
+                # was the only part of the screen with nothing moving on it.
+                with st.spinner("Working out what to draw…", show_time=True):
+                    _build_generation_plan(idea)
             jobs = st.session_state.generation_jobs
             job_index = len(st.session_state.generation_collected)
-            with st.spinner("Creating clean colouring-book line art"):
+            # show_time is Streamlit's own elapsed counter, driven by the
+            # browser's clock rather than by Python, so it keeps ticking for
+            # the whole blocked call. The screen rebuilds between pictures, so
+            # it reads this picture rather than the batch.
+            with st.spinner("Drawing the lines…", show_time=True):
                 artwork = _draw_next_quick_picture(job_index)
             st.session_state.generation_collected = [
                 *st.session_state.generation_collected,
@@ -3005,6 +3238,29 @@ def _render_generating_screen() -> None:
         st.rerun()
         return
     st.rerun()
+
+
+def _how_long_that_took() -> str:
+    """Confirm the number the parent just watched climb, rather than let it
+    vanish the moment the picture appears. It is also the same figure that
+    joins the chart on the next drawing, which is what gives the wait a small
+    payoff."""
+
+    seconds = [float(value) for value in st.session_state.get("generation_seconds") or []]
+    if not seconds:
+        return ""
+    if len(seconds) == 1:
+        return f"That took {round(seconds[0])} seconds."
+
+    total = round(sum(seconds))
+    minutes, remainder = divmod(total, 60)
+    if minutes:
+        spell = f"{minutes} minute{'' if minutes == 1 else 's'}"
+        if remainder:
+            spell += f" and {remainder} second{'' if remainder == 1 else 's'}"
+    else:
+        spell = f"{total} seconds"
+    return f"Those {len(seconds)} took {spell} altogether."
 
 
 def _render_first_result() -> None:
@@ -3041,6 +3297,9 @@ def _render_first_result() -> None:
     safe_title = html.escape(str(st.session_state.get("current_title", "")))
     st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
     _render_doodle_with_colours(processed, key_prefix="result")
+    took = _how_long_that_took()
+    if took:
+        st.caption(took)
     _render_alternatives_picker()
 
     again_col, love_col, print_col = st.columns([1, 1, 1.35])
