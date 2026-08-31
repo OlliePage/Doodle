@@ -217,6 +217,107 @@ def test_a_chosen_cast_keeps_their_likeness_on_the_badge(monkeypatch) -> None:
     assert "cut into a circle" in captured["prompt"]
 
 
+def test_pressing_the_badge_redraw_twice_keeps_the_cast_on_the_second_press(
+    monkeypatch,
+) -> None:
+    """FB-04: _adopt_artwork used to overwrite current_metadata["generation"]
+    wholesale with the fresh artwork's own metadata, which carries no
+    "characters" key. The first press of "Draw it for a badge" read the
+    recorded cast correctly and then destroyed it in the act of adopting its
+    own result, so a second press — the exact button a parent presses again
+    after not liking the first circle composition — silently dropped the
+    character and spent a generation on somebody else's picture."""
+
+    calls = []
+
+    def fake_refine(**kwargs):
+        calls.append(kwargs)
+        return GeneratedArtwork(
+            image_bytes=NEW_ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    monkeypatch.setattr(
+        generators,
+        "generate_with_provider",
+        lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError(
+                "a picture drawn with a recorded cast must not fall through "
+                "to the no-cast, no-reference generation path"
+            )
+        ),
+    )
+    ida_id = save_character(
+        photo=b"photo", portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _result_screen()
+    at.session_state["current_metadata"] = {
+        **at.session_state["current_metadata"],
+        "generation": {"characters": [ida_id]},
+    }
+    at.run()
+
+    at = _button(at, "Draw it for a badge").click().run()
+    assert not at.exception
+    assert "Ida" in calls[0]["prompt"]
+
+    at = _button(at, "Draw it for a badge").click().run()
+    assert not at.exception
+    assert len(calls) == 2, "the second press must still call refine_with_provider"
+    assert "Ida" in calls[1]["prompt"], (
+        "the cast was lost between the first and second badge redraw"
+    )
+    assert calls[1]["reference_images"]
+
+
+def test_redrawing_a_character_portrait_for_a_badge_keeps_the_character(
+    monkeypatch,
+) -> None:
+    """FB-04, second repro: the characters screen adopted a freshly drawn
+    caricature without recording the very character it is a caricature of,
+    so pressing "Draw it for a badge" on that portrait sent the provider a
+    bare name with no reference picture attached at all — the one picture
+    whose badge redraw could least afford to lose its cast. (Which of the
+    character's two pictures is the right one to send is FB-03's concern,
+    covered separately — this test only needs a reference attached at all.)
+    """
+
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    ida_id = save_character(
+        photo=b"photo", portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _result_screen()
+    # A character portrait's own adoption path: no scene idea, the cast is
+    # just the character themselves.
+    at.session_state["current_metadata"] = {
+        "source": "OpenAI",
+        "concept": "Ida, drawn by Doodle",
+        "generation": {"characters": [ida_id]},
+    }
+    at.run()
+
+    captured = {}
+    monkeypatch.setattr(
+        generators,
+        "refine_with_provider",
+        lambda **kwargs: captured.update(kwargs) or fake_refine(**kwargs),
+    )
+    at = _button(at, "Draw it for a badge").click().run()
+
+    assert not at.exception
+    assert len(captured["reference_images"]) == 1, (
+        "the character's cast was lost, so no reference picture was sent"
+    )
+    assert "Ida" in captured["prompt"]
+
+
 def test_ticking_a_character_now_does_not_put_them_in_a_picture_drawn_without_them(
     monkeypatch,
 ) -> None:

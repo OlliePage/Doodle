@@ -797,6 +797,7 @@ def _render_alternatives_picker() -> None:
                 _adopt_artwork(
                     candidate,
                     st.session_state.current_metadata.get("concept", "Doodle"),
+                    characters=candidate.metadata.get("characters", []),
                 )
                 _prepare_quick_outputs()
                 st.rerun()
@@ -960,8 +961,18 @@ def _render_home_options() -> None:
         save_settings({**settings, **chosen})
 
 
-def _adopt_artwork(artwork, idea: str) -> None:
-    """Make one generated picture the current doodle, starting its history."""
+def _adopt_artwork(artwork, idea: str, *, characters: list[str]) -> None:
+    """Make one generated picture the current doodle, starting its history.
+
+    `characters` is who the picture was actually drawn with, stamped here
+    rather than trusted to already be on artwork.metadata: this is the one
+    function every adoption path shares, so it is the one place a cast
+    cannot be silently dropped by a caller that forgets to carry it
+    forward. A badge redraw used to lose the cast this way on its very
+    first press, because the fresh artwork it adopted carried the
+    provider's own metadata, not the characters key the previous picture
+    had recorded.
+    """
 
     _set_current_artwork(
         artwork.image_bytes,
@@ -971,7 +982,7 @@ def _adopt_artwork(artwork, idea: str) -> None:
             "concept": idea,
             "prompt": artwork.prompt,
             "model": artwork.model,
-            "generation": artwork.metadata,
+            "generation": {**artwork.metadata, "characters": characters},
         },
     )
     _start_version_chain(artwork)
@@ -1312,14 +1323,16 @@ def _render_characters_screen() -> None:
             _show_guidance(exc.code, detail=str(exc))
             return
 
-        save_character(
+        character_id = save_character(
             photo=photo,
             portrait=artwork.image_bytes,
             name=name.strip(),
             kind=kind,
             marks=marks,
         )
-        _adopt_artwork(artwork, f"{name.strip()}, drawn by Doodle")
+        _adopt_artwork(
+            artwork, f"{name.strip()}, drawn by Doodle", characters=[character_id]
+        )
         _prepare_quick_outputs()
         st.session_state.screen = "result"
         st.rerun()
@@ -1920,7 +1933,11 @@ def _quick_generate() -> None:
         grown_up = artworks[-1] if pairing else None
         for_children = artworks[:-1] if pairing else artworks
         st.session_state.candidates = for_children if len(for_children) > 1 else []
-        _adopt_artwork(for_children[0], idea)
+        _adopt_artwork(
+            for_children[0],
+            idea,
+            characters=[character_id for character_id, *_ in chosen],
+        )
         st.session_state.pair_raw = grown_up.image_bytes if grown_up else None
 
     _prepare_quick_outputs()
@@ -2162,7 +2179,9 @@ def _render_badge_strip() -> None:
             return
 
         st.session_state.candidates = []
-        _adopt_artwork(artwork, idea)
+        _adopt_artwork(
+            artwork, idea, characters=[character_id for character_id, *_ in chosen]
+        )
         _prepare_quick_outputs()
         st.rerun()
 
