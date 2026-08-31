@@ -16,6 +16,21 @@ def _test_image() -> bytes:
     return stream.getvalue()
 
 
+# Recognisable stand-in for a real colour profile, the way tests/test_photos.py
+# proves photos.py's own stripping — an iPhone photo carries a genuine Display
+# P3 profile, but only round-tripping (or failing to) matters here.
+ICC_PROFILE = b"FAKE_ICC_PROFILE_MARKER_DOODLE_TEST_1234567890"
+
+
+def _test_image_with_icc_profile() -> bytes:
+    image = Image.new("RGB", (300, 220), "white")
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((80, 50, 220, 190), outline=(70, 70, 70), width=8)
+    stream = BytesIO()
+    image.save(stream, format="PNG", icc_profile=ICC_PROFILE)
+    return stream.getvalue()
+
+
 def test_processing_produces_binary_png_and_crops() -> None:
     output = normalise_line_art(
         _test_image(),
@@ -34,6 +49,25 @@ def test_metrics_report_ink() -> None:
     metrics = analyse_line_art(output)
     assert metrics["width_px"] > 0
     assert metrics["ink_percent"] > 0
+
+
+def test_the_source_colour_profile_does_not_survive_the_black_and_white_pass() -> None:
+    """SEC-04: Pillow's convert/point/filter chain copies `.info` through by
+    default, so an uploaded picture's ICC profile rode along into every
+    processed PNG and PDF. photos.py already fixes the identical problem for
+    photographs by rebuilding through a fresh Image.new with an empty info
+    dict; the colouring-page pipeline needs the same rebuild."""
+
+    processed = normalise_line_art(
+        _test_image_with_icc_profile(), ProcessingOptions(threshold=150)
+    )
+    reopened = Image.open(BytesIO(processed))
+
+    assert reopened.info.get("icc_profile") is None
+    # A PNG carries a colour profile in its own zlib-compressed "iCCP" chunk,
+    # so the profile's plain bytes would not appear even if it survived;
+    # checking for the chunk tag itself is what a raw-bytes check needs.
+    assert b"iCCP" not in processed
 
 
 def _faded_stroke_image() -> bytes:
@@ -97,7 +131,7 @@ def test_the_studio_advances_the_seed_between_generations() -> None:
     app_source = (Path(__file__).resolve().parents[1] / "app.py").read_text(
         encoding="utf-8"
     )
-    block = app_source[app_source.index("variant_prompts = ["):]
+    block = app_source[app_source.index("variant_prompts = [") :]
     block = block[: block.index("st.session_state.candidates")]
 
     assert "generation_nonce" in block
