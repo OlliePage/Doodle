@@ -114,26 +114,45 @@ def drawn(monkeypatch):
     than from its position in a shared list.
     """
 
-    asked: list[str] = []
+    class Asked(list):
+        """The prompts, with the reference pictures recorded alongside them."""
+
+        references: list[tuple]
+
+    asked = Asked()
+    references: list[tuple] = []
+
+    def _answer(prompt: str) -> GeneratedArtwork:
+        is_grown_up = "150 or more small colouring regions" in prompt
+        return GeneratedArtwork(
+            image_bytes=GROWN_UP_ART if is_grown_up else CHILD_ART,
+            prompt=prompt,
+            provider="OpenAI",
+            model="gpt-image-2",
+        )
 
     def fake_generate(**kwargs):
         prompt = kwargs["prompts"][0]
         asked.append(prompt)
-        is_grown_up = "150 or more small colouring regions" in prompt
-        return [
-            GeneratedArtwork(
-                image_bytes=GROWN_UP_ART if is_grown_up else CHILD_ART,
-                prompt=prompt,
-                provider="OpenAI",
-                model="gpt-image-2",
-            )
-        ]
+        return [_answer(prompt)]
+
+    # The pair's second sheet is drawn FROM the first since 2026-08-31, so it
+    # goes through the reference-carrying call and this fixture has to watch
+    # both doors. Watching only the text-only one made a two-sheet batch look
+    # like a one-sheet batch.
+    def fake_refine(**kwargs):
+        prompt = kwargs["prompt"]
+        asked.append(prompt)
+        references.append(tuple(kwargs.get("reference_images") or ()))
+        return _answer(prompt)
 
     def fake_briefs(idea, count, **kwargs):
         return [f"reading {index + 1} of {idea}" for index in range(count)]
 
     monkeypatch.setattr(generators, "generate_with_provider", fake_generate)
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
     monkeypatch.setattr(variations, "build_variation_briefs", fake_briefs)
+    asked.references = references
     return asked
 
 
@@ -256,3 +275,32 @@ def test_starting_a_new_doodle_clears_the_grown_up_sheet(drawn) -> None:
     assert not at.exception
     assert at.session_state["pair_raw"] is None
     assert at.session_state["pair_pdf"] is None
+
+
+def test_the_grown_up_sheet_is_drawn_from_the_childrens_one(drawn) -> None:
+    """Both sheets used to be drawn from the same words and hoped to match.
+    Reported 2026-08-31: a picnic under a hot air balloon festival came back as
+    two different pictures — different clothes, different food, different
+    composition — under a caption promising the same scene."""
+
+    at = _draw(True)
+    assert not at.exception
+    assert len(drawn) == 2
+
+    attached = drawn.references
+    assert attached, "the second sheet was drawn from words again, not the first"
+    assert CHILD_ART in attached[0], (
+        "the grown-up sheet was not given the children's sheet to work from"
+    )
+
+
+def test_the_second_sheet_is_told_to_change_only_the_detail(drawn) -> None:
+    """Told only to add detail, a model redraws the scene its own way and then
+    decorates that. Sameness has to come first."""
+
+    _draw(True)
+    grown_up = drawn[1]
+
+    assert "The attached picture is a colouring page of this same scene" in grown_up
+    assert "Nothing may be added, removed, moved or resized" in grown_up
+    assert "one picture drawn twice" in grown_up

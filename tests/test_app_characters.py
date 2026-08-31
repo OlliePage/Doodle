@@ -1507,8 +1507,14 @@ def test_pairing_with_a_chosen_cast_draws_both_sheets_with_the_characters_in_bot
     assert all("Ida" in call["prompt"] for call in calls), (
         "the character must be in both readings of the scene, not just the first"
     )
-    assert len(calls[0]["reference_images"]) == 1
-    assert len(calls[1]["reference_images"]) == 1
+    assert len(calls[0]["reference_images"]) == 1, "the first sheet has her portrait"
+    # Two on the second sheet since 2026-08-31: the children's sheet leads, so
+    # the grown-up one is the same picture rather than a second guess at the
+    # same words, and her portrait rides behind it so she is still herself.
+    assert len(calls[1]["reference_images"]) == 2
+    assert calls[1]["reference_images"][0] == ARTWORK, (
+        "the children's sheet must lead, or the ordinal words behind it slip"
+    )
 
     children_prompt, grown_up_prompt = calls[0]["prompt"], calls[1]["prompt"]
     assert "6 to 12 large colouring regions" in children_prompt

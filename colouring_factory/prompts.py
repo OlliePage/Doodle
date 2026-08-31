@@ -796,6 +796,27 @@ def build_character_scene_prompt(
     return dedent(prompt).strip()
 
 
+# Pairing draws one scene twice so a parent and a child can colour the same
+# picture side by side. Drawn from the same words alone the two sheets simply
+# diverge — reported 2026-08-31 as two different pictures under a caption
+# promising the same one — so the second is now drawn from the first, and this
+# is what it is told about it. Sameness comes before detail on purpose: told
+# only to add detail, a model redraws the scene its own way and decorates that.
+SAME_SCENE_RULE = (
+    "The attached picture is a colouring page of this same scene, already "
+    "drawn. Draw that same picture again: the same things, the same number of "
+    "them, in the same places, at the same sizes, seen from the same angle, "
+    "with the same thing happening. Nothing may be added, removed, moved or "
+    "resized, and nothing may be swapped for something like it — the same "
+    "clothes, the same food, the same objects. What changes is only how much "
+    "line work each of those things carries: find far more inside every shape "
+    "the attached picture already contains, and put it there. Somebody must be "
+    "able to lay the two pages side by side and see one picture drawn twice."
+)
+
+GROWN_UP_PAIR_LEVEL = "Grown-up"
+
+
 def build_caricature_prompt(
     name: str,
     kind: str,
@@ -882,6 +903,83 @@ def build_caricature_prompt(
 {_spliced(CARICATURE_DENSITY_RULE)}
     Line profile: {level.line_rule}
     Detail profile: {level.texture_rule}
+    """
+
+    return dedent(prompt).strip()
+
+
+def build_paired_sheet_prompt(
+    concept: str,
+    characters: Sequence[tuple[str, str, str, str]] = (),
+    *,
+    age_profile: str = GROWN_UP_PAIR_LEVEL,
+    style_name: str = DEFAULT_STYLE,
+    target: str = "A4 page",
+) -> str:
+    """The same scene as the attached drawing, redrawn at another detail level.
+
+    Pairing offers two sheets so a parent and a child can colour the same
+    picture together, and until now it drew them twice from the same words and
+    hoped. Words are not enough: on 2026-08-31 a picnic under a hot air balloon
+    festival came back as two different pictures — different clothes, different
+    food, different composition entirely — under a caption promising the same
+    scene. Handing the second drawing the first one settles it, which is what
+    the reference-carrying call has always been for.
+
+    The instruction is deliberately about sameness before it is about detail.
+    Told only to add detail, a model redraws the scene its own way and then
+    decorates that; told first that the composition is fixed, the detail has
+    nowhere to go but inside the shapes already there, which is the same errand
+    the Grown-up reader profile asks for and easier to obey with the picture in
+    front of you.
+    """
+
+    concept = concept.strip()
+    if not concept:
+        raise ValueError("A picture idea is required.")
+
+    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS[DEFAULT_STYLE])
+    level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[GROWN_UP_PAIR_LEVEL])
+    target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
+
+    # Named even though the first sheet already shows them, because "the same
+    # things" is a weaker instruction about a person than about a picnic
+    # basket: a face redrawn generically still satisfies it. Their portraits
+    # ride along behind the first sheet, so the likeness rule has something to
+    # be about.
+    cast_block = ""
+    if characters:
+        introductions = []
+        for name, kind, marks, appearance in characters:
+            article = _KIND_ARTICLES.get(kind, "character")
+            line = f"{name} is in it, a {article}."
+            if marks.strip():
+                line += f" {marks.strip()}"
+            if appearance.strip():
+                line += f" {appearance.strip()}"
+            introductions.append(line)
+        cast_block = (
+            "\n    Who is in it:\n"
+            + _spliced(chr(10).join(introductions))
+            + "\n\n"
+            + _spliced(CHARACTER_LIKENESS_RULE)
+            + "\n"
+        )
+
+    prompt = f"""
+    Redraw the attached colouring page for {level.reader}.
+
+    It is a drawing of this scene: {concept}
+{cast_block}
+{_spliced(SAME_SCENE_RULE)}
+
+    Visual rules:
+{_spliced(VISUAL_RULES)}
+
+{_style_line(style)}    Reader profile: {level.regions}
+    Line profile: {level.line_rule}
+    Detail profile: {level.texture_rule}
+    Composition profile: {target_rule}
     """
 
     return dedent(prompt).strip()

@@ -91,6 +91,7 @@ from colouring_factory.providers import (
 from colouring_factory.prompts import (
     STYLE_PRESETS,
     build_caricature_prompt,
+    build_paired_sheet_prompt,
     build_character_scene_prompt,
     build_colouring_prompt,
     build_colour_suggestion_prompt,
@@ -3079,8 +3080,16 @@ def _build_generation_plan(idea: str) -> None:
     )
 
     st.session_state.generation_jobs = [
-        {"prompt": prompt, "level": level, "brief": brief}
-        for prompt, level, brief in zip(prompts, levels, briefs)
+        {
+            "prompt": prompt,
+            "level": level,
+            "brief": brief,
+            # The pair's second sheet is appended last and is drawn from the
+            # first rather than from the same words again, so its prompt is
+            # built at drawing time when that first sheet exists.
+            "pair_partner": pairing and index == len(prompts) - 1,
+        }
+        for index, (prompt, level, brief) in enumerate(zip(prompts, levels, briefs))
     ]
     st.session_state.generation_collected = []
     st.session_state.generation_seconds = []
@@ -3091,6 +3100,16 @@ def _build_generation_plan(idea: str) -> None:
     ]
     st.session_state.generation_pairing = pairing
     st.session_state.generation_random_seed_base = random_seed_base
+
+
+def _recorded_or_chosen_cast() -> list[tuple[str, str, str, str, str]]:
+    """The cast this batch was planned with, resolved back to their details.
+
+    generation_chosen_ids is frozen when the plan is built, so it is the right
+    list even if a parent unticks somebody while the batch is still drawing.
+    """
+
+    return _resolve_cast(list(st.session_state.get("generation_chosen_ids") or []))
 
 
 def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
@@ -3113,8 +3132,44 @@ def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
     job = st.session_state.generation_jobs[job_index]
     chosen_ids = list(st.session_state.generation_chosen_ids)
 
+    # The pair's grown-up sheet is drawn FROM the children's one, which by now
+    # is the first thing in generation_collected. Drawn from the same words
+    # instead, the two sheets simply diverge — reported 2026-08-31 as two
+    # different pictures under a caption promising the same scene.
+    pair_source = None
+    if job.get("pair_partner"):
+        drawn = list(st.session_state.get("generation_collected") or [])
+        if drawn:
+            pair_source = drawn[0].image_bytes
+
     started = time.monotonic()
-    if st.session_state.generation_uses_references:
+    if pair_source is not None:
+        # The first sheet leads, so the ordinal words in any cast introduction
+        # still line up behind it; the cast is trimmed to leave it room rather
+        # than letting the provider refuse the whole request.
+        room = max(0, spec.max_reference_images - 1)
+        references = (
+            pair_source,
+            *tuple(st.session_state.generation_references)[:room],
+        )
+        artwork = refine_with_provider(
+            provider_id=provider_id,
+            api_key=api_key,
+            prompt=build_paired_sheet_prompt(
+                _current_generation_idea(),
+                [
+                    (name, kind, marks, appearance)
+                    for _, name, kind, marks, appearance in _recorded_or_chosen_cast()
+                ],
+                age_profile=str(job["level"]),
+                style_name=str(quick_drawing_options(settings)["style"]),
+            ),
+            reference_images=references,
+            model=model,
+            size=spec.portrait_size,
+            quality=quality,
+        )
+    elif st.session_state.generation_uses_references:
         artwork = refine_with_provider(
             provider_id=provider_id,
             api_key=api_key,
