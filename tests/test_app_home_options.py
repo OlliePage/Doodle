@@ -131,7 +131,7 @@ def test_the_settings_line_says_what_will_happen() -> None:
     at = at.segmented_control(key="home_alternatives").set_value(3).run()
     assert "3 pictures" in _settings_line(at)
     assert "2-3 years" in _settings_line(at)
-    assert "toddler bold" in _settings_line(at)
+    assert "a scene" in _settings_line(at)
 
 
 def test_the_homepage_stacks_nothing_below_the_button() -> None:

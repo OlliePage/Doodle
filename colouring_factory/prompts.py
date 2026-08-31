@@ -11,33 +11,33 @@ class StylePreset:
     instruction: str
 
 
+# What KIND of picture, which is a different question from how detailed it is.
+# There used to be four of these and two of them — "Toddler bold" and
+# "Preschool detailed" — only restated the age setting beside them, badly and
+# without its region counts. Worse, they could contradict it: choosing
+# "Grown-up" and "Toddler bold" together sent one request saying both "only a
+# few large regions" and "aim for 150 or more small colouring regions", and the
+# model picked one. A settings file written on 2026-08-31 held exactly that
+# pair. "Badge portrait" went the same way, asking for a subject composed
+# inside a circle while the page target asked for A4; the "Draw it for a badge"
+# button on the result screen does that job on a square canvas, properly.
+#
+# What is left answers only what the age setting cannot. DEFAULT_STYLE is
+# first on purpose: an unrecognised saved style is coerced to whichever entry
+# leads, so it has to be the one that changes nothing.
+DEFAULT_STYLE = "A scene"
+
 STYLE_PRESETS: dict[str, StylePreset] = {
-    "Toddler bold": StylePreset(
-        label="Toddler bold",
+    # No instruction at all. The age setting already carries region count, line
+    # weight and texture at every rung, so a scene needs nothing added; the
+    # builders omit the Style profile line entirely rather than sending a
+    # labelled blank.
+    DEFAULT_STYLE: StylePreset(label=DEFAULT_STYLE, instruction=""),
+    "Just the things": StylePreset(
+        label="Just the things",
         instruction=(
-            "Use very thick, smooth, rounded black outlines and only a few large, "
-            "clearly enclosed colouring regions. Keep the action immediately legible."
-        ),
-    ),
-    "Preschool detailed": StylePreset(
-        label="Preschool detailed",
-        instruction=(
-            "Use strong rounded outlines with a moderate amount of detail, while keeping "
-            "every colouring region comfortably large for a preschool child."
-        ),
-    ),
-    "Badge portrait": StylePreset(
-        label="Badge portrait",
-        instruction=(
-            "Show one central subject, preferably head and upper body, composed inside an "
-            "imaginary circle with generous clear space around every edge."
-        ),
-    ),
-    "Simple objects": StylePreset(
-        label="Simple objects",
-        instruction=(
-            "Use one to three familiar objects, oversized and separated, with simple closed "
-            "shapes and almost no background detail."
+            "Draw one to three familiar objects, oversized and well separated, as "
+            "simple closed shapes with almost no background."
         ),
     ),
 }
@@ -102,11 +102,27 @@ DETAIL_LEVELS: dict[str, DetailLevel] = {
     "Grown-up": DetailLevel(
         label="Grown-up",
         reader="an adult who colours to unwind",
+        # The first wording listed "a decorative border of repeating motifs"
+        # and "patterned fills wherever a plain area would otherwise sit" as
+        # ways to reach the region count, and a model reads that as permission
+        # to take the cheap route: leave the subject drawn as simply as a
+        # toddler page and pile pattern into the background until the count is
+        # met. Reported on 2026-08-31 as a grown-up portrait that came back
+        # with a plain figure and a flowy ornamental background. The count now
+        # says where it has to be spent, and the border is named as a last
+        # resort rather than offered as a layer.
         regions=(
-            "Aim for 150 or more small colouring regions, filling the page corner to "
-            "corner with almost no empty white space. Build the scene from layers: the "
-            "subject, what surrounds it, a decorative border of repeating motifs, and "
-            "patterned fills wherever a plain area would otherwise sit."
+            "Aim for 150 or more small colouring regions, filling the page corner "
+            "to corner with almost no empty white space. Spend that detail on the "
+            "subject first: whatever the picture is of must itself be drawn at this "
+            "density, subdivided into many small closed shapes — the folds and "
+            "seams of clothing, individual leaves and petals, separate feathers, "
+            "scales, bricks, planks, strands and facets. A simply drawn subject "
+            "standing in an intricate setting is the wrong answer, and so is an "
+            "ornamental background compensating for a plain one. Only once the "
+            "subject carries this density, work outwards to what surrounds it, and "
+            "add a decorative border last and only if the page would otherwise "
+            "still have empty space."
         ),
         line_rule=(
             "Fine, even outlines of consistent weight throughout, in the intricate "
@@ -301,7 +317,78 @@ FACE_DETAIL_EXEMPTION = (
 # shelf, losing the exact wear that makes it that toy. "Character" is a third
 # thing again — an existing design, not a real object — so it needs telling
 # to keep that design rather than reinterpreting the idea of it.
-_KIND_ARTICLES = {"person": "person", "toy": "toy", "character": "character"}
+# "Object" is the fourth and is not a fourth kind of character: it is a table,
+# a kettle, a bicycle. It exists because the caricature builder's face wording
+# — head and shoulders, facing forward, the head drawn much larger than the
+# body — means nothing for furniture, and because a table introduced as a
+# "character" invites the model to give it a face.
+_KIND_ARTICLES = {
+    "person": "person",
+    "toy": "toy",
+    "character": "character",
+    "object": "object",
+}
+
+# A seaside artist enlarges the head because the head is where one sitter
+# stops looking like every other sitter, and draws the body small because that
+# is where everybody is alike. A table has no head, but it has the same
+# division: the ring-scarred top, the one replaced leg, the low squat height
+# are where this table stops being a catalogue table. That is what gets pushed.
+OBJECT_CARICATURE_RULE = (
+    "This is a seaside caricature of a thing rather than a person, so find "
+    "what makes this particular one different from every other one of its kind "
+    "and push it far beyond life: a lean, a sag, a wonky leg, a worn corner, a "
+    "squat or spindly proportion, whatever is most itself about it. Draw "
+    "everything it shares with every other one of its kind small, plain and "
+    "quickly. Give it presence and a bit of attitude through proportion, angle "
+    "and stance. Warm and affectionate, never mocking. A neat, accurate, "
+    "catalogue drawing is the wrong answer."
+)
+
+# The failure this refuses is the one already recorded twice for children: a
+# stock cartoon face landing on every subject, so that the particular thing
+# photographed stops being what the drawing is about. A face that is really
+# there — a teddy's stitched one, a mug's printed one — is kept and exaggerated
+# like any other feature, because the rule is about invention, not about faces.
+NO_INVENTED_FACE_RULE = (
+    "Do not give it eyes, a mouth or a face it does not already have, and do "
+    "not stand it up on legs or give it arms. If the real thing has a face, "
+    "keep that face and exaggerate it along with everything else. Its "
+    "character comes from how it is drawn, not from being turned into a "
+    "cartoon creature."
+)
+
+# BADGE_CORNERS_RULE's refusals, minus its final circle bullet — the one a
+# wide subject cannot obey. The bluntness is the part that was proved, so it is
+# repeated rather than split into a shared head and two tails.
+# TOY_LIKENESS_RULE generalised off the toy shelf. CHARACTER_LIKENESS_RULE
+# cannot be used here: it asks for real face shape, real hair length, parting
+# and wave, and freckles, none of which a table has.
+OBJECT_LIKENESS_RULE = (
+    "The attached picture is the reference for what this thing really looks "
+    "like. Draw this exact one rather than a new one from a shop: keep its "
+    "wear, its scratches, its stains, its repairs and anything odd or "
+    "mismatched about it exactly as it really is, rather than tidying them "
+    "away. Show marks and worn patches as outlined shapes to colour, never as "
+    "shading."
+)
+
+# The reader profile's region count is written for a scene, and at 6-9 it asks
+# outright for "a real setting around the subject, with foreground and
+# background" — which the framing rule above has just refused. A caricature has
+# no setting, so the count has to be pointed at the only thing on the page.
+CARICATURE_DENSITY_RULE = (
+    "That region count applies to the subject alone. There is no setting here "
+    "to spend it on, so subdivide the subject itself until the count is met, "
+    "and leave the space around it empty."
+)
+
+OBJECT_FRAMING_RULE = (
+    "Draw the whole thing, from the angle that shows most of what makes it "
+    "that one. Draw NOTHING around it: no background, no scenery, no room, no "
+    "surface it stands on, no border, no frame. Leave generous clear white "
+    "space on every side of it."
+)
 
 TOY_LIKENESS_RULE = (
     "This one is a toy, not a living thing. Keep it looking like this exact "
@@ -374,6 +461,19 @@ ORDINALS = (
 )
 
 
+def _style_line(style: StylePreset) -> str:
+    """The Style profile line, or nothing at all.
+
+    "A scene" carries no instruction, because the age setting already says
+    everything a plain scene needs. Splicing an empty instruction into the
+    template would send the model the line "Style profile:" with nothing after
+    it, which is a labelled blank rather than an absence.
+    """
+
+    instruction = style.instruction.strip()
+    return f"    Style profile: {instruction}\n" if instruction else ""
+
+
 def _spliced(text: str) -> str:
     """Indent a constant to the templates' four-space margin before splicing it in.
 
@@ -389,7 +489,7 @@ def _spliced(text: str) -> str:
 def build_colouring_prompt(
     concept: str,
     age_profile: str = "2-3 years",
-    style_name: str = "Toddler bold",
+    style_name: str = DEFAULT_STYLE,
     target: str = "A4 page",
     extra_instructions: str = "",
     variation_brief: str = "",
@@ -402,7 +502,7 @@ def build_colouring_prompt(
     # identical so alternatives differ in reading, not in drawing conventions.
     scene = variation_brief.strip() or concept
 
-    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
+    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS[DEFAULT_STYLE])
     level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[DEFAULT_LEVEL])
     target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
 
@@ -414,8 +514,7 @@ def build_colouring_prompt(
     Visual rules:
 {_spliced(VISUAL_RULES)}
 
-    Style profile: {style.instruction}
-    Reader profile: {level.regions}
+{_style_line(style)}    Reader profile: {level.regions}
     Line profile: {level.line_rule}
     Detail profile: {level.texture_rule}
     Composition profile: {target_rule}
@@ -430,7 +529,7 @@ def build_colouring_prompt(
 def build_refinement_prompt(
     instruction: str,
     *,
-    style_name: str = "Toddler bold",
+    style_name: str = DEFAULT_STYLE,
     age_profile: str = "2-3 years",
     target: str = "A4 page",
 ) -> str:
@@ -445,7 +544,7 @@ def build_refinement_prompt(
     if not instruction:
         raise ValueError("Describe the change you would like.")
 
-    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
+    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS[DEFAULT_STYLE])
     level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[DEFAULT_LEVEL])
     target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
 
@@ -461,8 +560,7 @@ def build_refinement_prompt(
     Visual rules, which the changed picture must still obey:
 {_spliced(VISUAL_RULES)}
 
-    Style profile: {style.instruction}
-    Reader profile: {level.regions}
+{_style_line(style)}    Reader profile: {level.regions}
     Line profile: {level.line_rule}
     Detail profile: {level.texture_rule}
     Composition profile: {target_rule}
@@ -533,7 +631,7 @@ def build_character_scene_prompt(
     *,
     dropped_appearance: str | None = None,
     age_profile: str = "2-3 years",
-    style_name: str = "Toddler bold",
+    style_name: str = DEFAULT_STYLE,
     target: str = "A4 page",
     extra_instructions: str = "",
     variation_brief: str = "",
@@ -563,7 +661,7 @@ def build_character_scene_prompt(
         raise ValueError("At least one character or a dropped picture is required.")
 
     scene = variation_brief.strip() or concept
-    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
+    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS[DEFAULT_STYLE])
     level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[DEFAULT_LEVEL])
     target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
 
@@ -645,8 +743,7 @@ def build_character_scene_prompt(
     Visual rules:
 {_spliced(VISUAL_RULES)}
 
-    Style profile: {style.instruction}
-    Reader profile: {level.regions}
+{_style_line(style)}    Reader profile: {level.regions}
     Line profile: {level.line_rule}
     Detail profile: {level.texture_rule}
     Composition profile: {target_rule}
@@ -671,6 +768,12 @@ def build_caricature_prompt(
 
     The default level is 6-9 rather than the toddler default because a
     caricature is nothing but a face, so the detail belongs everywhere.
+
+    The reader profile is carried through as well as the line and detail ones.
+    Without it, choosing "Grown-up" for a portrait changed the line weight and
+    permitted pattern but never asked for more to be drawn — the word "regions"
+    did not appear in the prompt at all — so the face came back as simple as a
+    toddler's with an intricate background behind it. Reported 2026-08-31.
     `appearance` is what a model saw in the reference photograph — hair,
     eyes, skin and the like — carried into the same introduction sentence
     as `marks` so the caricature keeps the right hair length and texture
@@ -682,31 +785,61 @@ def build_caricature_prompt(
     marks_line = f" {marks.strip()}" if marks.strip() else ""
     appearance_line = f" {appearance.strip()}" if appearance.strip() else ""
 
-    likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
-    if kind == "toy":
-        likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
-    elif kind == "character":
-        likeness_block += "\n\n" + _spliced(NAMED_CHARACTER_RULE)
+    if kind == "object":
+        likeness_block = _spliced(OBJECT_LIKENESS_RULE)
+        likeness_block += "\n\n" + _spliced(NO_INVENTED_FACE_RULE)
+    else:
+        likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
+        if kind == "toy":
+            likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
+        elif kind == "character":
+            likeness_block += "\n\n" + _spliced(NAMED_CHARACTER_RULE)
+
+    # An object is drawn whole and framed for a page; a face is drawn head and
+    # shoulders and framed for a badge. Everything else about the two is the
+    # same request, which is why this branches rather than forking a sixth
+    # builder and giving the colouring-book contract a sixth place to drift.
+    if kind == "object":
+        named = f"{name.strip()}, the " if name.strip() else "the "
+        subject_line = (
+            f"    Subject: a good-natured caricature of {named}{subject} in the "
+            f"attached picture, drawn whole."
+            f"{marks_line}{appearance_line}"
+        )
+        direction_block = f"    Caricature direction: {OBJECT_CARICATURE_RULE}"
+        framing_block = _spliced(OBJECT_FRAMING_RULE)
+    else:
+        subject_line = (
+            f"    Subject: a good-natured caricature of {name}, the {subject} in "
+            f"the attached picture, head and shoulders only, facing "
+            f"forward.{marks_line}{appearance_line}"
+        )
+        direction_block = (
+            "    Caricature direction: this is a seaside caricature, so exaggerate "
+            "boldly and comically. Draw the head much larger than the body. Push "
+            "the two or three most distinctive features far beyond life while "
+            "keeping them unmistakably recognisable. Warm and affectionate, never "
+            "unkind or ugly. A polite, accurate, flattering portrait is the wrong "
+            "answer."
+        )
+        framing_block = _spliced(BADGE_CORNERS_RULE)
 
     prompt = f"""
     Create an original black-and-white colouring-book caricature.
 
-    Subject: a good-natured caricature of {name}, the {subject} in the attached
-    picture, head and shoulders only, facing forward.{marks_line}{appearance_line}
+{subject_line}
 
 {likeness_block}
 
-    Caricature direction: this is a seaside caricature, so exaggerate boldly and
-    comically. Draw the head much larger than the body. Push the two or three
-    most distinctive features far beyond life while keeping them unmistakably
-    recognisable. Warm and affectionate, never unkind or ugly. A polite,
-    accurate, flattering portrait is the wrong answer.
+{direction_block}
 
     Visual rules:
 {_spliced(VISUAL_RULES)}
 
-{_spliced(BADGE_CORNERS_RULE)}
+{framing_block}
 
+    Reader profile: {level.regions}
+{_spliced(CARICATURE_DENSITY_RULE)}
     Line profile: {level.line_rule}
     Detail profile: {level.texture_rule}
     """

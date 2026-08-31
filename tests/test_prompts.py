@@ -1,6 +1,8 @@
 import pytest
 
 from colouring_factory.prompts import (
+    DEFAULT_STYLE,
+    STYLE_PRESETS,
     build_colour_suggestion_prompt,
     build_colouring_prompt,
     build_refinement_prompt,
@@ -34,7 +36,7 @@ def test_prompt_contains_concept_and_print_rules() -> None:
     prompt = build_colouring_prompt(
         "A small dragon baking a cake",
         age_profile="2-3 years",
-        style_name="Toddler bold",
+        style_name="Just the things",
         target="Round badge",
     )
     assert "A small dragon baking a cake" in prompt
@@ -139,3 +141,41 @@ def test_a_character_with_no_recorded_appearance_still_gets_a_safeguard() -> Non
     lowered = prompt.lower()
     assert "ida" in lowered
     assert "blonde" in lowered or "fair skin" in lowered or "default" in lowered
+
+
+def test_every_offered_style_is_one_the_prompt_builder_knows() -> None:
+    """The homepage's list of styles used to be typed out by hand beside the
+    dict the builders read, with nothing keeping the two in step. A name in one
+    and not the other offers a style that is silently ignored in favour of the
+    fallback, and no test noticed when four styles became two."""
+
+    from colouring_factory.storage import QUICK_STYLE_CHOICES
+
+    assert tuple(STYLE_PRESETS) == QUICK_STYLE_CHOICES
+    assert QUICK_STYLE_CHOICES[0] == DEFAULT_STYLE, (
+        "the first entry is both the default and what an unrecognised saved "
+        "style is quietly rewritten to, so it must be the one that adds nothing"
+    )
+
+
+def test_the_default_style_adds_no_instruction_of_its_own() -> None:
+    """The age setting already carries region count, line weight and texture at
+    every rung. A default style that restated any of it could contradict it."""
+
+    assert STYLE_PRESETS[DEFAULT_STYLE].instruction == ""
+    prompt = build_colouring_prompt("a fox in a wood", age_profile="Grown-up")
+    assert "Style profile" not in prompt, "an empty style still sent a labelled blank"
+
+
+def test_a_grown_up_scene_spends_its_detail_on_the_subject() -> None:
+    """Reported 2026-08-31: a grown-up portrait came back with a plainly drawn
+    subject and a flowy ornamental background. The old wording offered "a
+    decorative border of repeating motifs" and "patterned fills wherever a
+    plain area would otherwise sit" as ways to reach 150 regions, which a model
+    reads as permission to leave the subject alone."""
+
+    prompt = build_colouring_prompt("a fox in a wood", age_profile="Grown-up")
+
+    assert "Spend that detail on the subject first" in prompt
+    assert "compensating for a plain one" in prompt
+    assert "patterned fills wherever a plain area would otherwise sit" not in prompt

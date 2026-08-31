@@ -2293,7 +2293,18 @@ def _render_refine_controls(*, key_prefix: str) -> None:
     model = _model_for(provider_id, spec, settings)
 
     try:
-        prompt = build_refinement_prompt(instruction)
+        # Passed rather than left to default. The defaults are the toddler
+        # ones, so every change to every picture was re-rendered at "2-3 years"
+        # however the picture had been drawn: asking a grown-up mandala for a
+        # party hat told the model to aim for 6 to 12 large regions and use
+        # very thick outlines. Nothing on screen said so, and the picture came
+        # back coarser than it went in.
+        refine_options = quick_drawing_options(settings)
+        prompt = build_refinement_prompt(
+            instruction,
+            style_name=str(refine_options["style"]),
+            age_profile=str(refine_options["age_profile"]),
+        )
         with _mark_in_flight(refine_busy_key):
             with st.spinner("Making that change…"):
                 artwork = refine_with_provider(
