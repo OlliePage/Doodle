@@ -507,3 +507,35 @@ def test_the_foreground_rule_no_longer_says_named_characters() -> None:
     assert "named characters" not in CAST_FOREGROUND_RULE
     prompt = build_character_scene_prompt("at the beach", [], dropped_appearance="")
     assert CAST_FOREGROUND_RULE in prompt
+
+
+def test_no_rule_calls_a_dropped_picture_a_drawing_of_a_character() -> None:
+    """PORTRAIT_MATCH_RULE was gated behind a cast for this reason, and two
+    older rules were left saying the same thing one sentence apart. A
+    drop-with-no-cast prompt used to carry the new rule saying the reference is
+    a photograph alongside two asserting it is Doodle's drawing of a named
+    character."""
+
+    prompt = build_character_scene_prompt(
+        "having a picnic", [], dropped_appearance="A knitted rabbit."
+    )
+
+    for lie in (
+        "The attached drawing tells you",
+        "the line drawing Doodle has already made",
+        "how these characters really look",
+        "Doodle's drawing of",
+    ):
+        assert lie not in prompt, f"a dropped photograph is called a drawing: {lie!r}"
+
+
+def test_the_pose_rule_still_refuses_the_nodding_doll() -> None:
+    """Reworded to cover a photograph as well as a portrait, so check the
+    instruction it exists for survived the rewording. A photograph has the same
+    problem a portrait does: one forward-facing snapshot repeated in every
+    picture."""
+
+    assert "forward-facing smile in every picture" in POSE_FREEDOM_RULE
+    assert "doll rather" in POSE_FREEDOM_RULE
+    prompt = build_character_scene_prompt("having a picnic", [], dropped_appearance="")
+    assert POSE_FREEDOM_RULE in prompt

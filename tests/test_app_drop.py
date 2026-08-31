@@ -25,6 +25,7 @@ from colouring_factory import appearance, characters, generators, timings
 from colouring_factory.characters import save_character
 from colouring_factory.generators import GeneratorError
 from colouring_factory.models import GeneratedArtwork
+from colouring_factory.providers import get_provider
 from colouring_factory.storage import load_settings, save_settings
 from colouring_factory.prompts import DROPPED_PICTURE_RULE
 from tests.test_photos import GPS_IFD_POINTER, _photo_with_gps
@@ -459,3 +460,75 @@ def test_the_service_is_asked_about_a_picture_only_once(monkeypatch) -> None:
     at.text_input(key="home_prompt").set_value("a rocket ship").run()
 
     assert len(calls) == 1, "an empty answer was treated as no answer at all"
+
+
+# --- what the review of 2026-08-31 found --------------------------------
+
+
+def test_a_full_cast_plus_a_picture_never_builds_a_batch_that_cannot_run(
+    monkeypatch,
+) -> None:
+    """The cast picker gives a slot back while a picture is attached, but only
+    by disabling further ticks — an already-ticked box stays enabled so
+    unticking is possible, and nothing unticks anyone when the picture arrives
+    after the ticking. So a parent who fills every slot and then drops a
+    picture used to reach the provider with one reference too many, and
+    refine_with_provider killed the whole batch on its first job."""
+
+    monkeypatch.setenv("GEMINI_API_KEY", "gm-test")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    seen = _capture_refine(monkeypatch)
+
+    at = _homepage()
+    save_settings({**load_settings(), "image_provider": "google"})
+    for name in ("Ida", "Bo", "Ada", "Fen"):
+        save_character(
+            photo=PHOTO, portrait=ARTWORK, name=name, kind="person", marks=""
+        )
+    at.session_state["chosen_characters"] = [
+        character.id for character in characters.list_characters()
+    ]
+    at.run()
+    at = _drop(at)
+    _button(at, "Draw it").click().run()
+
+    assert not at.exception
+    assert seen, "no drawing was requested"
+    limit = get_provider("google").max_reference_images
+    assert len(seen["reference_images"]) <= limit, (
+        f"{len(seen['reference_images'])} pictures sent to a service that "
+        f"looks at {limit}"
+    )
+    assert at.session_state["dropped_picture"] in seen["reference_images"], (
+        "the picture the batch was dropped for is not the one to trim"
+    )
+
+
+def test_a_picture_dropped_before_connecting_is_still_described(monkeypatch) -> None:
+    """A first-time parent drops a photograph before connecting anything, then
+    connects and goes straight to the generating screen without passing a drop
+    well again. Marking it described while there was no key meant the drawing
+    was planned for ever from the placeholder phrase, and several alternatives
+    were pulled apart along axes derived from words nobody wrote."""
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    at = _homepage()
+    at = _drop(at)
+
+    assert at.session_state["dropped_picture"], "the picture was refused with no key"
+    assert at.session_state["dropped_picture_described"] is False, (
+        "a picture nobody could ask about was recorded as already asked about"
+    )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    seen = _capture_refine(monkeypatch)
+    at.run()
+    _button(at, "Draw it").click().run()
+
+    assert not at.exception
+    assert at.session_state["dropped_picture_described"] is True
+    assert DRAFT_APPEARANCE in at.session_state["generation_idea"], (
+        "the drawing was planned from the placeholder rather than the picture"
+    )
+    assert DRAFT_APPEARANCE in seen["prompt"]

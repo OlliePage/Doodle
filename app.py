@@ -605,20 +605,38 @@ def _describe_dropped_picture() -> None:
         return
 
     api_key, _source = _provider_key()
-    described = ""
-    if api_key:
-        with st.spinner("Looking at your picture…"):
-            try:
-                described = describe_appearance(
-                    _dropped_picture(),
-                    provider_id=_active_provider_id(),
-                    api_key=api_key,
-                )
-            except (GeneratorError, ValueError):
-                described = ""
-    st.session_state.dropped_picture_appearance = described
-    st.session_state.dropped_picture_described = True
+    if not api_key:
+        # Left unasked, and the flag left False so the next visit to a screen
+        # with a well tries again. A first-time parent drops a photograph
+        # before connecting anything; marking it described here would mean the
+        # drawing was planned from the placeholder phrase for ever, because
+        # connecting sends them straight to the generating screen and they
+        # never pass a drop well again.
+        return
+
+    with st.spinner("Looking at your picture…"):
+        try:
+            described = describe_appearance(
+                _dropped_picture(),
+                provider_id=_active_provider_id(),
+                api_key=api_key,
+            )
+        except (GeneratorError, ValueError):
+            described = ""
+        # Written inside the spinner, before its context closes. Streamlit
+        # raises a queued rerun at the next element call, and the parent has
+        # had the thumbnail and the Draw it button in front of them for the
+        # whole of this call — pressing Enter during it would otherwise throw
+        # away work already paid for.
+        st.session_state.dropped_picture_appearance = described
+        st.session_state.dropped_picture_described = True
     st.rerun()
+
+
+# What a drawing made from a picture and no words is called before anyone has
+# asked what the picture shows. Named rather than repeated, because
+# _build_generation_plan has to recognise it to replace it.
+DROPPED_PICTURE_IDEA = "the picture you dropped"
 
 
 def _dropped_picture_idea() -> str:
@@ -631,7 +649,7 @@ def _dropped_picture_idea() -> str:
     """
 
     described = str(st.session_state.get("dropped_picture_appearance", "")).strip()
-    return described or "the picture you dropped"
+    return described or DROPPED_PICTURE_IDEA
 
 
 def _submit_home_prompt() -> None:
@@ -2731,6 +2749,24 @@ def _build_generation_plan(idea: str) -> None:
     pairing = bool(options["pair_grown_up"])
     wanted = 1 if pairing else int(options["alternatives"])
 
+    # The last chance to find out what a dropped picture shows. A parent who
+    # drops one before connecting anything is sent from the homepage to the
+    # connection screen and then straight here, never passing a drop well
+    # again, so without this their drawing is planned from the placeholder
+    # phrase and the alternatives are pulled apart along axes derived from
+    # words nobody wrote.
+    if _dropped_picture() and not st.session_state.get("dropped_picture_described"):
+        try:
+            st.session_state.dropped_picture_appearance = describe_appearance(
+                _dropped_picture(), provider_id=provider_id, api_key=api_key
+            )
+        except (GeneratorError, ValueError):
+            st.session_state.dropped_picture_appearance = ""
+        st.session_state.dropped_picture_described = True
+        if idea == DROPPED_PICTURE_IDEA:
+            idea = _dropped_picture_idea()
+            st.session_state.generation_idea = idea
+
     # One alternative needs no plan: the brief exists to pull several
     # drawings of one idea apart from each other. A pair is the opposite
     # errand, one scene drawn twice, so it never asks for briefs either.
@@ -2753,6 +2789,26 @@ def _build_generation_plan(idea: str) -> None:
 
     chosen = _cast_for_drawing()
     dropped = _dropped_picture()
+    if dropped and chosen:
+        # The cast picker gives a slot back while a picture is attached, but
+        # only by disabling further ticks — an already-ticked box stays enabled
+        # so unticking back under the cap is possible, and nothing unticks
+        # anyone when the picture arrives after the ticking. So a parent who
+        # fills every slot and then drops a picture reaches here with one
+        # reference too many, and refine_with_provider would refuse the first
+        # job and kill the whole batch. Trimmed here, where the request is
+        # actually assembled, rather than trusted to the interface.
+        room = spec.max_reference_images - 1
+        if len(chosen) > room:
+            dropped_name = (
+                st.session_state.get("dropped_picture_name") or "your picture"
+            )
+            st.session_state.generation_notice = (
+                f"{spec.label} looks at {spec.max_reference_images} pictures at "
+                f"once, so this drawing uses {dropped_name} and the first "
+                f"{room} of your characters."
+            )
+            chosen = chosen[:room]
     if chosen or dropped:
         # A drawing carrying any picture goes through refine_with_provider,
         # the call that takes references, rather than generate_with_provider.
@@ -4732,9 +4788,11 @@ with guide_tab:
         "A picture you drag onto the page is sent too. It goes once so the "
         "service can describe what is in it, and then again with each "
         "drawing in the batch — four pictures means four sends — because "
-        "that picture is the likeness the drawing is made from. It is held "
-        "for as long as it is shown in the bar and is not written to this "
-        "computer at all unless you save the doodle it made.\n\n"
+        "that picture is the likeness the drawing is made from. It stays "
+        "attached until you press New doodle, which is longer than it is "
+        "shown in the bar: pressing Draw this idea again on a finished "
+        "picture sends it once more. It is not written to this computer at "
+        "all unless you save the doodle it made.\n\n"
         "Removing a character deletes their photograph from this computer, "
         "which is the only copy Doodle has; it cannot recall anything a "
         "drawing service has already been sent. What each service does with "

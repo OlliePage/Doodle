@@ -151,9 +151,10 @@ VISUAL_RULES = (
 )
 
 CHARACTER_LIKENESS_RULE = (
-    "The attached pictures are the reference for how these characters really "
-    "look. Draw each one as a friendly cartoon who is unmistakably recognisable "
-    "as that particular character rather than a generic one. Follow each one's "
+    "The attached pictures are the reference for how the subjects of this "
+    "drawing really look. Draw each one as a friendly cartoon who is "
+    "unmistakably recognisable "
+    "as that particular one rather than a generic example. Follow each one's "
     "real face shape and their real hair length, parting and wave. Draw the "
     "hair as its outline plus a few large closed wave shapes inside it, never "
     "as many fine separate strands or hairline texture. Show markings, worn "
@@ -215,13 +216,13 @@ PORTRAIT_MATCH_RULE = (
 # and turned three quarters away, and her sister knelt side-on to dig, both
 # still plainly themselves.
 POSE_FREEDOM_RULE = (
-    "The attached drawing tells you who they are, not how they are standing. "
+    "The attached picture tells you who they are, not how they are standing. "
     "Take their face, hair and features from it; take their pose, their "
     "expression and the direction they are looking from the scene. Draw them "
     "from whatever angle the action calls for \u2014 in profile, three "
     "quarters, from behind, looking up, looking away \u2014 and wearing "
     "whatever expression fits what they are doing, whether that is laughing, "
-    "concentrating, shouting or thinking. Repeating the drawing's "
+    "concentrating, shouting or thinking. Repeating the reference's "
     "forward-facing smile in every picture makes them look like a doll rather "
     "than a person."
 )

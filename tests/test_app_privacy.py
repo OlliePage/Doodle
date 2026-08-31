@@ -156,3 +156,16 @@ def test_the_paragraph_no_longer_claims_the_photograph_is_the_later_likeness() -
 
     assert "likeness always comes from the photograph" not in text
     assert "portrait" in text
+
+
+def test_the_paragraph_says_how_long_a_dropped_picture_is_held() -> None:
+    """It first said "for as long as it is shown in the bar", which is only
+    the homepage. The picture survives into the connect, generating and result
+    screens, and Draw this idea again re-sends it, so the paragraph named a
+    shorter life than the code keeps."""
+
+    text = _about_tab_text()
+
+    assert "for as long as it is shown in the bar" not in text
+    assert "New doodle" in text
+    assert "Draw this idea again" in text
