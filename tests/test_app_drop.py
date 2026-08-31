@@ -612,3 +612,28 @@ def test_a_caricature_draws_one_square_picture_from_the_dropped_photo(
         "Do not give it eyes, a mouth or a face it does not already have"
         in (seen["prompt"])
     )
+
+
+def test_a_real_heic_photo_can_be_dropped() -> None:
+    """The format an iPhone hands over, through the whole drop path.
+
+    This was broken on the machine rather than in the code: requirements.txt
+    capped pillow-heif below 1.0, the newest version under that cap publishes
+    no wheel for Python 3.14, and the source build needs a libheif that is not
+    installed. So pillow-heif was simply absent, tests/test_photos.py skipped
+    its HEIF case, and dropping a phone photo failed with nothing to say why.
+    """
+
+    heif = pytest.importorskip("pillow_heif")
+    heif.register_heif_opener()
+
+    buffer = BytesIO()
+    Image.new("RGB", (400, 300), (200, 120, 60)).save(buffer, format="HEIF")
+
+    at = _drop(_homepage(), buffer.getvalue(), "IMG_4021.HEIC")
+
+    assert not at.exception
+    assert not at.error
+    assert at.session_state["dropped_picture"], "an iPhone photo was refused"
+    with Image.open(BytesIO(at.session_state["dropped_picture"])) as prepared:
+        assert prepared.format == "PNG", "a HEIC was stored without re-encoding"

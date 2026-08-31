@@ -28,6 +28,16 @@ try:
 
     register_heif_opener()
 except ImportError:  # pragma: no cover - only in an incomplete installation.
+    # Silent on purpose: everything else about a photograph still works, and a
+    # PNG or JPEG must not be refused because a HEIC decoder is missing. The
+    # cost of that silence was paid on 2026-08-31, when the package turned out
+    # to be absent from the running environment and dropping an iPhone photo
+    # failed with nothing on screen explaining why. The cause was the version
+    # pin rather than the machine: requirements.txt capped this below 1.0, the
+    # newest version under that cap publishes no wheel for Python 3.14, and
+    # building it from source needs a libheif that is not installed. Raising
+    # the pin to 1.x, which does publish that wheel, fixed it. Keep the pin
+    # ahead of the Python this runs on.
     pass
 
 
