@@ -1138,3 +1138,26 @@ def test_a_privacy_statement_is_on_the_characters_screen_itself() -> None:
     assert "deletes" in captions
 
 
+def test_redrawing_a_portrait_is_disabled_when_the_provider_cannot_use_references(
+    monkeypatch,
+) -> None:
+    """Carried concern: "Redraw their portrait" disabled only on a missing
+    key, not on a connected provider that cannot accept reference pictures
+    at all (Recraft). It used to fail after the click instead of explaining
+    itself in advance, the way the "Add a character" section already does."""
+
+    ida_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+    save_settings({**load_settings(), "image_provider": "recraft"})
+    monkeypatch.setenv("RECRAFT_API_TOKEN", "r-test")
+
+    at = _characters_screen()
+
+    assert not at.exception
+    redraw = next(
+        button for button in at.button if button.key == f"redraw_character_{ida_id}"
+    )
+    assert redraw.disabled is True
+    captions = " ".join(str(caption.value) for caption in at.caption)
+    assert "recraft cannot draw from a picture" in captions.lower()

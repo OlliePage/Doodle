@@ -1254,6 +1254,11 @@ def _render_characters_screen() -> None:
     spec = get_provider(provider_id)
     api_key, _source = _provider_key(provider_id)
     kind_label_for_kind = {kind: label for label, kind in CHARACTER_KIND_LABELS.items()}
+    # A redraw always sends the stored photograph as a reference picture, the
+    # same call shape as drawing a character in for the first time, so it
+    # needs the same capability rather than only a key: on Recraft it used to
+    # disable on nothing, fail after the click, and explain itself only then.
+    can_redraw = bool(api_key) and spec.max_reference_images >= 1
 
     characters = list_characters()
     if not characters:
@@ -1359,12 +1364,21 @@ def _render_characters_screen() -> None:
                                 )
                                 st.rerun()
 
+                        if not can_redraw and api_key:
+                            # The key exists, so this is the capability gap,
+                            # not the missing-key one: name it in advance
+                            # rather than let the button fail after a click.
+                            st.caption(
+                                f"{spec.label} cannot draw from a picture of "
+                                "someone. Connect OpenAI or Google Gemini to "
+                                "redraw a portrait."
+                            )
                         if st.button(
                             "Redraw their portrait",
                             key=f"redraw_character_{character.id}",
                             width="stretch",
                             icon=":material/auto_awesome:",
-                            disabled=not api_key,
+                            disabled=not can_redraw,
                             help=(
                                 "Draws a fresh portrait from the photo "
                                 "already on file. Costs one generation."
