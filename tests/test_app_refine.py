@@ -190,6 +190,56 @@ def test_a_second_refinement_builds_on_the_first(monkeypatch, tmp_path) -> None:
     assert [v.parent for v in chain] == [None, 0, 1]
 
 
+def test_a_click_while_a_change_is_already_in_flight_changes_nothing_more(
+    monkeypatch, tmp_path
+) -> None:
+    """Streamlit can queue a click made while this control's own previous
+    press is still blocked in the drawing service's call, and replay it the
+    instant that call returns — a second generation from one press."""
+
+    from colouring_factory.storage import load_settings, save_settings
+
+    at = _connected_studio(history.start(_art("original")))
+    settings = load_settings()
+    settings["image_provider"] = "google"
+    save_settings(settings)
+    _stub_google(monkeypatch, ARTWORK + b"one")
+    at.run()
+
+    _change_box(at).set_value("add a hat")
+    at.session_state["busy_refine_studio"] = True
+    [b for b in at.button if b.label == "Change it"][0].click().run()
+
+    assert not at.exception
+    assert len(at.session_state["doodle_versions"]) == 1
+
+
+def test_a_failed_change_leaves_the_control_pressable_again(monkeypatch) -> None:
+    from colouring_factory import generators
+    from colouring_factory.storage import load_settings, save_settings
+
+    def refuse(**kwargs):
+        raise generators.GeneratorError(
+            "Google Gemini declined that description.",
+            provider="Google Gemini",
+            code="content",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", refuse)
+
+    at = _connected_studio(history.start(_art("original")))
+    settings = load_settings()
+    settings["image_provider"] = "google"
+    save_settings(settings)
+    at.run()
+
+    _change_box(at).set_value("give it a hat")
+    [b for b in at.button if b.label == "Change it"][0].click().run()
+
+    assert not at.exception
+    assert at.session_state["busy_refine_studio"] is False
+
+
 def test_the_version_strip_shows_the_chain_and_can_step_back() -> None:
     chain = history.start(_art("original"))
     chain = history.append(chain, _art("hatted"), "add a hat", parent=0)
@@ -290,6 +340,8 @@ def test_the_result_screen_survives_unprepared_outputs() -> None:
     at.run()
 
     assert not at.exception
+
+
 def test_the_wordmark_goes_home_from_every_screen_that_carries_it() -> None:
     """The logo in the corner is a route, not decoration.
 

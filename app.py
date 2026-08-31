@@ -843,20 +843,25 @@ def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
         disabled=not api_key,
     ):
         return
+    colour_busy_key = f"busy_colour_{key_prefix}"
+    if _drawing_already_in_flight(colour_busy_key):
+        # A queued replay of a click already being handled.
+        return
 
     settings = load_settings()
     model = _model_for(provider_id, spec, settings)
 
     try:
-        with st.spinner("Choosing colours…"):
-            artwork = refine_with_provider(
-                provider_id=provider_id,
-                api_key=api_key,
-                image_bytes=image_bytes,
-                prompt=build_colour_suggestion_prompt(),
-                model=model,
-                size=spec.portrait_size,
-            )
+        with _mark_in_flight(colour_busy_key):
+            with st.spinner("Choosing colours…"):
+                artwork = refine_with_provider(
+                    provider_id=provider_id,
+                    api_key=api_key,
+                    image_bytes=image_bytes,
+                    prompt=build_colour_suggestion_prompt(),
+                    model=model,
+                    size=spec.portrait_size,
+                )
     except GeneratorError as exc:
         _show_guidance(exc.code, detail=str(exc))
         return
@@ -1707,6 +1712,10 @@ def _render_refine_controls(*, key_prefix: str) -> None:
     if not api_key:
         _show_guidance("missing_key")
         return
+    refine_busy_key = f"busy_refine_{key_prefix}"
+    if _drawing_already_in_flight(refine_busy_key):
+        # A queued replay of a click already being handled.
+        return
 
     base = chain[current]
     settings = load_settings()
@@ -1714,15 +1723,16 @@ def _render_refine_controls(*, key_prefix: str) -> None:
 
     try:
         prompt = build_refinement_prompt(instruction)
-        with st.spinner("Making that change…"):
-            artwork = refine_with_provider(
-                provider_id=provider_id,
-                api_key=api_key,
-                image_bytes=base.artwork.image_bytes,
-                prompt=prompt,
-                model=model,
-                size=spec.portrait_size,
-            )
+        with _mark_in_flight(refine_busy_key):
+            with st.spinner("Making that change…"):
+                artwork = refine_with_provider(
+                    provider_id=provider_id,
+                    api_key=api_key,
+                    image_bytes=base.artwork.image_bytes,
+                    prompt=prompt,
+                    model=model,
+                    size=spec.portrait_size,
+                )
     except GeneratorError as exc:
         # The chain is untouched, so a failed change costs nothing but the call.
         _show_guidance(exc.code, detail=str(exc))
@@ -2419,7 +2429,7 @@ def _render_badge_strip() -> None:
             icon=":material/badge:",
             key="draw_for_badge",
             disabled=not api_key,
-        ):
+        ) and not _drawing_already_in_flight("busy_badge"):
             idea = (
                 str(
                     st.session_state.get("current_metadata", {}).get("concept")
@@ -2438,54 +2448,55 @@ def _render_badge_strip() -> None:
             chosen = _recorded_cast()
 
             try:
-                with st.spinner("Composing it for a badge…"):
-                    if chosen:
-                        # A scene starring saved characters is redrawn the
-                        # same way _quick_generate draws one: from their
-                        # stored photographs, not from the drawn
-                        # (deliberately exaggerated) portrait — see the
-                        # matching comment there.
-                        references = tuple(
-                            load_character_image(character_id, portrait=False)
-                            for character_id, *_ in chosen
-                        )
-                        artwork = refine_with_provider(
-                            provider_id=provider_id,
-                            api_key=api_key,
-                            prompt=build_character_scene_prompt(
-                                idea,
-                                [
-                                    (name, kind, marks)
-                                    for _, name, kind, marks in chosen
-                                ],
-                                age_profile=str(options["age_profile"]),
-                                style_name=str(options["style"]),
-                                target="Round badge",
-                                extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
-                            ),
-                            reference_images=references,
-                            model=model,
-                            size=spec.square_size,
-                            quality=quality,
-                        )
-                    else:
-                        artworks = generate_with_provider(
-                            provider_id=provider_id,
-                            api_key=api_key,
-                            prompts=[
-                                build_colouring_prompt(
+                with _mark_in_flight("busy_badge"):
+                    with st.spinner("Composing it for a badge…"):
+                        if chosen:
+                            # A scene starring saved characters is redrawn
+                            # the same way _quick_generate draws one: from
+                            # their stored photographs, not from the drawn
+                            # (deliberately exaggerated) portrait — see the
+                            # matching comment there.
+                            references = tuple(
+                                load_character_image(character_id, portrait=False)
+                                for character_id, *_ in chosen
+                            )
+                            artwork = refine_with_provider(
+                                provider_id=provider_id,
+                                api_key=api_key,
+                                prompt=build_character_scene_prompt(
                                     idea,
+                                    [
+                                        (name, kind, marks)
+                                        for _, name, kind, marks in chosen
+                                    ],
                                     age_profile=str(options["age_profile"]),
                                     style_name=str(options["style"]),
                                     target="Round badge",
                                     extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
-                                )
-                            ],
-                            model=model,
-                            size=spec.square_size,
-                            quality=quality,
-                        )
-                        artwork = artworks[0]
+                                ),
+                                reference_images=references,
+                                model=model,
+                                size=spec.square_size,
+                                quality=quality,
+                            )
+                        else:
+                            artworks = generate_with_provider(
+                                provider_id=provider_id,
+                                api_key=api_key,
+                                prompts=[
+                                    build_colouring_prompt(
+                                        idea,
+                                        age_profile=str(options["age_profile"]),
+                                        style_name=str(options["style"]),
+                                        target="Round badge",
+                                        extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
+                                    )
+                                ],
+                                model=model,
+                                size=spec.square_size,
+                                quality=quality,
+                            )
+                            artwork = artworks[0]
             except GeneratorError as exc:
                 _show_guidance(exc.code, detail=str(exc))
             else:

@@ -440,6 +440,38 @@ def test_a_failed_redraw_is_explained_rather_than_crashing(monkeypatch) -> None:
     assert at.session_state["current_raw"] == ARTWORK
     errors = " ".join(str(e.value) for e in at.error)
     assert errors
+    assert at.session_state["busy_badge"] is False
+
+
+def test_a_click_while_a_badge_redraw_is_already_in_flight_draws_nothing_more(
+    monkeypatch,
+) -> None:
+    """Streamlit can queue a click made while this control's own previous
+    press is still blocked in the drawing service's call, and replay it the
+    instant that call returns — a second generation from one press."""
+
+    calls = []
+
+    def fake_generate(**kwargs):
+        calls.append(kwargs)
+        return [
+            GeneratedArtwork(
+                image_bytes=NEW_ARTWORK,
+                prompt="p",
+                provider="OpenAI",
+                model="gpt-image-2",
+            )
+        ]
+
+    monkeypatch.setattr(generators, "generate_with_provider", fake_generate)
+
+    at = _result_screen()
+    at.session_state["busy_badge"] = True
+    at = _button(at, "Draw it for a badge").click().run()
+
+    assert not at.exception
+    assert calls == []
+    assert at.session_state["current_raw"] == ARTWORK
 
 
 def test_a_new_doodle_shows_no_badge_strip() -> None:

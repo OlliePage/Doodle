@@ -150,3 +150,32 @@ def test_a_failed_attempt_explains_itself_and_keeps_the_picture(monkeypatch) -> 
     assert at.session_state["showing_colours"] is False
     assert at.session_state["colour_previews"] == {}
     assert at.session_state["quick_processed"] == LINE_ART
+
+
+def test_a_click_while_already_in_flight_colours_nothing_more(coloured) -> None:
+    """Streamlit can queue a click made while this control's own previous
+    press is still blocked in the drawing service's call, and replay it the
+    instant that call returns — a second generation from one press."""
+
+    at = _result_screen()
+    at.session_state["busy_colour_result"] = True
+    at = _button(at, "colour it in for me").click().run()
+
+    assert not at.exception
+    assert coloured == []
+    assert at.session_state["colour_previews"] == {}
+
+
+def test_a_failed_attempt_leaves_the_control_pressable_again(monkeypatch) -> None:
+    def failing(**kwargs):
+        raise generators.GeneratorError(
+            "OpenAI refused that request.", provider="OpenAI", code="content"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", failing)
+
+    at = _result_screen()
+    at = _button(at, "colour it in for me").click().run()
+
+    assert not at.exception
+    assert at.session_state["busy_colour_result"] is False
