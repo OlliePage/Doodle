@@ -3127,7 +3127,15 @@ with guide_tab:
         The generated illustration itself is probabilistic. Reusing the same words may produce a different drawing. The PDF page size, circle diameters, margins and spacing are deterministic.
         """
     )
-    st.subheader("Privacy and files")
-    st.write(
-        "AI mode sends the written prompt to the selected image provider. Uploaded pictures and saved doodles remain in the local data folder unless you separately send them elsewhere."
+    st.markdown(
+        "**Privacy and files**\n\n"
+        "Doodle sends the written idea to the drawing service you have "
+        "connected, and when a picture has your characters in it, it sends "
+        "their portraits too. Everything else stays on this computer: your "
+        "characters live in the local data folder along with the photographs "
+        "you added them from, and so do your saved doodles.\n\n"
+        "Removing someone from your characters deletes their photograph from "
+        "this computer, which is the only copy Doodle has; it cannot recall "
+        "anything a drawing service has already been sent. What each service "
+        "does with what it receives is set out in its own terms, not here."
     )

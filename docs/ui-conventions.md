@@ -144,3 +144,28 @@ always the line art, because a colouring page a child cannot colour is not one.
 The coloured copy is kept for as long as the picture is unchanged, so looking
 at it again is free. Changing the picture, or choosing a different alternative,
 asks again, because the copy no longer matches what is on screen.
+
+## Who's in the picture
+
+Three decisions from adding a saved cast of characters, recorded so a later
+change has to argue with them rather than quietly undo them.
+
+- The homepage settings line names a count, `3 characters`, never the
+  characters themselves. That line is a row of two-or-three-word popovers
+  built specifically to stay one row regardless of how many pictures Doodle
+  can draw; a cast of names would grow with every character added and break
+  the row it sits in. Opening the popover still lists every name, with a
+  checkbox each, so nothing is hidden — only the closed line stays short.
+- A person is always drawn at full facial fidelity, with no setting to turn
+  it down. Whenever any character in a scene is a person, the prompt exempts
+  their head from the reader's line profile, so a toddler sheet's few, large,
+  simple shapes still leave a face carrying as much fine line work as it
+  takes to be recognisably them. A face that is not recognisable has failed
+  at the one job it had, at any age level.
+- Every picture Doodle makes reaches the badge machinery the same way: it
+  becomes `quick_processed`, and the badge strip looks up (or builds) its own
+  fit from whatever `quick_processed` currently is. A newly drawn character's
+  portrait, a redraw, a refinement and an earlier version picked back up from
+  the version strip all pass through that one door; nothing sets the badge
+  preview directly, so nothing can leave it pointing at a picture no longer
+  on screen.
