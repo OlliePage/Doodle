@@ -10,6 +10,15 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 # pixels alone before it is stored.
 MAX_PHOTO_EDGE_PX = 1536
 
+# Doodle Studio's own "Upload artwork" door takes line art a parent already
+# has, such as a scanned A4 page, rather than a reference photo — a 300dpi A4
+# scan is already ~2481x3508, well past MAX_PHOTO_EDGE_PX, and clipping it to
+# a photo-reference size would visibly degrade something meant to be printed.
+# It carries the same GPS/camera/ICC risk whenever the "artwork" happens to be
+# a phone photo, so it is worth the same metadata strip; only the size budget
+# differs, generous enough that no realistic scan or photo is ever touched.
+MAX_ARTWORK_EDGE_PX = 6000
+
 # Photographs straight off an iPhone are HEIC, which Pillow cannot open on its
 # own. This is the one runtime dependency the characters feature adds; a photo
 # feature that cannot read the format most family photographs are in is broken

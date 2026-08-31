@@ -59,7 +59,7 @@ from colouring_factory.pdf_export import (
     create_custom_page_pdf,
     create_full_page_pdf,
 )
-from colouring_factory.photos import prepare_photo
+from colouring_factory.photos import MAX_ARTWORK_EDGE_PX, prepare_photo
 from colouring_factory.preview import render_pdf_preview
 from colouring_factory.providers import (
     DEFAULT_PROVIDER,
@@ -3387,12 +3387,23 @@ with create_tab:
         )
         upload_title = st.text_input("Artwork title", value="My colouring picture")
         if uploaded and st.button("Use uploaded artwork", type="primary"):
-            _set_current_artwork(
-                uploaded.getvalue(),
-                title=upload_title,
-                metadata={"source": "Upload", "original_filename": uploaded.name},
-            )
-            st.rerun()
+            # A phone photo used as "artwork" carries the same GPS, camera
+            # make and capture time the characters door already strips from
+            # an identical file (SEC-03); the original filename can carry a
+            # child's name too, so it is dropped rather than recorded.
+            try:
+                prepared = prepare_photo(
+                    uploaded.getvalue(), max_edge=MAX_ARTWORK_EDGE_PX
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                _set_current_artwork(
+                    prepared,
+                    title=upload_title,
+                    metadata={"source": "Upload"},
+                )
+                st.rerun()
 
     else:
         demos = list_demo_artwork()
