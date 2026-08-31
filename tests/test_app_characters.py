@@ -131,6 +131,65 @@ def test_adding_a_character_draws_a_portrait_and_saves_it(monkeypatch) -> None:
     assert at.session_state["quick_processed"]
 
 
+def test_drawing_the_idea_again_after_a_character_portrait_does_not_trap_on_connect(
+    monkeypatch,
+) -> None:
+    """FB-01: the characters screen used to land on the result screen with no
+    generation_idea set, since a portrait has no scene idea behind it. The
+    result screen's leftmost button, "Draw this idea again", always reads
+    that same key, so it raised missing_prompt — which
+    _render_generating_screen then misrouted to the Connect screen: a screen
+    that simultaneously said OpenAI was already connected and that a
+    description was needed, with two of its three buttons looping back to
+    themselves and Back escaping to Doodle Studio."""
+
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    def fake_generate(**kwargs):
+        return [
+            GeneratedArtwork(
+                image_bytes=OTHER_ARTWORK,
+                prompt=kwargs["prompts"][0],
+                provider="OpenAI",
+                model="gpt-image-2",
+            )
+        ]
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    monkeypatch.setattr(generators, "generate_with_provider", fake_generate)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("ida.png", PHOTO_BYTES, "image/png"))
+    at.text_input(key="character_name").set_value("Ida").run()
+
+    for button in at.button:
+        if button.label == "Draw them":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert at.session_state["screen"] == "result"
+    assert str(at.session_state["generation_idea"]).strip(), (
+        "no idea was carried forward from the new portrait"
+    )
+
+    for button in at.button:
+        if button.label == "Draw this idea again":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Draw this idea again button not found")
+
+    assert not at.exception
+    assert at.session_state["screen"] != "connect", (
+        f"trapped on the connect screen: {at.session_state['connection_error']}"
+    )
+
+
 def test_a_caricature_is_drawn_at_the_providers_square_size(monkeypatch) -> None:
     """A caricature is a face, and a face is the most badge-shaped thing
     Doodle draws, so it is drawn square rather than portrait. Nothing else

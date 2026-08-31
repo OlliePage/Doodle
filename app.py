@@ -1330,9 +1330,13 @@ def _render_characters_screen() -> None:
             kind=kind,
             marks=marks,
         )
-        _adopt_artwork(
-            artwork, f"{name.strip()}, drawn by Doodle", characters=[character_id]
-        )
+        concept = f"{name.strip()}, drawn by Doodle"
+        # A portrait has no scene idea behind it, but "Draw this idea again"
+        # on the result screen always reads generation_idea: leaving it
+        # empty made that button raise missing_prompt on the very first
+        # picture this screen ever produces.
+        st.session_state.generation_idea = concept
+        _adopt_artwork(artwork, concept, characters=[character_id])
         _prepare_quick_outputs()
         st.session_state.screen = "result"
         st.rerun()
@@ -2217,7 +2221,12 @@ def _render_generating_screen() -> None:
     except GeneratorError as exc:
         provider_id = _active_provider_id()
         _key, source = _provider_key(provider_id)
-        if exc.code == "content":
+        if exc.code in {"content", "missing_prompt"}:
+            # Both are about what was typed, not about the connection: a
+            # missing idea used to fall into the branch below, landing on
+            # the Connect screen with a message that had nothing to do with
+            # any provider, alongside a success banner saying one was
+            # already connected.
             st.session_state.home_error = str(exc)
             st.session_state.home_prompt = st.session_state.generation_idea
             st.session_state.screen = "home"
