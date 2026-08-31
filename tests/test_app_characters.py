@@ -125,6 +125,40 @@ def test_adding_a_character_draws_a_portrait_and_saves_it(monkeypatch) -> None:
     assert at.session_state["quick_processed"]
 
 
+def test_a_caricature_is_drawn_at_the_providers_square_size(monkeypatch) -> None:
+    """A caricature is a face, and a face is the most badge-shaped thing
+    Doodle draws, so it is drawn square rather than portrait. Nothing else
+    in the suite pins this down: swap `square_size` for `portrait_size` in
+    `_draw_character_portrait` and every other test here stays green."""
+
+    from colouring_factory.providers import get_provider
+
+    captured = {}
+
+    def fake_refine(**kwargs):
+        captured["size"] = kwargs["size"]
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("ida.png", PHOTO_BYTES, "image/png"))
+    at.text_input(key="character_name").set_value("Ida").run()
+    at.text_area(key="character_marks").set_value("Curly hair, round glasses.").run()
+
+    for button in at.button:
+        if button.label == "Draw them":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    assert captured["size"] == get_provider("openai").square_size
+
+
 def test_a_declined_photograph_is_explained_as_a_picture_problem(monkeypatch) -> None:
     def refuse(**kwargs):
         raise GeneratorError(
@@ -147,10 +181,24 @@ def test_a_declined_photograph_is_explained_as_a_picture_problem(monkeypatch) ->
         raise AssertionError("Draw them button not found")
 
     assert not at.exception
-    errors = " ".join(str(error.value) for error in at.error)
-    assert "picture" in errors.lower()
+    # _show_guidance splits the message across st.error (title + detail) and,
+    # inside its own container, st.markdown (the fix) and st.caption (the
+    # control) — the wrong-screen advice this guards against lives in the
+    # latter two, not in the error line itself.
+    guidance_text = " ".join(
+        str(element.value)
+        for group in (at.error, at.markdown, at.caption)
+        for element in group
+    )
+    assert "picture" in guidance_text.lower()
     # The old content guidance blamed the wording and pointed at the idea box.
-    assert "television" not in errors.lower()
+    assert "television" not in guidance_text.lower()
+    # A parent on the character-creation screen has nothing to untick, and
+    # is not standing on the homepage — the fix given here must be true on
+    # both screens this code can fire from, not just the one it was written
+    # for.
+    assert "untick" not in guidance_text.lower()
+    assert "homepage" not in guidance_text.lower()
     assert list_characters() == []
 
 

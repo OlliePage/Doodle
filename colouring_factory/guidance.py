@@ -195,10 +195,11 @@ _ENTRIES: dict[str, Guidance] = {
             "it. Doodle does not know which part it objected to."
         ),
         fix=(
-            "Try a different picture of the same character, or untick them and "
-            "let the written description do the work."
+            "Try a different picture of the same character. A written "
+            "description of what makes them recognisable can carry the "
+            "likeness when a photograph will not."
         ),
-        control="Your characters, on the homepage",
+        control="The picture you uploaded",
     ),
     "no_reference_support": Guidance(
         title="This drawing service cannot draw from a picture",

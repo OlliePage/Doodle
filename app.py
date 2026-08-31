@@ -2093,11 +2093,7 @@ with st.sidebar:
         st.session_state.screen = "connect"
         st.rerun()
 
-    saved_model = str(
-        settings.get(f"{studio_provider_id}_model", studio_provider.default_model)
-    )
-    if saved_model not in studio_provider.models:
-        saved_model = studio_provider.default_model
+    saved_model = _model_for(studio_provider_id, studio_provider, settings)
     model = st.selectbox(
         "Image model",
         list(studio_provider.models),
