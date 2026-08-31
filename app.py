@@ -779,9 +779,21 @@ def _render_homepage() -> None:
              padding grows to make room. Nothing moves when there is no
              picture, because none of this renders. */
           div[data-testid="stForm"] {position: relative;}
+          /* Both of these are centred against the pill, not against the form.
+             The pill starts 16px below the form's top edge, so a fixed top
+             measured from the form left the thumbnail 16px high and the cross
+             12px high — visible as soon as a real photograph was dropped, and
+             invisible to a check that only measured left and right. Giving
+             each wrapper the pill's own height and centring inside it keeps
+             them true whatever the wrapped control turns out to measure. */
           .st-key-doodle-home-thumb {
             position: absolute;
-            top: 15px;
+            /* 16px down to the pill's top edge, then half the difference
+               between the pill's 64px and this 34px thumbnail. Streamlit
+               wraps an image in five nested containers that each shrink to
+               its height, so flex centring on this wrapper never reaches it
+               and the offset has to be stated. */
+            top: 31px;
             left: max(1rem, calc(50% - 365px + 1rem));
             z-index: 3;
             width: 34px;
@@ -809,7 +821,9 @@ def _render_homepage() -> None:
              not siblings and nth-of-type never matches either of them. */
           .st-key-doodle-home-clear {
             position: absolute;
-            top: 12px;
+            /* 16px to the pill's top, then half of 64px minus this button's
+               own 48px. */
+            top: 24px;
             right: max(1rem, calc(50% - 365px + 1rem));
             z-index: 3;
             width: auto;
@@ -920,6 +934,10 @@ def _render_homepage() -> None:
             }
             .doodle-logo--hero {font-size: clamp(4.1rem, 22vw, 6rem); margin-bottom: 1.9rem;}
             div[data-testid="stTextInput"] > div > div {min-height: 58px;}
+            /* The pill loses 6px on a narrow screen, so both things centred
+               against it come up 3px. */
+            .st-key-doodle-home-thumb {top: 28px;}
+            .st-key-doodle-home-clear {top: 21px;}
             div[data-testid="stTextInput"] input {height: 56px; font-size: 1rem; padding: 0 1.3rem !important;}
           }
         </style>
@@ -3143,8 +3161,10 @@ def _render_badge_strip() -> None:
     spec = get_provider(provider_id)
     api_key, _source = _provider_key(provider_id)
 
-    with st.container(border=True):
-        st.markdown("**Your badge**")
+    # Collapsed by default. The preview is a full-width circle, and left open
+    # it was the tallest thing on the result screen for a parent who only
+    # wanted the A4 sheet.
+    with st.expander("Your badge"):
         st.image(preview, width="stretch")
         st.caption(
             "Your doodle fitted to a 58 mm badge. Doodle can draw it again "
@@ -3859,13 +3879,18 @@ def _render_first_result() -> None:
     )
 
     _render_grown_up_sheet()
-    _render_badge_strip()
 
     # This box used to rewrite the original idea and draw a new picture from
     # scratch. Since alternatives started coming back genuinely different, that
     # no longer returned anything like what was on screen; it now changes the
     # picture itself.
     _render_refine_controls(key_prefix="result")
+
+    # Below changing the picture, not above it. Changing what is on screen is
+    # the thing a parent reaches for next; the badge is an extra errand, and
+    # a full-width circle between the sheet and the change box pushed that box
+    # off the screen on a laptop.
+    _render_badge_strip()
 
     with st.expander("Other sizes & advanced options"):
         st.caption(

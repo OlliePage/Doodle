@@ -645,3 +645,27 @@ def test_the_badge_sheet_is_downloadable_too() -> None:
     at = _result_screen()
     labels_and_keys = [(button.label, button.key) for button in at.download_button]
     assert ("Download the PDF", "download_pdf_badges") in labels_and_keys
+
+
+def test_the_badge_section_is_collapsed_and_sits_below_changing_the_picture() -> None:
+    """The badge preview is a full-width circle. Left open above the change
+    box it was the tallest thing on the result screen, and pushed the control
+    a parent reaches for next off a laptop display."""
+
+    at = _result_screen()
+    assert not at.exception
+
+    labels = [expander.label for expander in at.get("expander")]
+    assert "Your badge" in labels, f"the badge section is not an expander: {labels}"
+
+    badge = next(e for e in at.get("expander") if e.label == "Your badge")
+    assert not badge.proto.expanded, "the badge section opens by default"
+
+    source = (Path(__file__).resolve().parents[1] / "app.py").read_text(
+        encoding="utf-8"
+    )
+    # rindex on both: each name appears first as its own def, and it is the
+    # call sites on the result screen whose order matters.
+    change_at = source.rindex('_render_refine_controls(key_prefix="result")')
+    badge_at = source.rindex("_render_badge_strip()")
+    assert change_at < badge_at, "the badge section still renders above the change box"
