@@ -102,37 +102,73 @@ DETAIL_LEVELS: dict[str, DetailLevel] = {
     "Grown-up": DetailLevel(
         label="Grown-up",
         reader="an adult who colours to unwind",
-        # The first wording listed "a decorative border of repeating motifs"
-        # and "patterned fills wherever a plain area would otherwise sit" as
-        # ways to reach the region count, and a model reads that as permission
-        # to take the cheap route: leave the subject drawn as simply as a
-        # toddler page and pile pattern into the background until the count is
-        # met. Reported on 2026-08-31 as a grown-up portrait that came back
-        # with a plain figure and a flowy ornamental background. The count now
-        # says where it has to be spent, and the border is named as a last
-        # resort rather than offered as a layer.
+        # Third wording. The first offered "a decorative border of repeating
+        # motifs" and "patterned fills wherever a plain area would otherwise
+        # sit" as ways to reach the count, and a grown-up portrait came back on
+        # 2026-08-31 with a plain figure and a flowy ornamental background. The
+        # second pointed the count at the subject and told the page to fill
+        # corner to corner, and the same day a picnic under a hot air balloon
+        # festival came back worse: the nine large balloons that were the whole
+        # point of the toddler sheet shrank into wallpaper, bunting ran across
+        # the top, and the foreground and both margins filled with daisies and
+        # foliage the words never mentioned. Anyone would have taken the
+        # toddler sheet.
+        #
+        # Three clauses paid for that. "Almost no empty white space" is an area
+        # order that says nothing about what fills the area, and it contradicted
+        # the visual rules' pure white background, the A4 profile's "leave
+        # useful white space around it" and the badge rule's blank corners — so
+        # the model followed the one instruction it could count. "Individual
+        # leaves and petals" was the only example in the list that also works as
+        # a free-standing object to multiply; you cannot scatter a fold, but you
+        # can scatter a petal. And a count scored against the page is far
+        # cheaper to reach by repeating a small shape forty times than by
+        # subdividing nine large ones, so the balloons shrank to make room.
+        #
+        # The count now lives inside the objects and cannot be earned by adding
+        # to the page. The border offer is gone rather than demoted, because a
+        # field that overrides the shared visual rules teaches the model those
+        # rules are negotiable immediately before it decides whether inventing a
+        # meadow is allowed.
         regions=(
-            "Aim for 150 or more small colouring regions, filling the page corner "
-            "to corner with almost no empty white space. Spend that detail on the "
-            "subject first: whatever the picture is of must itself be drawn at this "
-            "density, subdivided into many small closed shapes — the folds and "
-            "seams of clothing, individual leaves and petals, separate feathers, "
-            "scales, bricks, planks, strands and facets. A simply drawn subject "
-            "standing in an intricate setting is the wrong answer, and so is an "
-            "ornamental background compensating for a plain one. Only once the "
-            "subject carries this density, work outwards to what surrounds it, and "
-            "add a decorative border last and only if the page would otherwise "
-            "still have empty space."
+            "Aim for 150 or more small colouring regions, and find every one of "
+            "them inside the things the picture already contains: regions won by "
+            "adding something new do not count. Spend that detail on the subject "
+            "first, and the subject is everything the description names, not only "
+            "the people in it. Draw each named thing at the size the scene gives "
+            "it, big enough to be looked at, then divide it into ten or twenty "
+            "small closed shapes cut from what it is really made of: the seams "
+            "and folds of cloth, the planks and grain of wood, the courses of a "
+            "wall. Nothing may enter the picture that the description has not "
+            "asked for and the scene does not need in order to stand up: a meadow "
+            "of flowers nobody asked for, a run of bunting or a decorative border "
+            "arriving to fill a gap is the failure this refuses. Nor may anything "
+            "named be shrunk, or repeated small until it becomes wallpaper, to "
+            "make room for one. Space the description does not account for is "
+            "left white; a gap is not a place to put something. A simply drawn "
+            "subject standing in an intricate setting is the wrong answer, and so "
+            "is an ornamental background compensating for a plain one."
         ),
         line_rule=(
             "Fine, even outlines of consistent weight throughout, in the intricate "
             "style of an adult colouring book, mandala or zentangle."
         ),
+        # The more direct cause of the flower mat than the region count was.
+        # It named the motif (petals, leaves), nominated every empty area as
+        # somewhere to put it — the sky is a larger area and so is the grass —
+        # and declared ornament to be the goal rather than a consequence.
+        # Pattern is still welcome and still dense; it is now bound to surfaces
+        # that carry pattern in life, and the two places the wallpaper and the
+        # daisies went are refused by name.
         texture_rule=(
-            "Dense decorative pattern is the point: scales, petals, paisley, dots, "
-            "leaves, waves and geometric repeats subdividing every larger area. Every "
-            "one of them must be a closed shape a fine pen or pencil can colour, never "
-            "a shaded or filled black mass."
+            "Dense decorative pattern belongs wherever a surface really carries "
+            "one — a printed dress, a tiled floor, a brick wall, the scales of a "
+            "fish, the weave of a basket — and nowhere else: empty sky, bare "
+            "ground and the space between things stay plain. Every mark of it "
+            "must be a closed shape a fine pen or pencil can colour, never a "
+            "shaded or filled black mass. Density here means more regions to "
+            "colour, never darker drawing: no hatching, no cross-hatching, no "
+            "stippling and no strokes standing in for texture."
         ),
     ),
 }
@@ -172,8 +208,11 @@ CHARACTER_LIKENESS_RULE = (
     "unmistakably recognisable "
     "as that particular one rather than a generic example. Follow each one's "
     "real face shape and their real hair length, parting and wave. Draw the "
-    "hair as its outline plus a few large closed wave shapes inside it, never "
-    "as many fine separate strands or hairline texture. Show markings, worn "
+    "hair as its outline plus closed wave and lock shapes inside it — a few "
+    "large ones on a simple page, many smaller ones on a detailed one — and "
+    "never as separate fine strands, flyaway wisps or hairline texture, "
+    "however wispy the reference is and however detailed the page. Hair drawn "
+    "as strokes is a black mass nobody can colour. Show markings, worn "
     "patches and freckles as outlined shapes to colour, never as shading."
 )
 
@@ -305,10 +344,11 @@ FACE_DETAIL_EXEMPTION = (
     "picture only: each person's head — the face, the hair and the glasses — may "
     "carry as much fine line work as it takes to be recognisably them. "
     "Everything else in the picture, including bodies, clothes and the whole "
-    "setting, obeys the reader profile exactly: few, large, simple shapes with "
-    "wide gaps. Clothing is part of everything else: a dress at the toddler "
+    "setting, obeys the reader profile exactly, whatever that profile asks for. "
+    "Clothing is part of everything else: a dress at the toddler "
     "level is two or three large plain shapes, however patterned it was in the "
-    "reference."
+    "reference, and on a detailed page it carries as many small closed shapes "
+    "as that profile demands."
 )
 
 # "Person" and "toy" each need their own instruction because they fail in
@@ -756,6 +796,27 @@ def build_character_scene_prompt(
     return dedent(prompt).strip()
 
 
+# Pairing draws one scene twice so a parent and a child can colour the same
+# picture side by side. Drawn from the same words alone the two sheets simply
+# diverge — reported 2026-08-31 as two different pictures under a caption
+# promising the same one — so the second is now drawn from the first, and this
+# is what it is told about it. Sameness comes before detail on purpose: told
+# only to add detail, a model redraws the scene its own way and decorates that.
+SAME_SCENE_RULE = (
+    "The attached picture is a colouring page of this same scene, already "
+    "drawn. Draw that same picture again: the same things, the same number of "
+    "them, in the same places, at the same sizes, seen from the same angle, "
+    "with the same thing happening. Nothing may be added, removed, moved or "
+    "resized, and nothing may be swapped for something like it — the same "
+    "clothes, the same food, the same objects. What changes is only how much "
+    "line work each of those things carries: find far more inside every shape "
+    "the attached picture already contains, and put it there. Somebody must be "
+    "able to lay the two pages side by side and see one picture drawn twice."
+)
+
+GROWN_UP_PAIR_LEVEL = "Grown-up"
+
+
 def build_caricature_prompt(
     name: str,
     kind: str,
@@ -842,6 +903,83 @@ def build_caricature_prompt(
 {_spliced(CARICATURE_DENSITY_RULE)}
     Line profile: {level.line_rule}
     Detail profile: {level.texture_rule}
+    """
+
+    return dedent(prompt).strip()
+
+
+def build_paired_sheet_prompt(
+    concept: str,
+    characters: Sequence[tuple[str, str, str, str]] = (),
+    *,
+    age_profile: str = GROWN_UP_PAIR_LEVEL,
+    style_name: str = DEFAULT_STYLE,
+    target: str = "A4 page",
+) -> str:
+    """The same scene as the attached drawing, redrawn at another detail level.
+
+    Pairing offers two sheets so a parent and a child can colour the same
+    picture together, and until now it drew them twice from the same words and
+    hoped. Words are not enough: on 2026-08-31 a picnic under a hot air balloon
+    festival came back as two different pictures — different clothes, different
+    food, different composition entirely — under a caption promising the same
+    scene. Handing the second drawing the first one settles it, which is what
+    the reference-carrying call has always been for.
+
+    The instruction is deliberately about sameness before it is about detail.
+    Told only to add detail, a model redraws the scene its own way and then
+    decorates that; told first that the composition is fixed, the detail has
+    nowhere to go but inside the shapes already there, which is the same errand
+    the Grown-up reader profile asks for and easier to obey with the picture in
+    front of you.
+    """
+
+    concept = concept.strip()
+    if not concept:
+        raise ValueError("A picture idea is required.")
+
+    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS[DEFAULT_STYLE])
+    level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[GROWN_UP_PAIR_LEVEL])
+    target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
+
+    # Named even though the first sheet already shows them, because "the same
+    # things" is a weaker instruction about a person than about a picnic
+    # basket: a face redrawn generically still satisfies it. Their portraits
+    # ride along behind the first sheet, so the likeness rule has something to
+    # be about.
+    cast_block = ""
+    if characters:
+        introductions = []
+        for name, kind, marks, appearance in characters:
+            article = _KIND_ARTICLES.get(kind, "character")
+            line = f"{name} is in it, a {article}."
+            if marks.strip():
+                line += f" {marks.strip()}"
+            if appearance.strip():
+                line += f" {appearance.strip()}"
+            introductions.append(line)
+        cast_block = (
+            "\n    Who is in it:\n"
+            + _spliced(chr(10).join(introductions))
+            + "\n\n"
+            + _spliced(CHARACTER_LIKENESS_RULE)
+            + "\n"
+        )
+
+    prompt = f"""
+    Redraw the attached colouring page for {level.reader}.
+
+    It is a drawing of this scene: {concept}
+{cast_block}
+{_spliced(SAME_SCENE_RULE)}
+
+    Visual rules:
+{_spliced(VISUAL_RULES)}
+
+{_style_line(style)}    Reader profile: {level.regions}
+    Line profile: {level.line_rule}
+    Detail profile: {level.texture_rule}
+    Composition profile: {target_rule}
     """
 
     return dedent(prompt).strip()

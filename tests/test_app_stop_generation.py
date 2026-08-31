@@ -203,6 +203,19 @@ def test_pairing_still_draws_exactly_two_pictures_one_at_a_time(monkeypatch) -> 
 
     monkeypatch.setattr(generators, "generate_with_provider", fake_generate)
 
+    # The pair's second sheet is drawn FROM the first since 2026-08-31, so it
+    # goes through the reference-carrying call and this has to count both.
+    def fake_refine(**kwargs):
+        calls.append(kwargs["prompt"])
+        return GeneratedArtwork(
+            image_bytes=OTHER,
+            prompt=kwargs["prompt"],
+            provider="OpenAI",
+            model="gpt-image-2",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
     at = _homepage()
     at = at.segmented_control(key="home_alternatives").set_value(4).run()
     at = at.checkbox(key="home_pair_grown_up").set_value(True).run()

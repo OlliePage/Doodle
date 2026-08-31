@@ -91,6 +91,7 @@ from colouring_factory.providers import (
 from colouring_factory.prompts import (
     STYLE_PRESETS,
     build_caricature_prompt,
+    build_paired_sheet_prompt,
     build_character_scene_prompt,
     build_colouring_prompt,
     build_colour_suggestion_prompt,
@@ -640,16 +641,40 @@ DROPPED_PICTURE_IDEA = "the picture you dropped"
 
 
 def _dropped_picture_idea() -> str:
-    """What to call a drawing made from a picture and no words.
+    """What to show a parent while a picture with no words is being drawn.
 
-    The generating screen renders the idea as the largest words on the page and
-    the connection screen shows it on the "your idea is waiting" card, so an
-    empty string would leave a parent staring at a blank wait with no sign
-    their picture was still held.
+    The generating screen renders this as the largest words on the page and the
+    connection screen shows it on the "your idea is waiting" card, so an empty
+    string would leave a parent staring at a blank wait with no sign their
+    picture was still held.
+
+    Shown, not sent. It used to be both, and the scene the model was given was
+    this same sentence — a description of hair colour, eye colour and skin
+    tone, written to travel alongside the photograph rather than to be drawn
+    from. Handed over as the scene it was drawn literally: "fine hair pulled
+    back with wispy flyaways" came back as thousands of separate strokes.
+    It also reached the model twice, once here and once in the character
+    introduction, which doubled the weight of exactly the wrong words.
+    _dropped_picture_scene is what is sent now.
     """
 
     described = str(st.session_state.get("dropped_picture_appearance", "")).strip()
     return described or DROPPED_PICTURE_IDEA
+
+
+def _dropped_picture_scene(idea: str) -> str:
+    """The Scene line for a drawing made from a picture and no typed words.
+
+    The photograph itself is attached to the request, and the introduction
+    already reads the description out. What the scene slot needs is the errand,
+    not a second copy of the appearance: draw the thing in the picture.
+    """
+
+    return (
+        idea
+        if idea and idea != _dropped_picture_idea()
+        else "the subject of the attached picture, drawn as it is"
+    )
 
 
 def _submit_home_prompt() -> None:
@@ -1671,6 +1696,41 @@ def _send_to_printer(pdf_bytes: bytes) -> None:
         print_trigger_html(pdf_bytes, nonce=f"doodle-print-{nonce}"),
         unsafe_allow_javascript=True,
     )
+
+
+def _render_export_row(
+    pdf_bytes: bytes, *, file_name: str, key: str, label: str
+) -> None:
+    """The two things anyone wants from a finished picture, side by side.
+
+    Saving the PDF used to live inside the "Nothing happened when I pressed
+    print" panel, as the consolation prize for a browser that refused a print
+    dialogue. It is not a consolation prize — wanting the file is as ordinary
+    as wanting the printer, whether to print it somewhere else, keep it, or
+    send it to somebody. It stands beside printing now, and the panel below
+    keeps its own copy for the case it was written for.
+    """
+
+    print_col, save_col = st.columns(2)
+    with print_col:
+        if st.button(
+            label,
+            type="primary",
+            width="stretch",
+            icon=":material/print:",
+            key=f"print_{key}",
+        ):
+            _send_to_printer(pdf_bytes)
+    with save_col:
+        st.download_button(
+            "Save as a PDF",
+            data=pdf_bytes,
+            file_name=file_name,
+            mime="application/pdf",
+            width="stretch",
+            icon=":material/download:",
+            key=f"save_pdf_{key}",
+        )
 
 
 def _render_print_help(
@@ -2980,7 +3040,10 @@ def _build_generation_plan(idea: str) -> None:
             references = (*references, dropped)
         prompts = [
             build_character_scene_prompt(
-                idea,
+                # The photograph is attached to this request and its
+                # description is read out in the introduction below. The scene
+                # slot gets the errand instead of a second copy of the words.
+                _dropped_picture_scene(idea) if dropped else idea,
                 [
                     (name, kind, marks, appearance)
                     for _, name, kind, marks, appearance in chosen
@@ -3017,8 +3080,16 @@ def _build_generation_plan(idea: str) -> None:
     )
 
     st.session_state.generation_jobs = [
-        {"prompt": prompt, "level": level, "brief": brief}
-        for prompt, level, brief in zip(prompts, levels, briefs)
+        {
+            "prompt": prompt,
+            "level": level,
+            "brief": brief,
+            # The pair's second sheet is appended last and is drawn from the
+            # first rather than from the same words again, so its prompt is
+            # built at drawing time when that first sheet exists.
+            "pair_partner": pairing and index == len(prompts) - 1,
+        }
+        for index, (prompt, level, brief) in enumerate(zip(prompts, levels, briefs))
     ]
     st.session_state.generation_collected = []
     st.session_state.generation_seconds = []
@@ -3029,6 +3100,16 @@ def _build_generation_plan(idea: str) -> None:
     ]
     st.session_state.generation_pairing = pairing
     st.session_state.generation_random_seed_base = random_seed_base
+
+
+def _recorded_or_chosen_cast() -> list[tuple[str, str, str, str, str]]:
+    """The cast this batch was planned with, resolved back to their details.
+
+    generation_chosen_ids is frozen when the plan is built, so it is the right
+    list even if a parent unticks somebody while the batch is still drawing.
+    """
+
+    return _resolve_cast(list(st.session_state.get("generation_chosen_ids") or []))
 
 
 def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
@@ -3051,8 +3132,44 @@ def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
     job = st.session_state.generation_jobs[job_index]
     chosen_ids = list(st.session_state.generation_chosen_ids)
 
+    # The pair's grown-up sheet is drawn FROM the children's one, which by now
+    # is the first thing in generation_collected. Drawn from the same words
+    # instead, the two sheets simply diverge — reported 2026-08-31 as two
+    # different pictures under a caption promising the same scene.
+    pair_source = None
+    if job.get("pair_partner"):
+        drawn = list(st.session_state.get("generation_collected") or [])
+        if drawn:
+            pair_source = drawn[0].image_bytes
+
     started = time.monotonic()
-    if st.session_state.generation_uses_references:
+    if pair_source is not None:
+        # The first sheet leads, so the ordinal words in any cast introduction
+        # still line up behind it; the cast is trimmed to leave it room rather
+        # than letting the provider refuse the whole request.
+        room = max(0, spec.max_reference_images - 1)
+        references = (
+            pair_source,
+            *tuple(st.session_state.generation_references)[:room],
+        )
+        artwork = refine_with_provider(
+            provider_id=provider_id,
+            api_key=api_key,
+            prompt=build_paired_sheet_prompt(
+                _current_generation_idea(),
+                [
+                    (name, kind, marks, appearance)
+                    for _, name, kind, marks, appearance in _recorded_or_chosen_cast()
+                ],
+                age_profile=str(job["level"]),
+                style_name=str(quick_drawing_options(settings)["style"]),
+            ),
+            reference_images=references,
+            model=model,
+            size=spec.portrait_size,
+            quality=quality,
+        )
+    elif st.session_state.generation_uses_references:
         artwork = refine_with_provider(
             provider_id=provider_id,
             api_key=api_key,
@@ -3956,7 +4073,7 @@ def _render_first_result() -> None:
         st.caption(took)
     _render_alternatives_picker()
 
-    again_col, love_col, print_col = st.columns([1, 1, 1.35])
+    again_col, love_col, print_col, file_col = st.columns([1, 1, 1.2, 1.1])
     with again_col:
         if st.button(
             "Draw this idea again", width="stretch", icon=":material/refresh:"
@@ -3998,6 +4115,20 @@ def _render_first_result() -> None:
             icon=":material/print:",
         ):
             _send_to_printer(st.session_state.quick_pdf)
+    with file_col:
+        # Beside printing rather than inside the "nothing happened when I
+        # pressed print" panel, where it had been sitting as the consolation
+        # prize for a browser that refuses a print dialogue. Wanting the file
+        # is as ordinary as wanting the printer.
+        st.download_button(
+            "Save as a PDF",
+            data=st.session_state.quick_pdf,
+            file_name=f"{_slug(st.session_state.current_title)}-a4.pdf",
+            mime="application/pdf",
+            width="stretch",
+            icon=":material/download:",
+            key="save_pdf_result",
+        )
 
     if st.session_state.get("quick_saved"):
         st.success("Saved to your doodles, on this computer.", icon=":material/check:")
@@ -4793,14 +4924,12 @@ with create_tab:
                 f"{st.session_state.pdf_summary}</div>",
                 unsafe_allow_html=True,
             )
-            if st.button(
-                "Print this layout",
-                type="primary",
-                width="stretch",
-                icon=":material/print:",
-                key="print_studio",
-            ):
-                _send_to_printer(st.session_state.pdf_bytes)
+            _render_export_row(
+                st.session_state.pdf_bytes,
+                file_name=st.session_state.pdf_filename,
+                key="studio",
+                label="Print this layout",
+            )
             _render_print_help(
                 st.session_state.pdf_bytes,
                 file_name=st.session_state.pdf_filename,
