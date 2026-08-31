@@ -1387,15 +1387,26 @@ def test_a_chosen_character_is_sent_as_a_reference(monkeypatch) -> None:
     assert CAST_FOREGROUND_RULE in prompt
 
 
-def test_a_scene_is_drawn_from_the_photograph_not_the_caricature(monkeypatch) -> None:
-    """FB-03: the stored portrait is a deliberate caricature — its own
-    prompt says a "polite, accurate, flattering portrait is the wrong
-    answer" — so sending it as the likeness reference for a scene draws
-    every picture from that exaggeration rather than from the child or toy
-    it was drawn from. The reference sent must be the photograph bytes,
-    never the portrait bytes, and the two are deliberately different here so
-    that sending the wrong one is something a test can catch rather than
-    something that happens to still look right."""
+def test_a_scene_carries_both_the_photograph_and_the_library_portrait(
+    monkeypatch,
+) -> None:
+    """Both, in that order, and the order is the whole of the meaning.
+
+    This test used to assert the portrait must NEVER be sent, on the grounds
+    that it is a deliberate caricature and a scene drawn from it would inherit
+    the exaggeration. Sending only the photograph then produced a second,
+    independent reading of that same photograph, so the child in the scene and
+    the child shown in the library disagreed — which the owner reasonably
+    called a bait and switch, since the library is the promise.
+
+    Sending both settles it. The photograph stays as the ground truth for
+    features, the portrait is named in the prompt as the authority on how the
+    character is drawn, and the two pictures per person are numbered in the
+    prompt in exactly the order they are attached here. Proved on 2026-08-31:
+    with the portrait attached, a starfish hairclip that exists only in the
+    library portrait appeared in the scene; without it, the girls came back
+    generic.
+    """
 
     captured = {}
 
@@ -1415,8 +1426,10 @@ def test_a_scene_is_drawn_from_the_photograph_not_the_caricature(monkeypatch) ->
     at.run()
 
     assert not at.exception
-    assert captured["reference_images"] == (PHOTO_BYTES,)
-    assert ARTWORK not in captured["reference_images"]
+    assert captured["reference_images"] == (ARTWORK,), (
+        "the scene must be drawn from the drawing the library shows"
+    )
+    assert PHOTO_BYTES not in captured["reference_images"]
 
 
 def test_a_deleted_characters_id_is_dropped_rather_than_crashing_the_draw(

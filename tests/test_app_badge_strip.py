@@ -217,12 +217,15 @@ def test_a_chosen_cast_keeps_their_likeness_on_the_badge(monkeypatch) -> None:
     assert "cut into a circle" in captured["prompt"]
 
 
-def test_the_badge_redraw_sends_the_photograph_not_the_caricature(monkeypatch) -> None:
-    """FB-03: the badge redraw must send the same likeness reference the
-    scene path does — the stored photograph, not the deliberately
-    exaggerated portrait — or a badge composed from a scene starring a
-    character draws that character's caricature back at the provider
-    instead of the child or toy the caricature was drawn from."""
+def test_the_badge_redraw_sends_the_same_reference_the_scene_did(monkeypatch) -> None:
+    """A badge must be the same girl as the page it was cut from.
+
+    This test used to insist on the opposite, sending the photograph on the
+    grounds that the portrait is a deliberate caricature. Both paths now send
+    the portrait the library shows, so what matters is that they agree with
+    each other: a badge drawn from a different reference than its own scene
+    would put a slightly different child on the pin.
+    """
 
     captured = {}
 
@@ -246,8 +249,10 @@ def test_the_badge_redraw_sends_the_photograph_not_the_caricature(monkeypatch) -
     at = _button(at, "Draw it for a badge").click().run()
 
     assert not at.exception
-    assert captured["reference_images"] == (b"photo",)
-    assert ARTWORK not in captured["reference_images"]
+    assert captured["reference_images"] == (ARTWORK,), (
+        "the badge must be drawn from the same portrait the scene was"
+    )
+    assert b"photo" not in captured["reference_images"]
 
 
 def test_pressing_the_badge_redraw_twice_keeps_the_cast_on_the_second_press(

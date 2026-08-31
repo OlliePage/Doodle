@@ -170,6 +170,31 @@ CHARACTER_LIKENESS_RULE = (
 # grey lines solid black) and lands at 12.5% to 13.6% coverage against the 35%
 # mark where Doodle warns a page is too dark.
 
+# The library shows a drawing of each character, and that drawing is the
+# promise. Scenes used to be drawn from the photograph instead, which made them
+# a second, independent reading of the same face — close, but not the same
+# child, and worse than the one advertised. Sending the drawing itself is what
+# keeps the promise. Four versions of one scene on 2026-08-31 settled it: from
+# the photograph alone the girls came back generic; from the drawing alone a
+# starfish hairclip that exists nowhere but the library portrait appeared in
+# the scene, and both faces matched what the library showed. Ink coverage went
+# from 10.24% to 9.42%, so the match costs nothing in colourability.
+#
+# Sending the photograph as well was tried and dropped. It was no better than
+# the drawing alone and in places worse, giving one girl a ponytail her
+# portrait does not have, because two references of one face invite an average
+# of the two. It also cost a reference slot per character, halving how many
+# could appear in one picture.
+PORTRAIT_MATCH_RULE = (
+    "Each attached picture is the line drawing Doodle has already made of that "
+    "character and shows their family. It is the authority on how they are "
+    "drawn. Copy the face from it \u2014 the shape of the eyes, the nose, the "
+    "mouth, the eyebrows, the hairline and the way the hair falls \u2014 so "
+    "that the character in your picture and the character in that drawing are "
+    "plainly the same one drawn twice, not two who look similar. Keep every "
+    "particular thing it shows, down to a hair clip or a pattern on a top."
+)
+
 GENERIC_FACE_REFUSAL = (
     "A generic cartoon child with large round eyes and a button nose is the "
     "wrong answer and will be rejected."
@@ -474,11 +499,14 @@ def build_character_scene_prompt(
     level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[DEFAULT_LEVEL])
     target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
 
+    # One picture per character, in the order app.py attaches them, and the
+    # ordinal is the only thing telling the model which face belongs to which
+    # name.
     introductions = []
     for index, (name, kind, marks, appearance) in enumerate(characters):
         ordinal = ORDINALS[index] if index < len(ORDINALS) else f"number {index + 1}"
         article = _KIND_ARTICLES.get(kind, "character")
-        line = f"The {ordinal} picture is {name}, a {article}."
+        line = f"The {ordinal} picture is Doodle's drawing of {name}, a {article}."
         if marks.strip():
             line += f" {marks.strip()}"
         if appearance.strip():
@@ -486,6 +514,7 @@ def build_character_scene_prompt(
         introductions.append(line)
 
     likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
+    likeness_block += "\n\n" + _spliced(PORTRAIT_MATCH_RULE)
     if any(kind == "toy" for _, kind, _, _ in characters):
         likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
     if any(kind == "character" for _, kind, _, _ in characters):

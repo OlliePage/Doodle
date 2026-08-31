@@ -48,8 +48,8 @@ def test_the_ordinal_naming_each_character_matches_their_actual_order() -> None:
         ],
     )
 
-    assert "The first picture is Ida" in prompt
-    assert "The second picture is Bear" in prompt
+    assert "The first picture is Doodle's drawing of Ida" in prompt
+    assert "The second picture is Doodle's drawing of Bear" in prompt
 
 
 def test_a_person_gets_the_face_exemption_and_a_toy_does_not() -> None:

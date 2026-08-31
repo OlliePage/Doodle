@@ -2405,8 +2405,12 @@ def _build_generation_plan(idea: str) -> None:
         # the portrait is a deliberate caricature, and sending it as the
         # likeness reference would draw every scene from that exaggeration
         # rather than from the child or toy it was drawn from.
+        # The portrait, not the photograph. The library shows the parent
+        # this drawing, so it is what the scene has to agree with; drawing
+        # from the photograph instead produced a second reading of the same
+        # face that was close but not the same child.
         references = tuple(
-            load_character_image(character_id, portrait=False)
+            load_character_image(character_id, portrait=True)
             for character_id, *_ in chosen
         )
         prompts = [
@@ -2749,13 +2753,11 @@ def _render_badge_strip() -> None:
                 with _mark_in_flight("busy_badge"):
                     with st.spinner("Composing it for a badge…"):
                         if chosen:
-                            # A scene starring saved characters is redrawn
-                            # the same way _quick_generate draws one: from
-                            # their stored photographs, not from the drawn
-                            # (deliberately exaggerated) portrait — see the
-                            # matching comment there.
+                            # The same portrait the scene was drawn from,
+                            # so a badge of your daughter is the same girl as
+                            # the page it was cut from.
                             references = tuple(
-                                load_character_image(character_id, portrait=False)
+                                load_character_image(character_id, portrait=True)
                                 for character_id, *_ in chosen
                             )
                             artwork = refine_with_provider(
