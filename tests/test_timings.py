@@ -27,7 +27,7 @@ KEY = timings.settings_key(
 
 def test_a_fresh_install_has_no_history_and_does_not_mind() -> None:
     assert timings.load_timings() == []
-    assert timings.durations_for([], KEY) == []
+    assert timings.recent_durations([]) == []
 
 
 def test_a_recorded_drawing_comes_back() -> None:
@@ -37,7 +37,7 @@ def test_a_recorded_drawing_comes_back() -> None:
     assert len(records) == 1
     assert records[0]["seconds"] == pytest.approx(44.2)
     assert records[0]["key"] == KEY
-    assert timings.durations_for(records, KEY) == [pytest.approx(44.2)]
+    assert timings.recent_durations(records) == [pytest.approx(44.2)]
 
 
 def test_the_log_never_carries_what_was_drawn() -> None:
@@ -52,10 +52,16 @@ def test_the_log_never_carries_what_was_drawn() -> None:
         assert forbidden not in written.lower(), f"{forbidden} reached the timing log"
 
 
-def test_times_are_kept_apart_by_the_settings_that_produced_them() -> None:
-    """A four-picture batch with two photographs attached at high quality is a
-    different animal from one quick sketch, and averaging them together would
-    give a wrong expectation rather than no expectation."""
+def test_the_settings_are_written_down_but_the_chart_pools_everything() -> None:
+    """The chart used to be split by settings, and that made it useless.
+
+    A batch with photographs attached at high quality really is a slower thing
+    than a quick sketch, so splitting them is more accurate. But a household
+    drawing a few times a week never gathers enough in any one group to show a
+    shape, and the screen sat on a sentence apologising instead of drawing
+    anything. Every record still carries the settings that produced it, so the
+    split can come back the day there is enough to split.
+    """
 
     other = timings.settings_key(
         provider="openai",
@@ -70,8 +76,11 @@ def test_times_are_kept_apart_by_the_settings_that_produced_them() -> None:
     timings.record_timing(seconds=12.0, settings_key=other)
 
     records = timings.load_timings()
-    assert timings.durations_for(records, KEY) == [pytest.approx(44.0)]
-    assert timings.durations_for(records, other) == [pytest.approx(12.0)]
+    assert {entry["key"] for entry in records} == {KEY, other}
+    assert timings.recent_durations(records) == [
+        pytest.approx(44.0),
+        pytest.approx(12.0),
+    ]
 
 
 def test_a_corrupt_or_odd_log_reads_as_empty_rather_than_exploding() -> None:
@@ -98,7 +107,7 @@ def test_a_corrupt_or_odd_log_reads_as_empty_rather_than_exploding() -> None:
             ]
         )
     )
-    assert timings.durations_for(timings.load_timings(), KEY) == [
+    assert timings.recent_durations(timings.load_timings()) == [
         pytest.approx(40.0),
         pytest.approx(50.0),
     ]

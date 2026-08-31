@@ -24,10 +24,6 @@ BUCKET_SECONDS = 5
 BUCKET_COUNT = 18
 AXIS_SECONDS = BUCKET_SECONDS * BUCKET_COUNT
 
-# Below this the chart is left out entirely rather than drawn from one or two
-# samples, because a hill of one bar reads as an expectation and is not one.
-MIN_RECORDS_FOR_CHART = 3
-
 # Roughly two years of daily use for one family, and a file small enough that
 # reading it while the screen is blocked costs nothing.
 MAX_RECORDS = 500
@@ -119,13 +115,22 @@ def record_timing(*, seconds: float, settings_key: str) -> None:
         return
 
 
-def durations_for(
-    records: list[dict[str, Any]], key: str, limit: int = MAX_RECORDS
+def recent_durations(
+    records: list[dict[str, Any]], limit: int = MAX_RECORDS
 ) -> list[float]:
-    """The durations matching one settings combination, oldest first."""
+    """Every recorded duration, oldest first.
 
-    matching = [float(entry["seconds"]) for entry in records if entry.get("key") == key]
-    return matching[-limit:]
+    These were once split by the settings that produced them, on the grounds
+    that a batch with photographs attached at high quality is a slower thing
+    than a quick sketch. True, and it made the chart useless: a household
+    drawing a few times a week never accumulates enough in any one group to
+    show a shape, so the screen sat on a sentence apologising for having
+    nothing to say. A pooled chart from the first drawing beats a perfect one
+    that never arrives. The settings are still written down with each record,
+    so splitting them later costs nothing but a decision.
+    """
+
+    return [float(entry["seconds"]) for entry in records][-limit:]
 
 
 def histogram(

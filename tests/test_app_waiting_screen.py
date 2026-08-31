@@ -56,22 +56,37 @@ def _record(count: int, seconds: float = 44.0) -> None:
         timings.record_timing(seconds=seconds + index, settings_key=KEY)
 
 
-def test_with_no_history_the_screen_says_so_instead_of_drawing_an_empty_chart(
-    monkeypatch,
-) -> None:
-    """A hill built from nothing would read as an expectation and is not one."""
+def test_the_chart_is_drawn_from_the_very_first_wait(monkeypatch) -> None:
+    """With nothing recorded there is still an axis and a marker walking it.
+
+    The screen used to hold back the chart until it had three drawings at
+    matching settings, and print an apology in the meantime. Those groups fill
+    up so slowly for one household that the apology was what a parent normally
+    saw, and an empty axis with a moving marker tells them more about whether
+    anything is happening than a sentence explaining that Doodle cannot say.
+    """
 
     at = _frozen(monkeypatch)
 
-    captions = [str(caption.value) for caption in at.caption]
-    assert any("has not drawn at these settings before" in text for text in captions)
-    assert not any("wait-hist__bars" in str(block.value) for block in at.markdown)
+    charts = [
+        str(block.value)
+        for block in at.markdown
+        if "wait-hist__bars" in str(block.value)
+    ]
+    assert charts, "no chart on a first-ever wait"
+    assert "puts the first mark on the chart" in charts[0]
+    assert not any(
+        "nothing yet to say how long" in str(caption.value) for caption in at.caption
+    )
 
 
 def test_with_history_the_chart_is_drawn_and_counts_the_real_drawings(
     monkeypatch,
 ) -> None:
-    _record(5)
+    """Every drawing counts towards it, whatever settings produced it."""
+
+    _record(3)
+    _record(2, seconds=90.0)  # a different settings group, still on the chart
     at = _frozen(monkeypatch)
 
     charts = [
@@ -83,20 +98,23 @@ def test_with_history_the_chart_is_drawn_and_counts_the_real_drawings(
     chart = charts[0]
 
     assert chart.count("<i style=") == timings.BUCKET_COUNT
-    assert "Your last 5 drawings at these settings" in chart
-    assert not any(
-        "has not drawn at these settings before" in str(caption.value)
-        for caption in at.caption
-    )
+    assert "Your last 5 drawings, and where this one has got to." in chart
 
 
-def test_the_chart_needs_three_drawings_before_it_will_show_a_shape(
+def test_a_single_drawing_is_named_rather_than_called_a_distribution(
     monkeypatch,
 ) -> None:
-    _record(timings.MIN_RECORDS_FOR_CHART - 1)
-    at = _frozen(monkeypatch)
+    """One bar is a fact, not a shape, so the caption says what it is."""
 
-    assert not any("wait-hist__bars" in str(block.value) for block in at.markdown)
+    timings.record_timing(seconds=44.0, settings_key=KEY)
+    at = _frozen(monkeypatch)
+    chart = next(
+        str(block.value)
+        for block in at.markdown
+        if "wait-hist__bars" in str(block.value)
+    )
+
+    assert "One drawing so far, which took 44 seconds" in chart
 
 
 def test_every_animation_is_named_for_its_picture(monkeypatch) -> None:

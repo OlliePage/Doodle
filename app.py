@@ -46,11 +46,11 @@ from colouring_factory.generators import (
 from colouring_factory import history
 from colouring_factory.guidance import guidance_for
 from colouring_factory.timings import (
-    MIN_RECORDS_FOR_CHART,
+    AXIS_SECONDS,
     bar_heights,
-    durations_for,
     histogram,
     load_timings,
+    recent_durations,
     record_timing,
     settings_key,
 )
@@ -3103,22 +3103,27 @@ def _waiting_chart_html(job_index: int) -> str:
     coloured in and its "taking a while" note already showing.
     """
 
-    durations = durations_for(load_timings(), _current_settings_key())
-    if len(durations) < MIN_RECORDS_FOR_CHART:
-        return ""
-
+    durations = recent_durations(load_timings())
     counts = histogram(durations)
     heights = bar_heights(counts, tallest_px=104, floor_px=10)
-    slowest = max(durations)
+    # Drawn even with nothing recorded: an empty axis with the marker walking
+    # along it says more about whether anything is happening than a sentence
+    # explaining that Doodle cannot say.
+    slowest = max(durations) if durations else AXIS_SECONDS
 
     bars = "".join(
         f'<i style="--i:{index};height:{height}px"></i>'
         for index, height in enumerate(heights)
     )
-    caption = (
-        f"Your last {len(durations)} drawings at these settings, "
-        "and where this one has got to."
-    )
+    if not durations:
+        caption = "Nothing drawn yet, so this one puts the first mark on the chart."
+    elif len(durations) == 1:
+        caption = (
+            f"One drawing so far, which took {round(durations[0])} seconds, "
+            "and where this one has got to."
+        )
+    else:
+        caption = f"Your last {len(durations)} drawings, and where this one has got to."
 
     css = _WAITING_CHART_CSS.replace("__I__", str(job_index))
     css = css.replace("__SLOWEST__", f"{slowest:.0f}")
@@ -3248,17 +3253,7 @@ def _render_generating_screen() -> None:
             f'<div class="drawing-progress">Drawing {min(done + 1, total)} of {total}</div>',
             unsafe_allow_html=True,
         )
-        # Left out entirely rather than drawn empty when there is too little
-        # history to have a shape, because a hill of one bar reads as an
-        # expectation and is not one.
-        chart = _waiting_chart_html(done)
-        if chart:
-            st.markdown(chart, unsafe_allow_html=True)
-        else:
-            st.caption(
-                "Doodle has not drawn at these settings before, so there is "
-                "nothing yet to say how long this should take."
-            )
+        st.markdown(_waiting_chart_html(done), unsafe_allow_html=True)
         # Tucked behind a question mark rather than printed. It answers a
         # question a parent asks once and then knows the answer to for good,
         # and until they ask it, it is four lines of grey between the child's
