@@ -1411,12 +1411,23 @@ def _render_characters_screen() -> None:
         )
         return
 
+    if not api_key:
+        # Mirrors the capability guard above: a disabled button with no
+        # explanation and no route to the Connect screen was a dead end for
+        # any parent who explored the cast before typing an idea, which the
+        # settings-line popover's own copy invites them to do.
+        st.caption(f"Connect {spec.label}, or another provider, to add a character.")
+        if st.button("Connect a provider", width="stretch", icon=":material/link:"):
+            st.session_state.connect_return = "characters"
+            st.session_state.screen = "connect"
+            st.rerun()
+        return
+
     if st.button(
         "Draw them",
         type="primary",
         width="stretch",
         icon=":material/auto_awesome:",
-        disabled=not api_key,
         help="Draws their portrait and saves them to your cast. Costs one generation.",
     ):
         if not uploaded:
@@ -1617,7 +1628,9 @@ def _continue_after_connection() -> None:
     if destination == "generate":
         st.session_state.quick_mode = "ai"
     st.session_state.screen = (
-        destination if destination in {"generate", "studio", "result"} else "generate"
+        destination
+        if destination in {"generate", "studio", "result", "characters"}
+        else "generate"
     )
     st.rerun()
 

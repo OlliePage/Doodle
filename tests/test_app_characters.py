@@ -1082,3 +1082,45 @@ def test_the_picker_shows_a_distinct_portrait_for_each_character() -> None:
     assert ida_person_id and ida_teddy_id  # both saved; ids only needed above
 
 
+def test_the_add_screen_offers_a_route_to_connect_when_no_key_is_present(
+    monkeypatch,
+) -> None:
+    """FB-08: with no drawing service connected, "Draw them" rendered
+    disabled with no explanation and no route to the Connect screen
+    anywhere on the page — a dead end for a parent exploring the cast
+    before typing an idea, which the settings-line popover's own copy
+    invites them to do."""
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "characters"
+    at.run()
+
+    assert not at.exception
+    assert not any(button.label == "Draw them" for button in at.button)
+    captions = " ".join(str(caption.value) for caption in at.caption)
+    assert "connect" in captions.lower()
+
+    connect_button = next(
+        button for button in at.button if button.label == "Connect a provider"
+    )
+    connect_button.click().run()
+
+    assert at.session_state["screen"] == "connect"
+    assert at.session_state["connect_return"] == "characters"
+
+    # _continue_after_connection only knew "generate", "studio" and "result"
+    # as valid places to send a parent back to; without "characters" in that
+    # set, connecting here would have bounced to the homepage's idea screen
+    # instead of back to the cast the parent was trying to build.
+    monkeypatch.setattr(generators, "check_provider_connection", lambda *a, **k: {})
+    key_box = next(
+        widget for widget in at.text_input if widget.label == "OpenAI API key"
+    )
+    at = key_box.set_value("sk-newly-pasted").run()
+    at = next(button for button in at.button if button.label == "Connect").click().run()
+
+    assert not at.exception
+    assert at.session_state["screen"] == "characters"
+
+
