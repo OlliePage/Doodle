@@ -362,6 +362,10 @@ def _initialise_state() -> None:
         "generation_pairing": False,
         "generation_random_seed_base": 0,
         "generation_stop_requested": False,
+        # Read and cleared at the top of the result screen: a failure that
+        # still kept what had already been drawn (unlike a stop, which the
+        # parent already knows they pressed) needs to say what happened.
+        "generation_notice": "",
         "doodle_versions": (),
         "current_version": 0,
     }
@@ -2868,6 +2872,26 @@ def _stop_quick_generation() -> None:
     _clear_generation_plan()
 
 
+def _keep_partial_batch_progress(message: str) -> bool:
+    """A failure partway through a batch should keep what already
+    succeeded, the way a parent-pressed Stop does — those pictures were
+    already drawn and already charged for. Returns False, doing nothing,
+    when nothing has been collected yet: there is nothing to keep, so the
+    caller falls through to its usual failure routing unchanged.
+    """
+
+    if not st.session_state.get("generation_collected"):
+        return False
+    done = len(st.session_state.generation_collected)
+    total = len(st.session_state.get("generation_jobs") or [])
+    st.session_state.generation_notice = (
+        f"Doodle drew {done} of the {total} pictures you asked for; the "
+        f"rest could not be drawn: {message} What worked is ready below."
+    )
+    _finish_quick_generation()
+    return True
+
+
 def _render_generating_screen() -> None:
     st.markdown(
         """
@@ -2954,12 +2978,18 @@ def _render_generating_screen() -> None:
             if len(st.session_state.generation_collected) >= len(jobs):
                 _finish_quick_generation()
     except GeneratorError as exc:
+        if not is_demo and _keep_partial_batch_progress(str(exc)):
+            st.rerun()
+            return
         if not is_demo:
             _clear_generation_plan()
         _route_generation_failure(exc)
         st.rerun()
         return
     except ValueError as exc:
+        if not is_demo and _keep_partial_batch_progress(str(exc)):
+            st.rerun()
+            return
         if not is_demo:
             _clear_generation_plan()
         _route_generation_value_error(exc)
@@ -2984,6 +3014,10 @@ def _render_first_result() -> None:
         unsafe_allow_html=True,
     )
     _render_top_bar(where="result")
+
+    if st.session_state.get("generation_notice"):
+        st.warning(st.session_state.generation_notice, icon=":material/info:")
+        st.session_state.generation_notice = ""
 
     processed = st.session_state.get("quick_processed")
     if not processed:

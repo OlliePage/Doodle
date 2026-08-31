@@ -19,6 +19,7 @@ from streamlit.testing.v1 import AppTest
 
 from colouring_factory import generators, variations
 from colouring_factory.characters import save_character
+from colouring_factory.generators import GeneratorError
 from colouring_factory.models import GeneratedArtwork
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -351,3 +352,102 @@ def test_the_homepage_settings_row_is_hidden_on_the_drawing_screen(monkeypatch) 
     styles = " ".join(str(m.value) for m in at.markdown if "<style>" in str(m.value))
     assert ".st-key-doodle-home-settings" in styles
     assert "display:none" in styles.replace(" ", "")
+
+
+def test_a_failure_partway_through_a_batch_keeps_what_succeeded(monkeypatch) -> None:
+    """A stop the parent presses keeps what has been drawn; a failure used
+    to discard the whole batch instead, including pictures already paid
+    for. The second of four alternatives fails here — the first, already
+    charged, must still reach the result screen."""
+
+    calls: list[str] = []
+
+    def failing_generate(**kwargs):
+        prompt = kwargs["prompts"][0]
+        calls.append(prompt)
+        if len(calls) == 2:
+            raise GeneratorError(
+                "OpenAI declined that description.", provider="OpenAI", code="content"
+            )
+        return [
+            GeneratedArtwork(
+                image_bytes=ARTWORK,
+                prompt=prompt,
+                provider="OpenAI",
+                model="gpt-image-2",
+            )
+        ]
+
+    monkeypatch.setattr(generators, "generate_with_provider", failing_generate)
+    monkeypatch.setattr(variations, "build_variation_briefs", _fake_briefs)
+
+    at = _homepage()
+    at = at.segmented_control(key="home_alternatives").set_value(4).run()
+    at.text_input(key="home_prompt").set_value(
+        "naomi and aria go camping with mummy in a forest with a stream"
+    )
+    at = _button(at, "draw it").click().run()
+
+    assert not at.exception
+    assert len(calls) == 2, (
+        "a failure must stop the rest of the batch, like a stop does"
+    )
+    assert at.session_state["screen"] == "result"
+    assert at.session_state["quick_processed"]
+
+
+def test_the_result_screen_explains_a_partial_batch_failure(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def failing_generate(**kwargs):
+        prompt = kwargs["prompts"][0]
+        calls.append(prompt)
+        if len(calls) == 2:
+            raise GeneratorError(
+                "OpenAI declined that description.", provider="OpenAI", code="content"
+            )
+        return [
+            GeneratedArtwork(
+                image_bytes=ARTWORK,
+                prompt=prompt,
+                provider="OpenAI",
+                model="gpt-image-2",
+            )
+        ]
+
+    monkeypatch.setattr(generators, "generate_with_provider", failing_generate)
+    monkeypatch.setattr(variations, "build_variation_briefs", _fake_briefs)
+
+    at = _homepage()
+    at = at.segmented_control(key="home_alternatives").set_value(4).run()
+    at.text_input(key="home_prompt").set_value(
+        "naomi and aria go camping with mummy in a forest with a stream"
+    )
+    at = _button(at, "draw it").click().run()
+
+    assert not at.exception
+    notices = " ".join(str(w.value) for w in at.warning).lower()
+    assert "could not be drawn" in notices
+    assert "declined" in notices
+
+
+def test_a_failure_before_anything_is_drawn_still_routes_home(monkeypatch) -> None:
+    """No concrete reason for this case to differ from before: with nothing
+    yet collected there is nothing to keep, so the existing route-to-home
+    (or Connect) behaviour is unchanged."""
+
+    def failing_generate(**kwargs):
+        raise GeneratorError(
+            "OpenAI declined that description.", provider="OpenAI", code="content"
+        )
+
+    monkeypatch.setattr(generators, "generate_with_provider", failing_generate)
+    monkeypatch.setattr(variations, "build_variation_briefs", _fake_briefs)
+
+    at = _homepage()
+    at.text_input(key="home_prompt").set_value("a bear flying a kite")
+    at = _button(at, "draw it").click().run()
+
+    assert not at.exception
+    assert at.session_state["screen"] == "home"
+    assert at.session_state["home_prompt"] == "a bear flying a kite"
