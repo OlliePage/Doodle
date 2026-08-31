@@ -17,7 +17,11 @@ from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 from colouring_factory import generators
-from colouring_factory.characters import list_characters, save_character
+from colouring_factory.characters import (
+    delete_character,
+    list_characters,
+    save_character,
+)
 from colouring_factory.generators import GeneratorError
 from colouring_factory.models import GeneratedArtwork
 
@@ -288,3 +292,134 @@ def test_starting_a_new_doodle_keeps_the_chosen_cast_but_clears_the_draft() -> N
     assert at.session_state["screen"] == "home"
     assert at.session_state["chosen_characters"] == ["someone"]
     assert at.session_state["character_draft"] == {}
+
+
+def test_a_ticked_character_survives_going_to_the_add_screen_and_back() -> None:
+    """Per-name widget keys are destroyed the moment they are not rendered.
+
+    Proved on 2026-08-30: tick a character, navigate away, come back, and the
+    key reads False. setdefault does not help, because the key is deleted
+    after the run in which the widget is absent.
+    """
+
+    _save_two_characters()
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+
+    at.checkbox(key="character_pick_Ida").set_value(True).run()
+    at.session_state["screen"] = "characters"
+    at.run()
+    at.session_state["screen"] = "home"
+    at.run()
+
+    assert at.session_state["chosen_characters"] == ["Ida"]
+    assert at.checkbox(key="character_pick_Ida").value is True
+
+
+def test_the_picker_label_is_a_count_never_a_list_of_names() -> None:
+    """A joined list of names is unbounded and would push the settings line
+    sideways on a phone, whose CSS gives it no way to wrap or shrink."""
+
+    _save_two_characters()
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+
+    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
+    assert "nobody" in popover_labels
+
+    at.checkbox(key="character_pick_Ida").set_value(True).run()
+    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
+    assert "1 character" in popover_labels
+    assert "Ida" not in " ".join(popover_labels)
+
+    at.checkbox(key="character_pick_Bo").set_value(True).run()
+    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
+    assert "2 characters" in popover_labels
+
+
+def test_the_picker_is_hidden_until_a_character_exists() -> None:
+    """The same rule the homepage already applies to Saved doodles (n)."""
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.run()
+
+    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
+    assert "nobody" not in popover_labels
+
+
+def test_the_add_someone_button_opens_the_characters_screen() -> None:
+    _save_two_characters()
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+
+    for button in at.button:
+        if button.label == "Add someone":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("Add someone button not found")
+
+    assert not at.exception
+    assert at.session_state["screen"] == "characters"
+    assert at.session_state["characters_return"] == "home"
+
+
+def test_a_chosen_character_is_sent_as_a_reference(monkeypatch) -> None:
+    """The tick on the homepage must reach the drawing call: a reference
+    picture attached, and the character's name in the prompt telling the
+    model whose face the attached picture is."""
+
+    captured = {}
+
+    def fake_refine(**kwargs):
+        captured.update(kwargs)
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    # monkeypatch.setattr on the app module is undone by the next widget
+    # .run(), because AppTest re-executes the app's imports on every run.
+    # Patching the source module survives every rerun.
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    _save_two_characters()
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["chosen_characters"] = ["Ida"]
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "walking in a forest"
+    at.run()
+
+    assert not at.exception
+    assert len(captured["reference_images"]) == 1
+    assert "Ida" in captured["prompt"]
+    assert "never as separate strands" in captured["prompt"]
+
+
+def test_a_deleted_characters_name_is_dropped_rather_than_crashing_the_draw(
+    monkeypatch,
+) -> None:
+    """A name ticked before a character was deleted must not reach
+    load_character_image, which would raise for a folder that is now gone."""
+
+    captured = {}
+
+    def fake_refine(**kwargs):
+        captured.update(kwargs)
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    ida_id, _bo_id = _save_two_characters()
+    delete_character(ida_id)
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["chosen_characters"] = ["Ida", "Bo"]
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "walking in a forest"
+    at.run()
+
+    assert not at.exception
+    assert len(captured["reference_images"]) == 1
+    assert "Bo" in captured["prompt"]
+    assert "Ida" not in captured["prompt"]

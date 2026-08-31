@@ -65,6 +65,7 @@ from colouring_factory.providers import (
 from colouring_factory.prompts import (
     STYLE_PRESETS,
     build_caricature_prompt,
+    build_character_scene_prompt,
     build_colouring_prompt,
     build_colour_suggestion_prompt,
     build_refinement_prompt,
@@ -806,15 +807,29 @@ def _render_alternatives_picker() -> None:
             )
 
 
+def _remember_chosen(name: str) -> None:
+    """Widget keys vanish when their widget is not rendered, so the answer
+    lives in a plain key and each box is told its value on the way in."""
+
+    chosen = list(st.session_state.get("chosen_characters", []))
+    if st.session_state.get(f"character_pick_{name}"):
+        if name not in chosen:
+            chosen.append(name)
+    elif name in chosen:
+        chosen.remove(name)
+    st.session_state.chosen_characters = chosen
+
+
 def _render_home_options() -> None:
-    """The three questions the homepage asks before it draws anything.
+    """The questions the homepage asks before it draws anything.
 
     Pressing Enter used to draw one picture on fixed settings, with the only
     controls for them buried in Doodle Studio, behind the drawing that had
     already been paid for. Answering them in a panel below the bar turned the
     page into a stack of boxes, so the answers are a line of small grey text
     instead, and each one opens its choices in a floating panel rather than
-    pushing the page around.
+    pushing the page around. Who is in the picture joins the same line, once
+    there is a saved cast to put in it.
     """
 
     settings = load_settings()
@@ -833,6 +848,12 @@ def _render_home_options() -> None:
     pairing = bool(st.session_state.get("home_pair_grown_up", options["pair_grown_up"]))
     pairing = pairing and shown_age != GROWN_UP_LEVEL
     age_label = f"{shown_age} + grown-up" if pairing else str(shown_age)
+
+    # Read-through against the current cast, the same discipline
+    # quick_drawing_options applies to the saved settings: a name left over
+    # from a character who has since been deleted must not be counted.
+    chosen_names = list(st.session_state.get("chosen_characters", []))
+    cast = list_characters()
 
     with st.container(
         key="doodle-home-settings",
@@ -880,6 +901,31 @@ def _render_home_options() -> None:
                 index=list(QUICK_STYLE_CHOICES).index(options["style"]),
                 key="home_style",
             )
+        # Offered only once there is a cast to put in the picture, the same
+        # rule the homepage already applies to Saved doodles (n).
+        if cast:
+            count = len(
+                [name for name in chosen_names if name in {c.name for c in cast}]
+            )
+            label = (
+                "nobody"
+                if not count
+                else f"{count} character{'' if count == 1 else 's'}"
+            )
+            with st.popover(label):
+                st.caption("Doodle draws these characters into the picture.")
+                for character in cast:
+                    st.checkbox(
+                        character.name,
+                        key=f"character_pick_{character.name}",
+                        value=character.name in chosen_names,
+                        on_change=_remember_chosen,
+                        args=(character.name,),
+                    )
+                if st.button("Add someone", width="stretch"):
+                    st.session_state.characters_return = "home"
+                    st.session_state.screen = "characters"
+                    st.rerun()
 
     # A segmented control returns None when its selection is cleared, which
     # would otherwise write a null into the settings file.
@@ -1633,6 +1679,23 @@ def _render_connection_setup() -> None:
     )
 
 
+def _cast_for_drawing() -> list[tuple[str, str, str, str]]:
+    """The ticked names, resolved against who is actually still saved.
+
+    Read-through, the same discipline quick_drawing_options applies to the
+    saved settings: a name that no longer matches a character (because it was
+    deleted after being ticked) is dropped here rather than reaching
+    load_character_image and breaking the homepage.
+    """
+
+    by_name = {character.name: character for character in list_characters()}
+    return [
+        (character.id, character.name, character.kind, character.marks)
+        for name in st.session_state.get("chosen_characters", [])
+        if (character := by_name.get(name)) is not None
+    ]
+
+
 def _quick_generate() -> None:
     idea = str(st.session_state.get("generation_idea", "")).strip()
     if not idea:
@@ -1693,50 +1756,94 @@ def _quick_generate() -> None:
                 idea, wanted, provider_id=provider_id, api_key=api_key
             )
 
-        def _prompt_for(level: str, brief: str) -> str:
-            return build_colouring_prompt(
-                idea,
-                age_profile=level,
-                style_name=str(options["style"]),
-                target="A4 page",
-                extra_instructions="One clear subject or action, generous white space, no caption or text.",
-                variation_brief=brief,
-            )
-
-        levels = [str(options["age_profile"])] * len(briefs)
-        prompts = [_prompt_for(level, brief) for level, brief in zip(levels, briefs)]
-        if pairing:
-            # The same words describe the scene both times, so the two sheets
-            # show the same picture and only the drawing rules differ.
-            levels.append(GROWN_UP_LEVEL)
-            briefs.append(briefs[0])
-            prompts.append(_prompt_for(GROWN_UP_LEVEL, briefs[0]))
         model = _model_for(provider_id, spec, settings)
         # Medium rather than low: low quality renders more fine detail as pale
         # grey that the black/white pass then breaks up.
         quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
-        nonce = int(st.session_state.get("generation_nonce", 0))
-        random_seed = int(
-            hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
-        )
-        artworks = generate_with_provider(
-            provider_id=provider_id,
-            api_key=api_key,
-            prompts=prompts,
-            model=model,
-            size=spec.portrait_size,
-            quality=quality,
-            random_seed=random_seed,
-        )
-        for artwork, brief, level in zip(artworks, briefs, levels):
-            artwork.metadata["brief"] = brief
-            artwork.metadata["detail_level"] = level
 
-        grown_up = artworks[-1] if pairing else None
-        for_children = artworks[:-1] if pairing else artworks
-        st.session_state.candidates = for_children if len(for_children) > 1 else []
-        _adopt_artwork(for_children[0], idea)
-        st.session_state.pair_raw = grown_up.image_bytes if grown_up else None
+        chosen = _cast_for_drawing()
+        if chosen:
+            # A character drawing goes through refine_with_provider, the call
+            # that carries pictures, rather than generate_with_provider. The
+            # references are the saved portraits, not the photographs: the
+            # likeness survives that second hop, and it is what keeps the same
+            # drawn character appearing in every picture instead of a fresh
+            # reading of their photo each time. Pairing with a grown-up sheet
+            # is not offered for a cast: one call per brief, nothing doubled.
+            references = tuple(
+                load_character_image(character_id) for character_id, *_ in chosen
+            )
+            artworks = [
+                refine_with_provider(
+                    provider_id=provider_id,
+                    api_key=api_key,
+                    prompt=build_character_scene_prompt(
+                        idea,
+                        [(name, kind, marks) for _, name, kind, marks in chosen],
+                        age_profile=str(options["age_profile"]),
+                        style_name=str(options["style"]),
+                        target="A4 page",
+                        variation_brief=brief,
+                    ),
+                    reference_images=references,
+                    model=model,
+                    size=spec.portrait_size,
+                    quality=quality,
+                )
+                for brief in briefs
+            ]
+            for artwork, brief in zip(artworks, briefs):
+                artwork.metadata["brief"] = brief
+                artwork.metadata["detail_level"] = str(options["age_profile"])
+
+            st.session_state.candidates = artworks if len(artworks) > 1 else []
+            _adopt_artwork(artworks[0], idea)
+            st.session_state.pair_raw = None
+        else:
+
+            def _prompt_for(level: str, brief: str) -> str:
+                return build_colouring_prompt(
+                    idea,
+                    age_profile=level,
+                    style_name=str(options["style"]),
+                    target="A4 page",
+                    extra_instructions="One clear subject or action, generous white space, no caption or text.",
+                    variation_brief=brief,
+                )
+
+            levels = [str(options["age_profile"])] * len(briefs)
+            prompts = [
+                _prompt_for(level, brief) for level, brief in zip(levels, briefs)
+            ]
+            if pairing:
+                # The same words describe the scene both times, so the two
+                # sheets show the same picture and only the drawing rules
+                # differ.
+                levels.append(GROWN_UP_LEVEL)
+                briefs.append(briefs[0])
+                prompts.append(_prompt_for(GROWN_UP_LEVEL, briefs[0]))
+            nonce = int(st.session_state.get("generation_nonce", 0))
+            random_seed = int(
+                hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
+            )
+            artworks = generate_with_provider(
+                provider_id=provider_id,
+                api_key=api_key,
+                prompts=prompts,
+                model=model,
+                size=spec.portrait_size,
+                quality=quality,
+                random_seed=random_seed,
+            )
+            for artwork, brief, level in zip(artworks, briefs, levels):
+                artwork.metadata["brief"] = brief
+                artwork.metadata["detail_level"] = level
+
+            grown_up = artworks[-1] if pairing else None
+            for_children = artworks[:-1] if pairing else artworks
+            st.session_state.candidates = for_children if len(for_children) > 1 else []
+            _adopt_artwork(for_children[0], idea)
+            st.session_state.pair_raw = grown_up.image_bytes if grown_up else None
 
     _prepare_quick_outputs()
     _prepare_pair_outputs()
