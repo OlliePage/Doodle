@@ -129,3 +129,43 @@ def test_the_privacy_paragraph_does_not_claim_the_request_is_sent_only_once() ->
     text = _about_tab_text().lower()
     assert "sent once" not in text
     assert "only once" not in text
+
+
+def test_the_paragraph_discloses_a_dropped_picture_being_sent() -> None:
+    """A second door that sends a user's picture to a third party, several
+    times per batch. The paragraph is where that is disclosed, and a feature
+    that adds a send without adding a sentence makes the whole panel false."""
+
+    text = _about_tab_text()
+
+    sentences = [line for line in text.split(".") if "drag" in line or "drop" in line]
+    assert sentences, "nothing in the panel mentions a dropped picture"
+    assert "sent" in text
+    assert any(
+        "four pictures means four sends" in sentence.lower()
+        for sentence in text.split(".")
+    ), "the paragraph does not say a dropped picture is re-sent per drawing"
+
+
+def test_the_paragraph_no_longer_claims_the_photograph_is_the_later_likeness() -> None:
+    """Commit 2a74542 made every scene draw from the portrait Doodle made, and
+    this paragraph went on saying the opposite until 2026-08-31. It is the
+    mechanical guard on a claim the code has to keep."""
+
+    text = _about_tab_text()
+
+    assert "likeness always comes from the photograph" not in text
+    assert "portrait" in text
+
+
+def test_the_paragraph_says_how_long_a_dropped_picture_is_held() -> None:
+    """It first said "for as long as it is shown in the bar", which is only
+    the homepage. The picture survives into the connect, generating and result
+    screens, and Draw this idea again re-sends it, so the paragraph named a
+    shorter life than the code keeps."""
+
+    text = _about_tab_text()
+
+    assert "for as long as it is shown in the bar" not in text
+    assert "New doodle" in text
+    assert "Draw this idea again" in text

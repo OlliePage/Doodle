@@ -151,9 +151,10 @@ VISUAL_RULES = (
 )
 
 CHARACTER_LIKENESS_RULE = (
-    "The attached pictures are the reference for how these characters really "
-    "look. Draw each one as a friendly cartoon who is unmistakably recognisable "
-    "as that particular character rather than a generic one. Follow each one's "
+    "The attached pictures are the reference for how the subjects of this "
+    "drawing really look. Draw each one as a friendly cartoon who is "
+    "unmistakably recognisable "
+    "as that particular one rather than a generic example. Follow each one's "
     "real face shape and their real hair length, parting and wave. Draw the "
     "hair as its outline plus a few large closed wave shapes inside it, never "
     "as many fine separate strands or hairline texture. Show markings, worn "
@@ -215,15 +216,37 @@ PORTRAIT_MATCH_RULE = (
 # and turned three quarters away, and her sister knelt side-on to dig, both
 # still plainly themselves.
 POSE_FREEDOM_RULE = (
-    "The attached drawing tells you who they are, not how they are standing. "
+    "The attached picture tells you who they are, not how they are standing. "
     "Take their face, hair and features from it; take their pose, their "
     "expression and the direction they are looking from the scene. Draw them "
     "from whatever angle the action calls for \u2014 in profile, three "
     "quarters, from behind, looking up, looking away \u2014 and wearing "
     "whatever expression fits what they are doing, whether that is laughing, "
-    "concentrating, shouting or thinking. Repeating the drawing's "
+    "concentrating, shouting or thinking. Repeating the reference's "
     "forward-facing smile in every picture makes them look like a doll rather "
     "than a person."
+)
+
+# The scene builder's other reference is a portrait Doodle drew, and
+# PORTRAIT_MATCH_RULE says so in as many words. A picture dropped onto the page
+# is a photograph, or somebody else's drawing, and telling the model it is
+# Doodle's own line drawing would be a plain lie about what it is looking at.
+#
+# The clothing instruction is deliberately the opposite of the portrait rule's.
+# A saved character recurs across many pictures, so their outfit is not part of
+# who they are and PORTRAIT_MATCH_RULE dresses them for the scene instead. A
+# dropped picture is used once and whatever it shows is the subject, jumper
+# and all — a parent who drops a photograph of a teddy in a knitted waistcoat
+# wants the waistcoat.
+DROPPED_PICTURE_RULE = (
+    "That picture is a photograph or a drawing the reader has supplied, not a "
+    "drawing Doodle made. What it shows is the subject of this picture: read "
+    "its shape, its markings, its wear and everything else that makes it that "
+    "particular one rather than a generic example, and draw that same thing "
+    "into the scene described above. Keep what it is wearing or carrying if "
+    "that is part of how it is recognised. Do not copy the photograph's "
+    "background, its lighting or its framing, and do not trace its edges: "
+    "draw the thing it shows, freshly, as a colouring-book illustration."
 )
 
 GENERIC_FACE_REFUSAL = (
@@ -249,8 +272,9 @@ TOLD_APART_RULE = (
 # it asks for closeness and leaves the amount to the scene, and says plainly
 # that heads are a normal size.
 CAST_FOREGROUND_RULE = (
-    "Composition note for the named characters: draw them near enough to the "
-    "viewer that their faces read clearly, and let the action decide how near. "
+    "Composition note for whoever the attached pictures show: draw them near "
+    "enough to the viewer that their faces read clearly, and let the action "
+    "decide how near. "
     "Their heads are an ordinary size for their bodies and are never enlarged. "
     "A wide shot of small full-length figures lost in a landscape is the wrong "
     "answer, and so is a head too big for the body it is on."
@@ -507,6 +531,7 @@ def build_character_scene_prompt(
     concept: str,
     characters: Sequence[tuple[str, str, str, str]],
     *,
+    dropped_appearance: str | None = None,
     age_profile: str = "2-3 years",
     style_name: str = "Toddler bold",
     target: str = "A4 page",
@@ -522,13 +547,20 @@ def build_character_scene_prompt(
     the like — read out here so a black-and-white drawing still carries the
     right hair length and texture even though it has no colour to lose. A
     character saved before that field existed carries an empty string.
+
+    `dropped_appearance` is None when nothing was dropped onto the page. When
+    a picture was dropped it holds that picture's description, which may be an
+    empty string if the one vision call it takes failed. A dropped picture is
+    always the last one attached, after every character's portrait, so its
+    ordinal here has to match the order app.py builds the reference tuple in.
+    Either a cast or a dropped picture is enough on its own.
     """
 
     concept = concept.strip()
     if not concept:
         raise ValueError("A picture idea is required.")
-    if not characters:
-        raise ValueError("At least one character is required.")
+    if not characters and dropped_appearance is None:
+        raise ValueError("At least one character or a dropped picture is required.")
 
     scene = variation_brief.strip() or concept
     style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
@@ -549,8 +581,28 @@ def build_character_scene_prompt(
             line += f" {appearance.strip()}"
         introductions.append(line)
 
+    # Always last, matching the order app.py attaches the pictures: every
+    # character's portrait first, the dropped picture after them. The ordinal
+    # words are the only thing binding a picture to what it shows, so the two
+    # orders cannot be allowed to drift apart.
+    if dropped_appearance is not None:
+        index = len(characters)
+        ordinal = ORDINALS[index] if index < len(ORDINALS) else f"number {index + 1}"
+        line = (
+            f"The {ordinal} picture is one the reader dropped onto the page. "
+            "What it shows is the subject of this drawing."
+        )
+        if dropped_appearance.strip():
+            line += f" {dropped_appearance.strip()}"
+        introductions.append(line)
+
     likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
-    likeness_block += "\n\n" + _spliced(PORTRAIT_MATCH_RULE)
+    # Only when there is a cast: this rule asserts the attached picture is a
+    # line drawing Doodle already made, which is false of a dropped photograph.
+    if characters:
+        likeness_block += "\n\n" + _spliced(PORTRAIT_MATCH_RULE)
+    if dropped_appearance is not None:
+        likeness_block += "\n\n" + _spliced(DROPPED_PICTURE_RULE)
     likeness_block += "\n\n" + _spliced(POSE_FREEDOM_RULE)
     if any(kind == "toy" for _, kind, _, _ in characters):
         likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
@@ -564,8 +616,17 @@ def build_character_scene_prompt(
     # stock cartoon child; stated last, they came back as themselves.
     people = sum(1 for _, kind, _, _ in characters if kind == "person")
     closing = ""
-    if people:
+    # A dropped picture always earns the exemption, because Doodle has no idea
+    # whether it shows a child or a teddy and the two fail in opposite
+    # directions. Spending it on a toy costs nothing — a toy has no face to
+    # genericise, which the caricature evidence already established — while
+    # withholding it from a photograph of a child gives back the stock cartoon
+    # this rule exists to refuse.
+    if people or dropped_appearance is not None:
         exemption = f"{FACE_DETAIL_EXEMPTION} {GENERIC_FACE_REFUSAL}"
+        # Still counted on the named cast alone: two saved characters have to
+        # be told apart from each other, and one dropped picture has nobody to
+        # be confused with.
         if people > 1:
             exemption += f" {TOLD_APART_RULE}"
         closing += "\n" + _spliced(exemption) + "\n"

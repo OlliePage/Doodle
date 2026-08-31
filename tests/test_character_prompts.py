@@ -3,6 +3,7 @@ import pytest
 from colouring_factory.prompts import (
     BADGE_CORNERS_RULE,
     CAST_FOREGROUND_RULE,
+    DROPPED_PICTURE_RULE,
     POSE_FREEDOM_RULE,
     FACE_DETAIL_EXEMPTION,
     GENERIC_FACE_REFUSAL,
@@ -325,7 +326,9 @@ def test_the_drawing_fixes_who_they_are_and_the_scene_fixes_the_pose() -> None:
     assert POSE_FREEDOM_RULE in prompt
     # The two halves of the rule, either of which alone leaves the doll.
     assert "tells you who they are, not how they are standing" in prompt
-    assert "take their pose, their expression and the direction they are looking" in prompt
+    assert (
+        "take their pose, their expression and the direction they are looking" in prompt
+    )
 
 
 def test_a_characters_clothes_obey_the_age_setting_not_the_portrait() -> None:
@@ -363,3 +366,176 @@ def test_the_face_exemption_still_covers_only_the_head() -> None:
         assert elsewhere not in head_words, (
             f"{elsewhere} has crept into the part of the page allowed fine detail"
         )
+
+
+# --- a picture dropped onto the page -------------------------------------
+#
+# A dropped picture is a character nobody saved: it supplies identity, the
+# typed words supply the scene. These tests pin the two things that make that
+# work — the model being told what the picture actually is, and the picture
+# being introduced in the same position app.py attaches it.
+
+
+def test_a_dropped_picture_is_introduced_last() -> None:
+    """The ordinal words are the only thing binding a picture to what it
+    shows, so the order here and the order app.py attaches the bytes in have
+    to agree. The cast's portraits go first, the dropped picture after them."""
+
+    prompt = build_character_scene_prompt(
+        "riding a rocket",
+        [("Ida", "person", "", ""), ("Bear", "toy", "", "")],
+        dropped_appearance="A knitted rabbit with one ear turned down.",
+    )
+
+    assert "The first picture is Doodle's drawing of Ida" in prompt
+    assert "The second picture is Doodle's drawing of Bear" in prompt
+    assert "The third picture is one the reader dropped onto the page" in prompt
+    assert "A knitted rabbit with one ear turned down." in prompt
+
+
+def test_a_dropped_picture_needs_no_cast() -> None:
+    """Dropping a picture and typing nothing else is the whole point of the
+    feature, so an empty cast must not raise."""
+
+    prompt = build_character_scene_prompt(
+        "a knitted rabbit having a picnic", [], dropped_appearance=""
+    )
+
+    assert "The first picture is one the reader dropped onto the page" in prompt
+
+
+def test_neither_a_cast_nor_a_dropped_picture_is_refused() -> None:
+    with pytest.raises(ValueError):
+        build_character_scene_prompt("a rabbit", [])
+
+
+def test_a_dropped_picture_is_never_called_a_doodle_drawing() -> None:
+    """PORTRAIT_MATCH_RULE asserts the reference is a line drawing Doodle
+    already made. Said about a photograph it is a plain lie about what the
+    model is looking at, and it also strips the clothing a dropped picture is
+    meant to keep."""
+
+    prompt = build_character_scene_prompt(
+        "a rabbit having a picnic", [], dropped_appearance=""
+    )
+
+    assert "Doodle's drawing of" not in prompt
+    assert "the line drawing Doodle has already made" not in prompt
+    assert DROPPED_PICTURE_RULE in prompt
+
+
+def test_a_cast_keeps_its_portrait_rule_when_a_picture_is_dropped() -> None:
+    """Both references are in the same request and they are different kinds of
+    thing, so both rules have to be present and each has to be true of its
+    own picture."""
+
+    prompt = build_character_scene_prompt(
+        "at the beach",
+        [("Ida", "person", "", "")],
+        dropped_appearance="",
+    )
+
+    assert "the line drawing Doodle has already made" in prompt
+    assert DROPPED_PICTURE_RULE in prompt
+
+
+def test_a_dropped_picture_keeps_what_it_is_wearing() -> None:
+    """The opposite instruction to the portrait rule's, and deliberately so. A
+    saved character recurs, so their outfit is not part of who they are; a
+    dropped picture is used once and the waistcoat is why it was dropped."""
+
+    assert "Keep what it is wearing or carrying" in DROPPED_PICTURE_RULE
+
+
+def test_a_dropped_picture_is_not_traced() -> None:
+    """The free local threshold pass in Doodle Studio traces edges. This path
+    draws the thing instead, and the model has to be told which errand it is
+    on or it returns a tidied-up photograph."""
+
+    assert "do not trace its edges" in DROPPED_PICTURE_RULE
+    assert "background" in DROPPED_PICTURE_RULE
+
+
+def test_a_dropped_picture_earns_the_face_exemption() -> None:
+    """Doodle never inspects the picture, so it cannot know whether this is a
+    child or a teddy. The two fail in opposite directions and only one of them
+    is recoverable: spending the exemption on a toy costs nothing, withholding
+    it from a child gives back the stock cartoon."""
+
+    prompt = build_character_scene_prompt(
+        "at the beach", [], dropped_appearance="A small girl with curly hair."
+    )
+
+    assert FACE_DETAIL_EXEMPTION in prompt
+    assert GENERIC_FACE_REFUSAL in prompt
+
+
+def test_one_dropped_picture_is_never_asked_to_be_told_apart() -> None:
+    """TOLD_APART_RULE is about two saved people being confused with each
+    other. One dropped picture has nobody to be confused with."""
+
+    prompt = build_character_scene_prompt(
+        "at the beach", [], dropped_appearance="A small girl with curly hair."
+    )
+
+    assert TOLD_APART_RULE not in prompt
+
+
+def test_the_dropped_rule_is_spliced_to_the_margin() -> None:
+    """A multi-line constant inserted flush left defeats dedent()'s common
+    prefix calculation and every other line comes out with a literal
+    four-space indent the drawing service would receive."""
+
+    prompt = build_character_scene_prompt("at the beach", [], dropped_appearance="")
+
+    for line in prompt.splitlines():
+        assert not line.startswith("    "), f"ragged margin: {line!r}"
+
+
+def test_the_dropped_rule_is_read_after_the_profile_lines() -> None:
+    """The same ordering the face exemption needs: a rule stated before the
+    four simplifying profile lines is overruled by them."""
+
+    prompt = build_character_scene_prompt("at the beach", [], dropped_appearance="")
+
+    assert prompt.index("Detail profile:") < prompt.index(FACE_DETAIL_EXEMPTION)
+
+
+def test_the_foreground_rule_no_longer_says_named_characters() -> None:
+    """It now covers a dropped picture too, which has no name."""
+
+    assert "named characters" not in CAST_FOREGROUND_RULE
+    prompt = build_character_scene_prompt("at the beach", [], dropped_appearance="")
+    assert CAST_FOREGROUND_RULE in prompt
+
+
+def test_no_rule_calls_a_dropped_picture_a_drawing_of_a_character() -> None:
+    """PORTRAIT_MATCH_RULE was gated behind a cast for this reason, and two
+    older rules were left saying the same thing one sentence apart. A
+    drop-with-no-cast prompt used to carry the new rule saying the reference is
+    a photograph alongside two asserting it is Doodle's drawing of a named
+    character."""
+
+    prompt = build_character_scene_prompt(
+        "having a picnic", [], dropped_appearance="A knitted rabbit."
+    )
+
+    for lie in (
+        "The attached drawing tells you",
+        "the line drawing Doodle has already made",
+        "how these characters really look",
+        "Doodle's drawing of",
+    ):
+        assert lie not in prompt, f"a dropped photograph is called a drawing: {lie!r}"
+
+
+def test_the_pose_rule_still_refuses_the_nodding_doll() -> None:
+    """Reworded to cover a photograph as well as a portrait, so check the
+    instruction it exists for survived the rewording. A photograph has the same
+    problem a portrait does: one forward-facing snapshot repeated in every
+    picture."""
+
+    assert "forward-facing smile in every picture" in POSE_FREEDOM_RULE
+    assert "doll rather" in POSE_FREEDOM_RULE
+    prompt = build_character_scene_prompt("having a picnic", [], dropped_appearance="")
+    assert POSE_FREEDOM_RULE in prompt

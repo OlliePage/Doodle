@@ -8,11 +8,17 @@ import time
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
+from io import BytesIO
 
 import streamlit as st
+from PIL import Image, ImageOps
 
 from colouring_factory.appearance import describe_appearance
 from colouring_factory.badge_preview import render_badge_preview
+from colouring_factory.browser_drop import (
+    DROP_EXTENSIONS,
+    drop_overlay_html,
+)
 from colouring_factory.browser_print import print_trigger_html
 from colouring_factory.calibration import profile_from_measurements
 from colouring_factory.characters import (
@@ -308,6 +314,18 @@ st.html(
     """
 )
 
+# The whole-page drop target, rendered once for the same reason the build badge
+# is: the st.stop() calls below mean the end of the script is often never
+# reached, and the overlay is fixed-position so where it appears in the
+# document does not matter.
+#
+# This payload never varies. Streamlit reuses the DOM node for an unchanged
+# st.html block and never re-inserts the script, so exactly one overlay and one
+# set of window listeners exist for the life of the page. Passing anything
+# per-screen, per-provider or per-session in here would remount the block on
+# every rerun and stack them up.
+st.html(drop_overlay_html(), unsafe_allow_javascript=True)
+
 
 def _doodle_logo(mode: str = "compact", *, centred: bool = False) -> str:
     centred_class = " doodle-logo--centred" if centred else ""
@@ -375,7 +393,7 @@ def _initialise_state() -> None:
         # one left over from an earlier idea.
         "generation_jobs": [],
         "generation_collected": [],
-        "generation_uses_cast": False,
+        "generation_uses_references": False,
         "generation_references": (),
         "generation_chosen_ids": [],
         "generation_pairing": False,
@@ -387,6 +405,21 @@ def _initialise_state() -> None:
         "generation_notice": "",
         "doodle_versions": (),
         "current_version": 0,
+        # A picture dragged onto the page. It holds prepared bytes, the sha256
+        # of the upload it came from so the same file is adopted once rather
+        # than on every rerun, and the one-line description a vision model
+        # drafted from it. The nonce is in the uploader's own key: Streamlit
+        # refuses an assignment to a widget key from the script body once the
+        # widget exists, so emptying the well means giving it a new key.
+        "dropped_picture": None,
+        "dropped_picture_hash": "",
+        "dropped_picture_appearance": "",
+        "dropped_picture_name": "",
+        # False between a drop and the run that asks what is in the picture,
+        # which is one run later so the thumbnail appears without waiting on a
+        # network call. True once asked, whether or not the asking worked.
+        "dropped_picture_described": False,
+        "drop_well_nonce": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -430,8 +463,203 @@ def _model_for(provider_id: str, spec, settings: dict) -> str:
     return model if model in spec.models else spec.default_model
 
 
+def _dropped_picture() -> bytes | None:
+    """The prepared bytes of a picture dragged onto the page, if there is one."""
+
+    return st.session_state.get("dropped_picture")
+
+
+def _clear_dropped_picture() -> None:
+    """Forget the dropped picture and empty the well that took it.
+
+    The nonce is what empties the widget. Assigning to a file uploader's own
+    session key from the script body raises once the widget has been
+    instantiated, which it always has by the time a click is handled, so the
+    well is given a fresh key instead and Streamlit builds an empty one.
+    """
+
+    st.session_state.dropped_picture = None
+    st.session_state.dropped_picture_hash = ""
+    st.session_state.dropped_picture_appearance = ""
+    st.session_state.dropped_picture_name = ""
+    st.session_state.dropped_picture_described = False
+    st.session_state.drop_well_nonce = (
+        int(st.session_state.get("drop_well_nonce", 0)) + 1
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _drop_thumbnail(raw: bytes) -> bytes:
+    """A 64-pixel square of the dropped picture, for the prompt bar.
+
+    Cached on the bytes themselves, the same content-addressed discipline
+    _character_portrait already follows. Without it a 1536-pixel PNG would be
+    re-encoded on every rerun to be drawn at 32 points.
+    """
+
+    with Image.open(BytesIO(raw)) as opened:
+        square = ImageOps.fit(opened.convert("RGB"), (64, 64), Image.LANCZOS)
+        buffer = BytesIO()
+        square.save(buffer, format="PNG", optimize=True)
+        return buffer.getvalue()
+
+
+def _render_drop_well() -> None:
+    """The hidden uploader a dragged picture is handed to.
+
+    Injected JavaScript catches the drag anywhere on the page and forwards the
+    file into this widget's own file input, so the bytes travel over
+    Streamlit's upload endpoint and inherit the 200 MB ceiling in
+    .streamlit/config.toml. Sending them back from a custom component instead
+    would cap at the 25 MB Streamlit allows a widget to return, which is less
+    than a phone photograph.
+
+    It must not be rendered inside a form. A form holds its widgets back until
+    its button is pressed, and a drop landing inside one stays invisible to
+    Python until then; measured on 2026-08-31, eight seconds of polling saw
+    nothing until the submit button was clicked.
+    """
+
+    with st.container(key="doodle-drop-well"):
+        uploaded = st.file_uploader(
+            "Drop a picture",
+            type=list(DROP_EXTENSIONS),
+            accept_multiple_files=False,
+            key=f"drop_well_{int(st.session_state.get('drop_well_nonce', 0))}",
+            label_visibility="collapsed",
+        )
+    if uploaded is not None:
+        _adopt_dropped_picture(uploaded)
+    # On the run after a drop, with the thumbnail already painted above.
+    _describe_dropped_picture()
+
+
+def _adopt_dropped_picture(uploaded) -> None:
+    """Take a dropped file into the session, once per distinct picture.
+
+    Streamlit reruns the whole script on every interaction and the well still
+    holds the file, so without the hash this would re-prepare the picture and
+    buy another description on every keystroke — the same guard the characters
+    screen puts in front of its own appearance call.
+    """
+
+    raw = uploaded.getvalue()
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest == st.session_state.get("dropped_picture_hash"):
+        return
+
+    spec = get_provider(_active_provider_id())
+    if spec.max_reference_images < 1:
+        # Refused here rather than in the browser: the injected script is
+        # deliberately blind to which service is connected, because a payload
+        # that varies by provider would be re-inserted on every rerun. Python
+        # knows, and can name the control that fixes it.
+        st.session_state.home_error = f"{spec.label} cannot draw from a picture."
+        st.session_state.home_error_code = "no_reference_support"
+        _clear_dropped_picture()
+        st.rerun()
+
+    try:
+        prepared = prepare_photo(raw)
+    except ValueError as error:
+        st.session_state.home_error = str(error)
+        st.session_state.home_error_code = ""
+        _clear_dropped_picture()
+        st.rerun()
+
+    st.session_state.dropped_picture = prepared
+    st.session_state.dropped_picture_hash = digest
+    st.session_state.dropped_picture_name = str(getattr(uploaded, "name", ""))
+    st.session_state.home_error = ""
+    st.session_state.home_error_code = ""
+    # A drop while the demo artwork is selected would otherwise be discarded
+    # without a word: _quick_generate_demo reads a picture off disk and never
+    # looks at references.
+    st.session_state.quick_mode = "ai"
+    # Deliberately not described here. Asking the service what is in the
+    # picture takes a second or two, and doing it in this run would hold the
+    # whole page still while a parent waits for the thumbnail they have just
+    # dropped to appear at all. This run ends now, the picture is in the bar
+    # immediately, and _describe_dropped_picture does the asking on the next
+    # one with something on screen to say so.
+    st.session_state.dropped_picture_described = False
+    st.rerun()
+
+
+def _describe_dropped_picture() -> None:
+    """Ask the service what is in the dropped picture. One call, once.
+
+    A two-tone line drawing throws away colour and tone, and words are the only
+    channel left for them, which is why the characters screen buys the same
+    sentence for a saved character. It earns its keep twice more here: it is
+    what the generating screen shows when a picture was dropped with nothing
+    typed, and it is what the variation planner reads to pull several drawings
+    of one picture apart from each other.
+
+    Failure is swallowed to an empty string. The picture is the point and the
+    sentence is a bonus, so a service having a bad minute must not cost a
+    parent the drop.
+    """
+
+    if not _dropped_picture() or st.session_state.get("dropped_picture_described"):
+        return
+
+    api_key, _source = _provider_key()
+    if not api_key:
+        # Left unasked, and the flag left False so the next visit to a screen
+        # with a well tries again. A first-time parent drops a photograph
+        # before connecting anything; marking it described here would mean the
+        # drawing was planned from the placeholder phrase for ever, because
+        # connecting sends them straight to the generating screen and they
+        # never pass a drop well again.
+        return
+
+    with st.spinner("Looking at your picture…"):
+        try:
+            described = describe_appearance(
+                _dropped_picture(),
+                provider_id=_active_provider_id(),
+                api_key=api_key,
+            )
+        except (GeneratorError, ValueError):
+            described = ""
+        # Written inside the spinner, before its context closes. Streamlit
+        # raises a queued rerun at the next element call, and the parent has
+        # had the thumbnail and the Draw it button in front of them for the
+        # whole of this call — pressing Enter during it would otherwise throw
+        # away work already paid for.
+        st.session_state.dropped_picture_appearance = described
+        st.session_state.dropped_picture_described = True
+    st.rerun()
+
+
+# What a drawing made from a picture and no words is called before anyone has
+# asked what the picture shows. Named rather than repeated, because
+# _build_generation_plan has to recognise it to replace it.
+DROPPED_PICTURE_IDEA = "the picture you dropped"
+
+
+def _dropped_picture_idea() -> str:
+    """What to call a drawing made from a picture and no words.
+
+    The generating screen renders the idea as the largest words on the page and
+    the connection screen shows it on the "your idea is waiting" card, so an
+    empty string would leave a parent staring at a blank wait with no sign
+    their picture was still held.
+    """
+
+    described = str(st.session_state.get("dropped_picture_appearance", "")).strip()
+    return described or DROPPED_PICTURE_IDEA
+
+
 def _submit_home_prompt() -> None:
     prompt = str(st.session_state.get("home_prompt", "")).strip()
+    # A picture on its own is an idea. Without this the homepage's own contract
+    # — a blank box does nothing — would swallow the whole point of dropping
+    # one, and the two tests pinning that contract still hold for a blank box
+    # with no picture behind it.
+    if not prompt and _dropped_picture():
+        prompt = _dropped_picture_idea()
     if not prompt:
         return
     st.session_state.generation_idea = prompt
@@ -480,6 +708,11 @@ def _start_new_doodle() -> None:
     # refinement quietly edits a doodle that is no longer on screen.
     st.session_state.doodle_versions = ()
     st.session_state.current_version = 0
+    # Cleared, unlike chosen_characters below. A cast is an answer to "who do I
+    # draw for", which stays true; a dropped picture is one picture, and
+    # leaving it attached would put it into the next unrelated drawing and
+    # charge for it again with nothing on screen saying so.
+    _clear_dropped_picture()
     # chosen_characters is deliberately left alone: a parent drawing for the
     # same children wants the same cast next time, the same reasoning the
     # homepage settings already follow.
@@ -539,6 +772,88 @@ def _render_homepage() -> None:
              Draw it button below the bar cannot collide with anything. */
           div[data-testid="stTextInput"] [data-testid="InputInstructions"],
           div[data-testid="stTextInput"] button {display: none !important;}
+
+          /* A picture dragged onto the page. The form is the positioning
+             context, the thumbnail and its remove control are lifted out of
+             the flow onto the two ends of the pill, and the input's left
+             padding grows to make room. Nothing moves when there is no
+             picture, because none of this renders. */
+          div[data-testid="stForm"] {position: relative;}
+          .st-key-doodle-home-thumb {
+            position: absolute;
+            top: 15px;
+            left: max(1rem, calc(50% - 365px + 1rem));
+            z-index: 3;
+            width: 34px;
+          }
+          .st-key-doodle-home-thumb [data-testid="stImage"] img {
+            width: 34px;
+            height: 34px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid #dfe1e5;
+          }
+          div[data-testid="stForm"]:has(.st-key-doodle-home-thumb)
+            div[data-testid="stTextInput"] input {
+            padding-left: 3.9rem !important;
+            padding-right: 3.4rem !important;
+          }
+          /* The well itself is plumbing the parent never sees. Hidden here,
+             on the homepage's own stylesheet rather than the global one, so
+             the characters screen and Doodle Studio can share the selector
+             the drop script looks for while keeping their visible uploaders. */
+          .st-key-doodle-drop-well {display: none !important;}
+          /* The remove control, lifted onto the pill's right end. Keyed
+             rather than picked out by position: Streamlit wraps each element
+             in its own container, so the two submit buttons in this form are
+             not siblings and nth-of-type never matches either of them. */
+          .st-key-doodle-home-clear {
+            position: absolute;
+            top: 12px;
+            right: max(1rem, calc(50% - 365px + 1rem));
+            z-index: 3;
+            width: auto;
+            margin: 0;
+          }
+          .st-key-doodle-home-clear div[data-testid="stFormSubmitButton"] {
+            width: auto;
+            margin: 0;
+          }
+          .st-key-doodle-home-clear button {
+            width: 40px !important;
+            min-width: 40px;
+            height: 40px;
+            padding: 0 !important;
+            border-radius: 50% !important;
+            background: transparent !important;
+            border: 0 !important;
+            box-shadow: none !important;
+            color: #5f6368 !important;
+          }
+          .st-key-doodle-home-clear button:hover {
+            background: #f1f3f4 !important;
+            color: #202124 !important;
+          }
+          /* The label stays in the accessibility tree and out of the picture:
+             a cross with a word beside it will not fit inside the pill, and a
+             bare glyph with no name is unreadable to a screen reader. Streamlit
+             renders the words into their own stMarkdownContainer beside the
+             icon span, so that container alone takes the visually-hidden
+             treatment. Read off the live DOM rather than guessed: hiding an
+             ancestor takes the cross with it, and collapsing the type reflows
+             the words one letter per line down the side of the page. */
+          .st-key-doodle-home-clear button [data-testid="stMarkdownContainer"] {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            white-space: nowrap;
+            clip-path: inset(50%);
+          }
+          .st-key-doodle-home-clear button [data-testid="stIconMaterial"] {
+            font-size: 20px !important;
+          }
+
           div[data-testid="stFormSubmitButton"] {
             width: min(100%, 730px);
             margin: .95rem auto 0;
@@ -631,20 +946,47 @@ def _render_homepage() -> None:
     # A form, not on_change: a bare text input commits when it loses focus as
     # well as on Enter, so clicking away from a half-typed prompt jumped
     # straight to the next screen. A form commits only on Enter or the button.
+    dropped = _dropped_picture()
     with st.form("home_prompt_form", border=False, clear_on_submit=False):
+        # Inside the bar rather than above or below it. The homepage holds one
+        # full-width element and the button that acts on it, and nothing on it
+        # opens in place, so a picture announcing itself in a new row would
+        # push the whole page down the moment one was dropped.
+        if dropped:
+            with st.container(key="doodle-home-thumb"):
+                st.image(_drop_thumbnail(dropped), width=32)
         st.text_input(
             "Describe a picture to colour",
             key="home_prompt",
-            placeholder="What shall we draw?",
+            placeholder=(
+                "What shall we draw with it?" if dropped else "What shall we draw?"
+            ),
             label_visibility="collapsed",
         )
         home_submitted = st.form_submit_button(
             "Draw it", type="primary", width="stretch"
         )
+        # A second submit button rather than an st.button, which Streamlit
+        # refuses inside a form. Rendered only when there is a picture to
+        # remove, so a homepage that has never seen one still offers exactly
+        # the two buttons the interface tests pin.
+        home_cleared = False
+        if dropped:
+            with st.container(key="doodle-home-clear"):
+                home_cleared = st.form_submit_button(
+                    "Remove picture", type="tertiary", icon=":material/close:"
+                )
+    if home_cleared:
+        _clear_dropped_picture()
+        st.rerun()
     if home_submitted:
         _submit_home_prompt()
         if st.session_state.screen != "home":
             st.rerun()
+    # Outside the form on purpose: a form batches its widgets and commits only
+    # on submit, so a drop landing inside one would sit in the browser until
+    # "Draw it" was pressed.
+    _render_drop_well()
     if st.session_state.get("home_error"):
         code = str(st.session_state.get("home_error_code") or "")
         if code:
@@ -824,9 +1166,7 @@ def _render_brand_home(where: str, *, centred: bool = False) -> None:
         unsafe_allow_html=True,
     )
     with st.container(key=f"doodle-brand-{where}"):
-        st.markdown(
-            _doodle_logo("compact", centred=centred), unsafe_allow_html=True
-        )
+        st.markdown(_doodle_logo("compact", centred=centred), unsafe_allow_html=True)
         if st.button(
             "Doodle, back to the homepage",
             key=f"top_brand_{where}",
@@ -1110,7 +1450,12 @@ def _render_home_options() -> None:
         if active_spec.max_reference_images >= 1:
             cast_ids = {character.id for character in cast}
             count = len(chosen_ids & cast_ids)
-            limit = active_spec.max_reference_images
+            # A dropped picture takes one of the service's reference slots, so
+            # the cap here has to give one back. Gemini looks at four pictures;
+            # with one dropped, three characters is what still fits. Without
+            # this a parent could tick four, drop a picture, and only find out
+            # when refine_with_provider refused the batch halfway through.
+            limit = active_spec.max_reference_images - (1 if _dropped_picture() else 0)
             # A face rather than a word, because this item answers "who" while
             # its three neighbours answer "how", and the icon says so at a
             # glance without spending any of the line's width. The count sits
@@ -1122,10 +1467,13 @@ def _render_home_options() -> None:
             # teddy both called Ida), so it lives inside the panel instead.
             with st.popover(label, type="tertiary", icon=":material/face:"):
                 if cast:
-                    st.caption(
+                    caption = (
                         "Doodle draws these characters into the picture. "
                         f"{active_spec.label} looks at up to {limit} at once."
                     )
+                    if _dropped_picture():
+                        caption += " The picture you dropped takes one of its places."
+                    st.caption(caption)
                     for character in cast:
                         ticked = character.id in chosen_ids
                         portrait_col, tick_col = st.columns(
@@ -1690,25 +2038,34 @@ def _render_characters_screen() -> None:
     st.subheader("Add a character")
     # The only screen that asks for a photograph of a child, so the fact and
     # the consequence belong right here, not on a Studio tab this journey
-    # never visits. The photograph is sent every time a picture is drawn
-    # with this character, not just once: see _draw_character_portrait and
-    # every load_character_image(..., portrait=False) call site.
+    # never visits. Corrected on 2026-08-31: this claimed the photograph was
+    # sent again for every scene, which stopped being true at 2a74542. It is
+    # the drawn portrait that goes from then on — see the portrait=True call
+    # sites in _build_generation_plan and the badge redraw — and the
+    # photograph goes only here, to make that portrait and to describe them.
     st.caption(
         "Their photograph is sent to the drawing service you have "
-        "connected, each time a picture is drawn with them — now, for "
-        "their portrait, and again for every scene or badge afterwards. "
-        "As soon as you choose it, the same service is also asked to "
-        "describe their hair, eyes and skin, so drawings and colouring "
-        "match them — check the description below and correct anything it "
-        "gets wrong. Removing a character deletes the copy Doodle holds."
+        "connected, twice and now: once to draw their portrait, and once "
+        "to describe their hair, eyes and skin so drawings and colouring "
+        "match them. Check that description below and correct anything it "
+        "gets wrong. Every picture afterwards sends the portrait and those "
+        "words rather than the photograph. Removing a character deletes "
+        "the copy Doodle holds."
     )
 
-    uploaded = st.file_uploader(
-        "Add a picture",
-        type=["png", "jpg", "jpeg", "webp", "heic"],
-        accept_multiple_files=False,
-        help="A clear photo of their face works best.",
-    )
+    # Wrapped in the key the drop script looks for, so dragging a photograph
+    # anywhere on this screen fills this uploader. Unlike the homepage's own
+    # well this one stays visible: it is the control the parent came here to
+    # use, and the drop only saves them the trip to the file browser. The
+    # homepage's stylesheet is what hides its copy, and that stylesheet is
+    # never rendered on this screen.
+    with st.container(key="doodle-drop-well"):
+        uploaded = st.file_uploader(
+            "Add a picture",
+            type=list(DROP_EXTENSIONS),
+            accept_multiple_files=False,
+            help="A clear photo of their face works best.",
+        )
 
     if uploaded is not None and api_key and spec.text_model:
         # Fired once per distinct photo, not on every rerun: every widget on
@@ -2360,7 +2717,7 @@ def _clear_generation_plan() -> None:
     st.session_state.generation_jobs = []
     st.session_state.generation_collected = []
     st.session_state.generation_seconds = []
-    st.session_state.generation_uses_cast = False
+    st.session_state.generation_uses_references = False
     st.session_state.generation_references = ()
     st.session_state.generation_chosen_ids = []
     st.session_state.generation_pairing = False
@@ -2392,6 +2749,24 @@ def _build_generation_plan(idea: str) -> None:
     pairing = bool(options["pair_grown_up"])
     wanted = 1 if pairing else int(options["alternatives"])
 
+    # The last chance to find out what a dropped picture shows. A parent who
+    # drops one before connecting anything is sent from the homepage to the
+    # connection screen and then straight here, never passing a drop well
+    # again, so without this their drawing is planned from the placeholder
+    # phrase and the alternatives are pulled apart along axes derived from
+    # words nobody wrote.
+    if _dropped_picture() and not st.session_state.get("dropped_picture_described"):
+        try:
+            st.session_state.dropped_picture_appearance = describe_appearance(
+                _dropped_picture(), provider_id=provider_id, api_key=api_key
+            )
+        except (GeneratorError, ValueError):
+            st.session_state.dropped_picture_appearance = ""
+        st.session_state.dropped_picture_described = True
+        if idea == DROPPED_PICTURE_IDEA:
+            idea = _dropped_picture_idea()
+            st.session_state.generation_idea = idea
+
     # One alternative needs no plan: the brief exists to pull several
     # drawings of one idea apart from each other. A pair is the opposite
     # errand, one scene drawn twice, so it never asks for briefs either.
@@ -2413,21 +2788,51 @@ def _build_generation_plan(idea: str) -> None:
         briefs.append(briefs[0])
 
     chosen = _cast_for_drawing()
-    if chosen:
-        # A character drawing goes through refine_with_provider, the call
-        # that carries pictures, rather than generate_with_provider. The
-        # reference sent is the stored photograph, not the drawn portrait:
-        # the portrait is a deliberate caricature, and sending it as the
-        # likeness reference would draw every scene from that exaggeration
-        # rather than from the child or toy it was drawn from.
-        # The portrait, not the photograph. The library shows the parent
-        # this drawing, so it is what the scene has to agree with; drawing
-        # from the photograph instead produced a second reading of the same
-        # face that was close but not the same child.
+    dropped = _dropped_picture()
+    if dropped and chosen:
+        # The cast picker gives a slot back while a picture is attached, but
+        # only by disabling further ticks — an already-ticked box stays enabled
+        # so unticking back under the cap is possible, and nothing unticks
+        # anyone when the picture arrives after the ticking. So a parent who
+        # fills every slot and then drops a picture reaches here with one
+        # reference too many, and refine_with_provider would refuse the first
+        # job and kill the whole batch. Trimmed here, where the request is
+        # actually assembled, rather than trusted to the interface.
+        room = spec.max_reference_images - 1
+        if len(chosen) > room:
+            dropped_name = (
+                st.session_state.get("dropped_picture_name") or "your picture"
+            )
+            st.session_state.generation_notice = (
+                f"{spec.label} looks at {spec.max_reference_images} pictures at "
+                f"once, so this drawing uses {dropped_name} and the first "
+                f"{room} of your characters."
+            )
+            chosen = chosen[:room]
+    if chosen or dropped:
+        # A drawing carrying any picture goes through refine_with_provider,
+        # the call that takes references, rather than generate_with_provider.
+        #
+        # For a saved character it is the portrait that is sent, not the
+        # photograph. The library shows the parent that drawing, so it is what
+        # every scene has to agree with; drawing from the photograph instead
+        # produced a second reading of the same face, close but not the same
+        # child. An earlier note here argued the opposite and was left in place
+        # when 2a74542 reversed the decision, so this comment sat contradicting
+        # itself and the code beneath it until 2026-08-31.
+        #
+        # A dropped picture is the other way round, because there is no
+        # portrait: whatever was dropped is the only reference there is.
         references = tuple(
             load_character_image(character_id, portrait=True)
             for character_id, *_ in chosen
         )
+        # The dropped picture goes last, after every portrait, because the
+        # ordinal words in the prompt are the only thing binding a picture to
+        # what it shows and build_character_scene_prompt introduces it in that
+        # position.
+        if dropped:
+            references = (*references, dropped)
         prompts = [
             build_character_scene_prompt(
                 idea,
@@ -2435,6 +2840,11 @@ def _build_generation_plan(idea: str) -> None:
                     (name, kind, marks, appearance)
                     for _, name, kind, marks, appearance in chosen
                 ],
+                dropped_appearance=(
+                    str(st.session_state.get("dropped_picture_appearance", ""))
+                    if dropped
+                    else None
+                ),
                 age_profile=level,
                 style_name=str(options["style"]),
                 target="A4 page",
@@ -2467,7 +2877,7 @@ def _build_generation_plan(idea: str) -> None:
     ]
     st.session_state.generation_collected = []
     st.session_state.generation_seconds = []
-    st.session_state.generation_uses_cast = bool(chosen)
+    st.session_state.generation_uses_references = bool(chosen or dropped)
     st.session_state.generation_references = references
     st.session_state.generation_chosen_ids = [
         character_id for character_id, *_ in chosen
@@ -2497,7 +2907,7 @@ def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
     chosen_ids = list(st.session_state.generation_chosen_ids)
 
     started = time.monotonic()
-    if st.session_state.generation_uses_cast:
+    if st.session_state.generation_uses_references:
         artwork = refine_with_provider(
             provider_id=provider_id,
             api_key=api_key,
@@ -2536,7 +2946,7 @@ def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
             model=model,
             quality=quality,
             size=spec.portrait_size,
-            with_references=bool(st.session_state.generation_uses_cast),
+            with_references=bool(st.session_state.generation_uses_references),
         ),
     )
     st.session_state.generation_seconds = [
@@ -3083,7 +3493,7 @@ def _current_settings_key() -> str:
         model=_model_for(provider_id, spec, settings),
         quality=str(settings.get("openai_quality", DEFAULT_QUALITY)),
         size=spec.portrait_size,
-        with_references=bool(st.session_state.get("generation_uses_cast")),
+        with_references=bool(st.session_state.get("generation_uses_references")),
     )
 
 
@@ -3258,9 +3668,7 @@ def _render_generating_screen() -> None:
         # question a parent asks once and then knows the answer to for good,
         # and until they ask it, it is four lines of grey between the child's
         # own sentence and the button.
-        with st.popover(
-            "", type="tertiary", icon=":material/help:", width="content"
-        ):
+        with st.popover("", type="tertiary", icon=":material/help:", width="content"):
             st.markdown(
                 "**If you stop now**\n\nA picture already sent to be drawn "
                 "finishes and is charged regardless. Stopping only cancels the "
@@ -3340,7 +3748,9 @@ def _how_long_that_took() -> str:
     joins the chart on the next drawing, which is what gives the wait a small
     payoff."""
 
-    seconds = [float(value) for value in st.session_state.get("generation_seconds") or []]
+    seconds = [
+        float(value) for value in st.session_state.get("generation_seconds") or []
+    ]
     if not seconds:
         return ""
     if len(seconds) == 1:
@@ -3802,12 +4212,18 @@ with create_tab:
                     st.code(prompt_value, language="text")
 
     elif source_mode == "Upload artwork":
-        uploaded = st.file_uploader(
-            "Upload a picture",
-            type=["png", "jpg", "jpeg", "webp"],
-            accept_multiple_files=False,
-            help="PNG, JPG or WebP.",
-        )
+        # The same keyed container the drop script looks for, so a picture
+        # dragged anywhere onto Studio lands here. HEIC joins the list while
+        # we are in it: pillow_heif is registered at import and decodes it
+        # perfectly well, and this door was refusing iPhone photographs the
+        # characters door next to it has always accepted.
+        with st.container(key="doodle-drop-well"):
+            uploaded = st.file_uploader(
+                "Upload a picture",
+                type=list(DROP_EXTENSIONS),
+                accept_multiple_files=False,
+                help="PNG, JPG, WebP or a photo straight off a phone.",
+            )
         upload_title = st.text_input("Artwork title", value="My colouring picture")
         if uploaded and st.button("Use uploaded artwork", type="primary"):
             # A phone photo used as "artwork" carries the same GPS, camera
@@ -4361,14 +4777,22 @@ with guide_tab:
         "and the two descriptions beside it — what makes them recognisable, "
         "and how they really look — are all sent so it can draw a "
         "caricature portrait; every later picture starring that character, "
-        "and every badge composed from one, sends the same name, "
-        "photograph and descriptions again, so the likeness always comes "
-        "from the photograph rather than from the drawn portrait. A "
-        "dropped connection can make the same request send again before it "
-        "succeeds, photograph included — ordinary here, and nothing beyond "
-        "that one request goes anywhere new. Both the photograph and the "
-        "portrait stay on this computer, in the local data folder, along "
-        "with your saved doodles.\n\n"
+        "and every badge composed from one, sends that name and those "
+        "descriptions again together with the portrait Doodle drew, which "
+        "from then on is the likeness the drawing is matched to rather than "
+        "the photograph. A dropped connection can make the same request send "
+        "again before it succeeds, photograph included — ordinary here, and "
+        "nothing beyond that one request goes anywhere new. Both the "
+        "photograph and the portrait stay on this computer, in the local "
+        "data folder, along with your saved doodles.\n\n"
+        "A picture you drag onto the page is sent too. It goes once so the "
+        "service can describe what is in it, and then again with each "
+        "drawing in the batch — four pictures means four sends — because "
+        "that picture is the likeness the drawing is made from. It stays "
+        "attached until you press New doodle, which is longer than it is "
+        "shown in the bar: pressing Draw this idea again on a finished "
+        "picture sends it once more. It is not written to this computer at "
+        "all unless you save the doodle it made.\n\n"
         "Removing a character deletes their photograph from this computer, "
         "which is the only copy Doodle has; it cannot recall anything a "
         "drawing service has already been sent. What each service does with "

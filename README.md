@@ -30,6 +30,7 @@ The application keeps two jobs separate:
 - Optional captions added as proper PDF text
 - PDF preview and download
 - Local saved-doodle library
+- A picture dragged anywhere onto the page, which drops into the prompt bar and is drawn from
 - Saved characters — people, toys or anything else recognisable — kept on this computer from a reference photograph
 - Any picture drawn with your saved characters in it, in their likeness
 - A caricature portrait drawn for each saved character as soon as they are added
@@ -92,6 +93,31 @@ The homepage contains no settings, menus or explanation. It presents only:
 Enter a picture idea and press Return. Doodle then opens the working studio with the idea carried into the generation form.
 
 Use **New doodle** in the studio to return to the clean homepage.
+
+### Dropping a picture on it
+
+Drag a photograph anywhere over the page and Doodle offers to take it, the way
+Google Search does. Let go and the picture appears as a small thumbnail inside
+the prompt bar, with a cross beside it to take it back out.
+
+![Doodle offering to take a dragged picture](samples/drop-a-picture-dragging.png)
+
+What happens next is decided by the settings already under the bar — how many
+pictures, who they are for, which style, who else is in them. The picture is
+the thing to draw; anything you type is the scene it goes into. Drop a
+photograph of a teddy and type *riding a rocket to the moon*, and you get that
+teddy, bald ear and all, in a rocket.
+
+![The dropped picture sitting in the prompt bar](samples/drop-a-picture-in-the-bar.png)
+
+Drop one and type nothing, and Doodle draws the picture itself as a colouring
+page. It asks the drawing service to describe what is in the photograph first,
+so the waiting screen has something to show you and several alternatives are
+several readings of the same thing rather than four copies.
+
+A dropped picture takes one of the drawing service's reference places, so the
+number of saved characters you can tick alongside it drops by one while it is
+attached. Pressing **New doodle** forgets it.
 
 Desktop and mobile visual previews are included in the `samples/` folder.
 
