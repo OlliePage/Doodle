@@ -1697,6 +1697,41 @@ def _send_to_printer(pdf_bytes: bytes) -> None:
     )
 
 
+def _render_export_row(
+    pdf_bytes: bytes, *, file_name: str, key: str, label: str
+) -> None:
+    """The two things anyone wants from a finished picture, side by side.
+
+    Saving the PDF used to live inside the "Nothing happened when I pressed
+    print" panel, as the consolation prize for a browser that refused a print
+    dialogue. It is not a consolation prize — wanting the file is as ordinary
+    as wanting the printer, whether to print it somewhere else, keep it, or
+    send it to somebody. It stands beside printing now, and the panel below
+    keeps its own copy for the case it was written for.
+    """
+
+    print_col, save_col = st.columns(2)
+    with print_col:
+        if st.button(
+            label,
+            type="primary",
+            width="stretch",
+            icon=":material/print:",
+            key=f"print_{key}",
+        ):
+            _send_to_printer(pdf_bytes)
+    with save_col:
+        st.download_button(
+            "Save as a PDF",
+            data=pdf_bytes,
+            file_name=file_name,
+            mime="application/pdf",
+            width="stretch",
+            icon=":material/download:",
+            key=f"save_pdf_{key}",
+        )
+
+
 def _render_print_help(
     pdf_bytes: bytes, *, file_name: str, key: str, scale_note: bool = True
 ) -> None:
@@ -3983,7 +4018,7 @@ def _render_first_result() -> None:
         st.caption(took)
     _render_alternatives_picker()
 
-    again_col, love_col, print_col = st.columns([1, 1, 1.35])
+    again_col, love_col, print_col, file_col = st.columns([1, 1, 1.2, 1.1])
     with again_col:
         if st.button(
             "Draw this idea again", width="stretch", icon=":material/refresh:"
@@ -4025,6 +4060,20 @@ def _render_first_result() -> None:
             icon=":material/print:",
         ):
             _send_to_printer(st.session_state.quick_pdf)
+    with file_col:
+        # Beside printing rather than inside the "nothing happened when I
+        # pressed print" panel, where it had been sitting as the consolation
+        # prize for a browser that refuses a print dialogue. Wanting the file
+        # is as ordinary as wanting the printer.
+        st.download_button(
+            "Save as a PDF",
+            data=st.session_state.quick_pdf,
+            file_name=f"{_slug(st.session_state.current_title)}-a4.pdf",
+            mime="application/pdf",
+            width="stretch",
+            icon=":material/download:",
+            key="save_pdf_result",
+        )
 
     if st.session_state.get("quick_saved"):
         st.success("Saved to your doodles, on this computer.", icon=":material/check:")
@@ -4820,14 +4869,12 @@ with create_tab:
                 f"{st.session_state.pdf_summary}</div>",
                 unsafe_allow_html=True,
             )
-            if st.button(
-                "Print this layout",
-                type="primary",
-                width="stretch",
-                icon=":material/print:",
-                key="print_studio",
-            ):
-                _send_to_printer(st.session_state.pdf_bytes)
+            _render_export_row(
+                st.session_state.pdf_bytes,
+                file_name=st.session_state.pdf_filename,
+                key="studio",
+                label="Print this layout",
+            )
             _render_print_help(
                 st.session_state.pdf_bytes,
                 file_name=st.session_state.pdf_filename,

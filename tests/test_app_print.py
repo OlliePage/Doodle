@@ -115,3 +115,21 @@ def test_the_calibration_page_prints_too() -> None:
     at = _button(at, "print the calibration page").click().run()
     assert not at.exception
     assert "doodle-print-frame" in _emitted_html(at)
+
+
+def test_a_finished_doodle_offers_both_printing_and_the_file() -> None:
+    """Saving the PDF used to live inside the "Nothing happened when I pressed
+    print" panel, as the consolation prize for a browser that refused a print
+    dialogue. Wanting the file is as ordinary as wanting the printer — to print
+    it elsewhere, keep it, or send it to somebody."""
+
+    at = _result_screen()
+    assert not at.exception
+
+    labels = [button.label for button in at.button]
+    assert "Print this doodle" in labels
+
+    downloads = [button.label for button in at.get("download_button")]
+    assert "Save as a PDF" in downloads, (
+        "the only way to get the file is still buried in the print-trouble panel"
+    )

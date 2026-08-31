@@ -102,41 +102,73 @@ DETAIL_LEVELS: dict[str, DetailLevel] = {
     "Grown-up": DetailLevel(
         label="Grown-up",
         reader="an adult who colours to unwind",
-        # The first wording listed "a decorative border of repeating motifs"
-        # and "patterned fills wherever a plain area would otherwise sit" as
-        # ways to reach the region count, and a model reads that as permission
-        # to take the cheap route: leave the subject drawn as simply as a
-        # toddler page and pile pattern into the background until the count is
-        # met. Reported on 2026-08-31 as a grown-up portrait that came back
-        # with a plain figure and a flowy ornamental background. The count now
-        # says where it has to be spent, and the border is named as a last
-        # resort rather than offered as a layer.
+        # Third wording. The first offered "a decorative border of repeating
+        # motifs" and "patterned fills wherever a plain area would otherwise
+        # sit" as ways to reach the count, and a grown-up portrait came back on
+        # 2026-08-31 with a plain figure and a flowy ornamental background. The
+        # second pointed the count at the subject and told the page to fill
+        # corner to corner, and the same day a picnic under a hot air balloon
+        # festival came back worse: the nine large balloons that were the whole
+        # point of the toddler sheet shrank into wallpaper, bunting ran across
+        # the top, and the foreground and both margins filled with daisies and
+        # foliage the words never mentioned. Anyone would have taken the
+        # toddler sheet.
+        #
+        # Three clauses paid for that. "Almost no empty white space" is an area
+        # order that says nothing about what fills the area, and it contradicted
+        # the visual rules' pure white background, the A4 profile's "leave
+        # useful white space around it" and the badge rule's blank corners — so
+        # the model followed the one instruction it could count. "Individual
+        # leaves and petals" was the only example in the list that also works as
+        # a free-standing object to multiply; you cannot scatter a fold, but you
+        # can scatter a petal. And a count scored against the page is far
+        # cheaper to reach by repeating a small shape forty times than by
+        # subdividing nine large ones, so the balloons shrank to make room.
+        #
+        # The count now lives inside the objects and cannot be earned by adding
+        # to the page. The border offer is gone rather than demoted, because a
+        # field that overrides the shared visual rules teaches the model those
+        # rules are negotiable immediately before it decides whether inventing a
+        # meadow is allowed.
         regions=(
-            "Aim for 150 or more small colouring regions, filling the page corner "
-            "to corner with almost no empty white space. Spend that detail on the "
-            "subject first: whatever the picture is of must itself be drawn at this "
-            "density, subdivided into many small closed shapes — the panels and "
-            "folds of clothing, individual leaves and petals, separate feathers, "
-            "scales, bricks, planks and facets. Every one of them is an outlined "
-            "region with white inside it that a pencil can fill. Density here "
-            "means more regions to colour, never darker drawing: no hatching, no "
-            "cross-hatching, no stippling, no strokes standing in for texture, and "
-            "no area allowed to read as a solid black mass. A simply drawn subject "
-            "standing in an intricate setting is the wrong answer, and so is an "
-            "ornamental background compensating for a plain one. Only once the "
-            "subject carries this density, work outwards to what surrounds it, and "
-            "add a decorative border last and only if the page would otherwise "
-            "still have empty space."
+            "Aim for 150 or more small colouring regions, and find every one of "
+            "them inside the things the picture already contains: regions won by "
+            "adding something new do not count. Spend that detail on the subject "
+            "first, and the subject is everything the description names, not only "
+            "the people in it. Draw each named thing at the size the scene gives "
+            "it, big enough to be looked at, then divide it into ten or twenty "
+            "small closed shapes cut from what it is really made of: the seams "
+            "and folds of cloth, the planks and grain of wood, the courses of a "
+            "wall. Nothing may enter the picture that the description has not "
+            "asked for and the scene does not need in order to stand up: a meadow "
+            "of flowers nobody asked for, a run of bunting or a decorative border "
+            "arriving to fill a gap is the failure this refuses. Nor may anything "
+            "named be shrunk, or repeated small until it becomes wallpaper, to "
+            "make room for one. Space the description does not account for is "
+            "left white; a gap is not a place to put something. A simply drawn "
+            "subject standing in an intricate setting is the wrong answer, and so "
+            "is an ornamental background compensating for a plain one."
         ),
         line_rule=(
             "Fine, even outlines of consistent weight throughout, in the intricate "
             "style of an adult colouring book, mandala or zentangle."
         ),
+        # The more direct cause of the flower mat than the region count was.
+        # It named the motif (petals, leaves), nominated every empty area as
+        # somewhere to put it — the sky is a larger area and so is the grass —
+        # and declared ornament to be the goal rather than a consequence.
+        # Pattern is still welcome and still dense; it is now bound to surfaces
+        # that carry pattern in life, and the two places the wallpaper and the
+        # daisies went are refused by name.
         texture_rule=(
-            "Dense decorative pattern is the point: scales, petals, paisley, dots, "
-            "leaves, waves and geometric repeats subdividing every larger area. Every "
-            "one of them must be a closed shape a fine pen or pencil can colour, never "
-            "a shaded or filled black mass."
+            "Dense decorative pattern belongs wherever a surface really carries "
+            "one — a printed dress, a tiled floor, a brick wall, the scales of a "
+            "fish, the weave of a basket — and nowhere else: empty sky, bare "
+            "ground and the space between things stay plain. Every mark of it "
+            "must be a closed shape a fine pen or pencil can colour, never a "
+            "shaded or filled black mass. Density here means more regions to "
+            "colour, never darker drawing: no hatching, no cross-hatching, no "
+            "stippling and no strokes standing in for texture."
         ),
     ),
 }
@@ -312,10 +344,11 @@ FACE_DETAIL_EXEMPTION = (
     "picture only: each person's head — the face, the hair and the glasses — may "
     "carry as much fine line work as it takes to be recognisably them. "
     "Everything else in the picture, including bodies, clothes and the whole "
-    "setting, obeys the reader profile exactly: few, large, simple shapes with "
-    "wide gaps. Clothing is part of everything else: a dress at the toddler "
+    "setting, obeys the reader profile exactly, whatever that profile asks for. "
+    "Clothing is part of everything else: a dress at the toddler "
     "level is two or three large plain shapes, however patterned it was in the "
-    "reference."
+    "reference, and on a detailed page it carries as many small closed shapes "
+    "as that profile demands."
 )
 
 # "Person" and "toy" each need their own instruction because they fail in
