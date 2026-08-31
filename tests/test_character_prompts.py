@@ -76,3 +76,23 @@ def test_a_caricature_refuses_the_corners_and_asks_for_exaggeration() -> None:
 def test_a_scene_with_no_characters_is_refused() -> None:
     with pytest.raises(ValueError):
         build_character_scene_prompt("walking in a forest", [])
+
+
+def test_no_composed_line_is_left_ragged() -> None:
+    """A multi-line rule constant spliced in flush left defeats dedent()'s
+    common-prefix calculation, so the rest of the prompt keeps a literal
+    four-space indent it should have lost. Caught in review on 2026-08-31 by
+    diffing composed prompts before and after VISUAL_RULES was introduced."""
+
+    scene = build_character_scene_prompt(
+        "building a sandcastle",
+        [
+            ("Ida", "person", "Curly hair, round glasses."),
+            ("Bear", "toy", "A bald patch on one ear."),
+        ],
+    )
+    caricature = build_caricature_prompt("Ida", "person", "Curly hair, round glasses.")
+
+    for prompt in (scene, caricature):
+        for line in prompt.splitlines():
+            assert not line[:1].isspace(), f"ragged line: {line!r}"

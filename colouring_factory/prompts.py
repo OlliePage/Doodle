@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from textwrap import dedent
+from textwrap import dedent, indent
 
 
 @dataclass(frozen=True)
@@ -200,6 +200,18 @@ ORDINALS = (
 )
 
 
+def _spliced(text: str) -> str:
+    """Indent a constant to the templates' four-space margin before splicing it in.
+
+    A multi-line constant inserted flush left defeats ``dedent()``'s common-prefix
+    calculation below, so it stops stripping the margin from every other line —
+    Scene, Style profile and the rest come out with a literal four-space indent
+    the drawing service would actually receive. Caught in review on 2026-08-31
+    by diffing composed prompts before and after the constants were spliced in.
+    """
+    return indent(text, "    ")
+
+
 def build_colouring_prompt(
     concept: str,
     age_profile: str = "2-3 years",
@@ -226,7 +238,7 @@ def build_colouring_prompt(
     Scene: {scene}
 
     Visual rules:
-    {VISUAL_RULES}
+{_spliced(VISUAL_RULES)}
 
     Style profile: {style.instruction}
     Reader profile: {level.regions}
@@ -273,7 +285,7 @@ def build_refinement_prompt(
     props, background and composition.
 
     Visual rules, which the changed picture must still obey:
-    {VISUAL_RULES}
+{_spliced(VISUAL_RULES)}
 
     Style profile: {style.instruction}
     Reader profile: {level.regions}
@@ -349,11 +361,9 @@ def build_character_scene_prompt(
             line += f" {marks.strip()}"
         introductions.append(line)
 
-    exemption = (
-        f"\n{FACE_DETAIL_EXEMPTION}\n"
-        if any(kind == "person" for _, kind, _ in characters)
-        else ""
-    )
+    likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
+    if any(kind == "person" for _, kind, _ in characters):
+        likeness_block += "\n\n" + _spliced(FACE_DETAIL_EXEMPTION)
 
     prompt = f"""
     Create an original black-and-white colouring-book illustration for {level.reader}.
@@ -361,12 +371,12 @@ def build_character_scene_prompt(
     Scene: {scene}
 
     Who is in it:
-    {chr(10).join(introductions)}
+{_spliced(chr(10).join(introductions))}
 
-    {CHARACTER_LIKENESS_RULE}
-    {exemption}
+{likeness_block}
+
     Visual rules:
-    {VISUAL_RULES}
+{_spliced(VISUAL_RULES)}
 
     Style profile: {style.instruction}
     Reader profile: {level.regions}
@@ -400,7 +410,7 @@ def build_caricature_prompt(
     Subject: a good-natured caricature of {name}, the {subject} in the attached
     picture, head and shoulders only, facing forward.{marks_line}
 
-    {CHARACTER_LIKENESS_RULE}
+{_spliced(CHARACTER_LIKENESS_RULE)}
 
     Caricature direction: this is a seaside caricature, so exaggerate boldly and
     comically. Draw the head much larger than the body. Push the two or three
@@ -409,9 +419,9 @@ def build_caricature_prompt(
     accurate, flattering portrait is the wrong answer.
 
     Visual rules:
-    {VISUAL_RULES}
+{_spliced(VISUAL_RULES)}
 
-    {BADGE_CORNERS_RULE}
+{_spliced(BADGE_CORNERS_RULE)}
 
     Line profile: {level.line_rule}
     Detail profile: {level.texture_rule}

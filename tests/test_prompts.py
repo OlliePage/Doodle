@@ -62,3 +62,17 @@ def test_the_round_badge_rule_asks_for_a_circular_composition() -> None:
     lowered = prompt.lower()
     assert "circle" in lowered or "circular" in lowered
     assert "corner" in lowered
+
+
+def test_no_composed_line_is_left_ragged() -> None:
+    """A multi-line rule constant spliced in flush left defeats dedent()'s
+    common-prefix calculation, so the rest of the prompt keeps a literal
+    four-space indent it should have lost. Caught in review on 2026-08-31 by
+    diffing composed prompts before and after VISUAL_RULES was introduced."""
+
+    for prompt in (
+        build_colouring_prompt("a bear", target="Round badge"),
+        build_refinement_prompt("give the bear a party hat"),
+    ):
+        for line in prompt.splitlines():
+            assert not line[:1].isspace(), f"ragged line: {line!r}"
