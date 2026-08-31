@@ -170,7 +170,10 @@ st.markdown(
       [data-testid="stDecoration"] {display: none;}
       .block-container,
       [data-testid="stMainBlockContainer"] {
-        max-width: 1180px;
+        /* Wide enough to stand a children's sheet beside a grown-up one at a
+           size worth looking at. The page config has always said layout="wide";
+           this was the rule quietly narrowing it back to one long column. */
+        max-width: 1520px;
         padding-top: 5rem;
         padding-bottom: 3rem;
         overflow: visible;
@@ -377,7 +380,12 @@ def _initialise_state() -> None:
         "pair_pdf": None,
         "badge_previews": {},
         "colour_previews": {},
-        "showing_colours": False,
+        # One per sheet since 2026-08-31 — showing_colours_result and
+        # showing_colours_grown_up — so a pair can be looked at one sheet
+        # coloured and the other in outline. Declared here as the default
+        # both derive from.
+        "showing_colours_result": False,
+        "showing_colours_grown_up": False,
         "session_provider_keys": {},
         "provider_choice": DEFAULT_PROVIDER,
         "connect_return": "generate",
@@ -724,7 +732,8 @@ def _start_new_doodle() -> None:
     # badge_previews is deliberately left alone, the same rule colour_previews
     # already follows: both are content-addressed caches, so an entry for a
     # picture no longer on screen is just unused, never wrong.
-    st.session_state.showing_colours = False
+    st.session_state.showing_colours_result = False
+    st.session_state.showing_colours_grown_up = False
     st.session_state.connection_error = None
     st.session_state.quick_mode = "ai"
     st.session_state.generation_nonce = 0
@@ -1258,7 +1267,9 @@ def _colour_key(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes).hexdigest()
 
 
-def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
+def _render_doodle_with_colours(
+    image_bytes: bytes, *, key_prefix: str, detailed: bool = False
+) -> None:
     """The picture, with the option of seeing it coloured in as a guide.
 
     A toddler deciding what colour water or grass should be has nothing to copy
@@ -1270,7 +1281,11 @@ def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
     cache = st.session_state.setdefault("colour_previews", {})
     key = _colour_key(image_bytes)
     coloured = cache.get(key)
-    showing = bool(st.session_state.get("showing_colours")) and coloured is not None
+    # Keyed per sheet. One shared flag meant showing the colours on one sheet
+    # showed them on the other, and a pair has two pictures a parent may well
+    # want to look at differently.
+    showing_key = f"showing_colours_{key_prefix}"
+    showing = bool(st.session_state.get(showing_key)) and coloured is not None
 
     st.image(coloured if showing else image_bytes, width="stretch")
 
@@ -1289,7 +1304,7 @@ def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
             width="stretch",
             icon=":material/gesture:",
         ):
-            st.session_state.showing_colours = False
+            st.session_state[showing_key] = False
             st.rerun()
         return
 
@@ -1300,7 +1315,7 @@ def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
             width="stretch",
             icon=":material/palette:",
         ):
-            st.session_state.showing_colours = True
+            st.session_state[showing_key] = True
             st.rerun()
         return
 
@@ -1338,7 +1353,8 @@ def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
                         [
                             (name, appearance)
                             for _, name, _, _, appearance in _recorded_cast()
-                        ]
+                        ],
+                        detailed=detailed,
                     ),
                     model=model,
                     size=spec.portrait_size,
@@ -1349,7 +1365,7 @@ def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
 
     cache[key] = artwork.image_bytes
     st.session_state.colour_previews = cache
-    st.session_state.showing_colours = True
+    st.session_state[showing_key] = True
     st.rerun()
 
 
@@ -3346,7 +3362,9 @@ def _render_grown_up_sheet() -> None:
             "The same scene drawn for a grown-up, so you can colour along with "
             "them. Print both and share the pencils."
         )
-        st.image(processed, width="stretch")
+        # The picture itself is up beside the children's one now; this panel
+        # keeps what is only ever about this sheet — printing it, and saving
+        # its own file.
         if st.button(
             "Print your sheet",
             type="primary",
@@ -4035,16 +4053,20 @@ def _how_long_that_took() -> str:
 
 
 def _render_first_result() -> None:
+    # Wider only when there are two sheets to stand beside each other. A single
+    # doodle reads better in a column narrow enough to take in at a glance;
+    # a pair pinned to 800px was the long scroll being complained about.
+    result_width = "1360px" if st.session_state.get("pair_processed") else "800px"
     st.markdown(
-        """
+        f"""
         <style>
           [data-testid="stHeader"], [data-testid="stToolbar"],
-          [data-testid="stSidebar"], [data-testid="collapsedControl"] {display:none!important;}
-          .block-container,[data-testid="stMainBlockContainer"] {max-width:800px!important;padding:2.5rem 1.15rem 4rem!important;overflow:visible!important;}
-          .happy-title{text-align:center;font-size:1.1rem;font-weight:720;color:#34373b;margin:.5rem 0 .15rem;}
-          .happy-idea{text-align:center;font-size:.94rem;color:#777b81;margin:0 0 1.15rem;}
-          [data-testid="stImage"] img{border:1px solid #e5e7eb;border-radius:1rem;background:#fff;box-shadow:0 10px 30px rgba(20,20,20,.06);}
-          [data-testid="stForm"] [data-testid="InputInstructions"] {display:none!important;}
+          [data-testid="stSidebar"], [data-testid="collapsedControl"] {{display:none!important;}}
+          .block-container,[data-testid="stMainBlockContainer"] {{max-width:{result_width}!important;padding:2.5rem 1.15rem 4rem!important;overflow:visible!important;}}
+          .happy-title{{text-align:center;font-size:1.1rem;font-weight:720;color:#34373b;margin:.5rem 0 .15rem;}}
+          .happy-idea{{text-align:center;font-size:.94rem;color:#777b81;margin:0 0 1.15rem;}}
+          [data-testid="stImage"] img{{border:1px solid #e5e7eb;border-radius:1rem;background:#fff;box-shadow:0 10px 30px rgba(20,20,20,.06);}}
+          [data-testid="stForm"] [data-testid="InputInstructions"] {{display:none!important;}}
         </style>
         """,
         unsafe_allow_html=True,
@@ -4067,7 +4089,21 @@ def _render_first_result() -> None:
     )
     safe_title = html.escape(str(st.session_state.get("current_title", "")))
     st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
-    _render_doodle_with_colours(processed, key_prefix="result")
+    # Side by side when there are two of them. One under the other made a pair
+    # a long scroll, and the whole point of a pair is comparing them.
+    pair_processed = st.session_state.get("pair_processed")
+    if pair_processed:
+        theirs, yours = st.columns(2, gap="large")
+        with theirs:
+            st.caption("Theirs")
+            _render_doodle_with_colours(processed, key_prefix="result")
+        with yours:
+            st.caption("Yours")
+            _render_doodle_with_colours(
+                pair_processed, key_prefix="grown_up", detailed=True
+            )
+    else:
+        _render_doodle_with_colours(processed, key_prefix="result")
     took = _how_long_that_took()
     if took:
         st.caption(took)

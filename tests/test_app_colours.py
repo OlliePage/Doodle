@@ -35,6 +35,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP = str(PROJECT_ROOT / "app.py")
 ASSETS = PROJECT_ROOT / "assets"
 LINE_ART = (ASSETS / "demo_dinosaur.png").read_bytes()
+# A different picture for the grown-up half of a pair, so the two sheets
+# cannot be confused for one another in an assertion.
+OTHER_LINE_ART = (ASSETS / "demo_robot_balloons.png").read_bytes()
 COLOURED = (ASSETS / "demo_robot_balloons.png").read_bytes()
 
 
@@ -92,6 +95,26 @@ def _result_screen() -> AppTest:
     return at
 
 
+def _paired_result_screen(monkeypatch) -> AppTest:
+    """A result screen holding both sheets of a pair.
+
+    The grown-up half is whatever was drawn second; the screen only needs its
+    processed picture and its PDF to render it.
+    """
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = LINE_ART
+    at.session_state["quick_processed"] = LINE_ART
+    at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+    at.session_state["pair_processed"] = OTHER_LINE_ART
+    at.session_state["pair_pdf"] = b"%PDF-1.4 grown-up"
+    at.session_state["current_title"] = "Blue dinosaur"
+    at.session_state["current_metadata"] = {"source": "test"}
+    at.run()
+    return at
+
+
 def test_the_offer_to_colour_it_in_is_on_the_result_screen() -> None:
     at = _result_screen()
     assert not at.exception
@@ -104,7 +127,7 @@ def test_colouring_it_in_shows_the_coloured_copy(coloured) -> None:
 
     assert not at.exception
     assert len(coloured) == 1, "one generation, not one per rerun"
-    assert at.session_state["showing_colours"] is True
+    assert at.session_state["showing_colours_result"] is True
     assert COLOURED in at.session_state["colour_previews"].values()
     assert "black and white" in _captions(at)
 
@@ -124,7 +147,7 @@ def test_the_outlines_come_back(coloured) -> None:
 
     at = _button(at, "show the outlines").click().run()
     assert not at.exception
-    assert at.session_state["showing_colours"] is False
+    assert at.session_state["showing_colours_result"] is False
     assert _has_button(at, "show suggested colours")
 
 
@@ -135,7 +158,7 @@ def test_looking_again_costs_nothing(coloured) -> None:
     at = _button(at, "show suggested colours").click().run()
 
     assert not at.exception
-    assert at.session_state["showing_colours"] is True
+    assert at.session_state["showing_colours_result"] is True
     assert len(coloured) == 1, "the coloured copy is kept, not redrawn"
 
 
@@ -163,7 +186,7 @@ def test_a_failed_attempt_explains_itself_and_keeps_the_picture(monkeypatch) -> 
     at = _button(at, "colour it in for me").click().run()
 
     assert not at.exception
-    assert at.session_state["showing_colours"] is False
+    assert at.session_state["showing_colours_result"] is False
     assert at.session_state["colour_previews"] == {}
     assert at.session_state["quick_processed"] == LINE_ART
 
@@ -253,3 +276,101 @@ def test_ticking_a_character_now_does_not_colour_a_picture_drawn_without_them(
     instruction = coloured[0]["prompt"]
     assert "Ida" not in instruction
     assert APPEARANCE not in instruction
+
+
+def test_the_grown_up_sheet_gets_a_colour_guide_of_its_own(monkeypatch) -> None:
+    """Offering one only on the children's sheet left the more detailed of the
+    two — the one whose many small regions most need a suggestion — with
+    nothing to copy from."""
+
+    at = _paired_result_screen(monkeypatch)
+    assert not at.exception
+
+    keys = [button.key for button in at.button if button.key]
+    assert any(key.startswith("result_") and "colour" in key for key in keys), (
+        f"the children's sheet has no colour control: {keys}"
+    )
+    assert any(key.startswith("grown_up_") and "colour" in key for key in keys), (
+        f"the grown-up sheet has no colour control: {keys}"
+    )
+
+
+def test_showing_colours_on_one_sheet_leaves_the_other_alone(
+    monkeypatch, coloured
+) -> None:
+    """One shared flag meant colouring one sheet coloured the other, and a pair
+    is two pictures a parent may well want to look at differently."""
+
+    at = _paired_result_screen(monkeypatch)
+
+    assert at.session_state["showing_colours_result"] is False
+    assert at.session_state["showing_colours_grown_up"] is False
+
+    for button in at.button:
+        if button.key == "result_make_colours":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("the children's sheet had no colour button")
+
+    assert not at.exception
+    assert at.session_state["showing_colours_result"] is True
+    assert at.session_state["showing_colours_grown_up"] is False, (
+        "colouring one sheet coloured the other"
+    )
+
+
+def test_the_grown_up_guide_asks_for_more_shades() -> None:
+    """A child's page usually gives one shape one colour. A grown-up page has
+    divided the same objects into many small regions, and filling every one of
+    them the same flat green wastes what the drawing is for."""
+
+    from colouring_factory.prompts import build_colour_suggestion_prompt
+
+    child = build_colour_suggestion_prompt()
+    grown_up = build_colour_suggestion_prompt(detailed=True)
+
+    assert "flat, bright, friendly colour" in child
+    assert "family of related shades" in grown_up
+    assert "several greens across the" in grown_up
+    assert "several blues across the panels of one balloon" in grown_up
+    # Both still refuse the thing that stops a page being copyable.
+    for prompt in (child, grown_up):
+        assert "gradients" in prompt
+        assert "Keep every black outline exactly where it is" in prompt
+
+
+def test_a_pair_stands_side_by_side_and_the_page_makes_room(monkeypatch) -> None:
+    """One sheet under the other made a pair a long scroll, and comparing them
+    is the whole point of a pair. The result screen pinned itself to 800px
+    however wide the window was."""
+
+    at = _paired_result_screen(monkeypatch)
+    assert not at.exception
+
+    def columns_holding(node, inside=False, found=None):
+        found = [] if found is None else found
+        for child in getattr(node, "children", {}).values():
+            kind = getattr(child, "type", type(child).__name__)
+            if type(child).__name__ == "Image" and inside:
+                found.append(True)
+            columns_holding(child, inside or kind == "column", found)
+        return found
+
+    assert len(columns_holding(at.main)) >= 2, (
+        "the two sheets are not in columns beside each other"
+    )
+
+    styles = " ".join(str(block.value) for block in at.markdown)
+    assert "max-width:1360px" in styles, (
+        "the result screen did not widen to make room for two sheets"
+    )
+
+
+def test_a_single_doodle_keeps_the_narrow_column() -> None:
+    """A page you can take in at a glance is better for one picture; the width
+    is for the pair, not for everything."""
+
+    at = _result_screen()
+    styles = " ".join(str(block.value) for block in at.markdown)
+    assert "max-width:800px" in styles
