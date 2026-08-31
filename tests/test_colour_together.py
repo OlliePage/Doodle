@@ -105,20 +105,28 @@ def test_a_grown_up_drawing_for_themselves_is_never_paired() -> None:
 
 @pytest.fixture
 def drawn(monkeypatch):
-    """Record what was asked for, and answer with two distinguishable pictures."""
+    """Record what was asked for, and answer with two distinguishable pictures.
+
+    Each picture is now its own call to generate_with_provider rather than
+    one entry in a prompts list handed to a single call, so which image
+    comes back is picked from the detail level baked into that job's own
+    prompt — the phrase only a grown-up sheet's prompt carries — rather
+    than from its position in a shared list.
+    """
 
     asked: list[str] = []
 
     def fake_generate(**kwargs):
-        asked.extend(kwargs["prompts"])
+        prompt = kwargs["prompts"][0]
+        asked.append(prompt)
+        is_grown_up = "150 or more small colouring regions" in prompt
         return [
             GeneratedArtwork(
-                image_bytes=CHILD_ART if index == 0 else GROWN_UP_ART,
+                image_bytes=GROWN_UP_ART if is_grown_up else CHILD_ART,
                 prompt=prompt,
                 provider="OpenAI",
                 model="gpt-image-2",
             )
-            for index, prompt in enumerate(kwargs["prompts"])
         ]
 
     def fake_briefs(idea, count, **kwargs):

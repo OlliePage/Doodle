@@ -123,6 +123,37 @@ the bottom of one and inside a tab on another.
 homepage. The two used to read `Draw another` and `New doodle`, which describe
 each other.
 
+## While it draws
+
+A batch of more than one picture is drawn one at a time, in one script run
+each, rather than inside a single blocking call: the page comes back to life
+between pictures with a live "Drawing 2 of 4" and a Stop drawing button,
+where a whole-batch call would leave nothing on the page pressable until
+every picture was done. The count is plain text, never a progress bar —
+there is no fraction of a picture to show, only whole ones finished.
+
+Stopping keeps whatever has already been drawn and goes straight to the
+result screen with it, exactly as if that many had been asked for. Only
+when nothing at all has been drawn yet does it return to the homepage, idea
+still in the box. A request already sent to the drawing service finishes
+and is charged regardless of when Stop is pressed — the copy says so
+plainly rather than implying the picture in flight can be recalled.
+
+Pairing still draws exactly two pictures this way, and a scene starring
+saved characters still draws one at a time through its own call
+(refine_with_provider, carrying reference photographs) rather than
+generate_with_provider's — restructuring the loop changed nothing about
+either rule, only how many network calls happen inside one script run.
+
+The built-in-sample path draws nothing and costs nothing, so it keeps its
+single blocking call and gains no Stop button: there would be nothing for
+it to stop.
+
+The homepage's settings line has no business on this screen — those
+questions are already answered — and is hidden here outright rather than
+left to not be drawn, the same defensiveness the corner "Saved doodles (n)"
+link and the settings-row CSS elsewhere already show it.
+
 ## One idea, two readers
 
 "Who it is for" runs from a toddler's dozen large regions to a grown-up's
