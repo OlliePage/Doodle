@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from textwrap import dedent
 
@@ -138,6 +139,66 @@ TARGET_RULES = {
     ),
 }
 
+# Shared by every builder below, so the colouring-book contract cannot drift
+# between a fresh drawing, a refinement, a character scene and a caricature.
+VISUAL_RULES = (
+    "- Pure white background.\n"
+    "- Black line work only: no colour, grey, shading, shadows, gradients or hatching.\n"
+    "- Every enclosed shape must be left white, so it can be coloured in.\n"
+    "- Coherent anatomy and friendly expressions.\n"
+    "- No border, words, letters, numbers, logos, signatures or watermark.\n"
+    "- Nothing important may be cropped by the image edge."
+)
+
+CHARACTER_LIKENESS_RULE = (
+    "The attached pictures are the reference for how these characters really "
+    "look. Draw each one as a friendly cartoon who is unmistakably recognisable "
+    "as that particular character rather than a generic one. Draw hair as one or "
+    "two large closed shapes that follow its real shape and length, never as "
+    "separate strands. Show markings, worn patches and freckles as outlined "
+    "shapes to colour, never as shading."
+)
+
+# A face is small on a page and carries all of the recognition, so it gets its
+# own allowance while the rest of the sheet stays colourable. Without this, a
+# face at the toddler level comes back as a stock cartoon child wearing the
+# reference's glasses; with it, the same page keeps its big simple trees.
+FACE_DETAIL_EXEMPTION = (
+    "Detail exception, which overrides the reader profile for one part of the "
+    "picture only: each person's head — the face, the hair and the glasses — may "
+    "carry as much fine line work as it takes to be recognisably them, and should "
+    "be drawn larger in the frame than realistic proportion would suggest. "
+    "Everything else in the picture, including bodies, clothes and the whole "
+    "setting, obeys the reader profile exactly: few, large, simple shapes with "
+    "wide gaps."
+)
+
+# The polite version of this rule was ignored: told to leave the corners empty,
+# the model filled them with a garden and added a decorative border. Refusing
+# each thing by name is what worked.
+BADGE_CORNERS_RULE = (
+    "Composition rules for a round badge, which override everything else:\n"
+    "- This picture will be cut into a circle. The four corners of the square are "
+    "cut away and thrown out, so they must be left completely blank white.\n"
+    "- Draw NOTHING in the corners: no background, no scenery, no border, no "
+    "frame, no circle, no decorative edge of any kind.\n"
+    "- The background behind the subject must be plain empty white. Do not invent "
+    "a setting, a room, a garden, foliage or a pattern.\n"
+    "- Place the whole head and shoulders inside an imaginary circle that touches "
+    "the four edges of the square, centred, filling most of that circle."
+)
+
+ORDINALS = (
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+)
+
 
 def build_colouring_prompt(
     concept: str,
@@ -165,13 +226,7 @@ def build_colouring_prompt(
     Scene: {scene}
 
     Visual rules:
-    - Pure white background.
-    - Black line work only: no colour, grey, shading, shadows, gradients or hatching.
-    - Every enclosed shape must be left white, so it can be coloured in.
-    - Coherent anatomy and friendly expressions.
-    - No border, words, letters, numbers, logos, signatures or watermark.
-    - Do not imitate or reproduce an existing television, film, book or game character.
-    - Nothing important may be cropped by the image edge.
+    {VISUAL_RULES}
 
     Style profile: {style.instruction}
     Reader profile: {level.regions}
@@ -218,12 +273,7 @@ def build_refinement_prompt(
     props, background and composition.
 
     Visual rules, which the changed picture must still obey:
-    - Pure white background.
-    - Black line work only: no colour, grey, shading, shadows, gradients or hatching.
-    - Every enclosed shape must be left white, so it can be coloured in.
-    - Coherent anatomy and friendly expressions.
-    - No border, words, letters, numbers, logos, signatures or watermark.
-    - Nothing important may be cropped by the image edge.
+    {VISUAL_RULES}
 
     Style profile: {style.instruction}
     Reader profile: {level.regions}
@@ -257,6 +307,114 @@ def build_colour_suggestion_prompt() -> str:
     wherever the original left it white.
 
     No shading, gradients, texture, outlines in colour, watermark or text.
+    """
+
+    return dedent(prompt).strip()
+
+
+def build_character_scene_prompt(
+    concept: str,
+    characters: Sequence[tuple[str, str, str]],
+    *,
+    age_profile: str = "2-3 years",
+    style_name: str = "Toddler bold",
+    target: str = "A4 page",
+    extra_instructions: str = "",
+    variation_brief: str = "",
+) -> str:
+    """A scene starring saved characters, drawn from their reference pictures.
+
+    `characters` is (name, kind, marks) in the same order the reference pictures
+    are attached, because that order is the only thing telling the model which
+    face is which.
+    """
+
+    concept = concept.strip()
+    if not concept:
+        raise ValueError("A picture idea is required.")
+    if not characters:
+        raise ValueError("At least one character is required.")
+
+    scene = variation_brief.strip() or concept
+    style = STYLE_PRESETS.get(style_name, STYLE_PRESETS["Toddler bold"])
+    level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS[DEFAULT_LEVEL])
+    target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
+
+    introductions = []
+    for index, (name, kind, marks) in enumerate(characters):
+        ordinal = ORDINALS[index] if index < len(ORDINALS) else f"number {index + 1}"
+        article = "person" if kind == "person" else "character"
+        line = f"The {ordinal} picture is {name}, a {article}."
+        if marks.strip():
+            line += f" {marks.strip()}"
+        introductions.append(line)
+
+    exemption = (
+        f"\n{FACE_DETAIL_EXEMPTION}\n"
+        if any(kind == "person" for _, kind, _ in characters)
+        else ""
+    )
+
+    prompt = f"""
+    Create an original black-and-white colouring-book illustration for {level.reader}.
+
+    Scene: {scene}
+
+    Who is in it:
+    {chr(10).join(introductions)}
+
+    {CHARACTER_LIKENESS_RULE}
+    {exemption}
+    Visual rules:
+    {VISUAL_RULES}
+
+    Style profile: {style.instruction}
+    Reader profile: {level.regions}
+    Line profile: {level.line_rule}
+    Detail profile: {level.texture_rule}
+    Composition profile: {target_rule}
+    """
+
+    if extra_instructions.strip():
+        prompt += f"\nAdditional direction: {extra_instructions.strip()}\n"
+
+    return dedent(prompt).strip()
+
+
+def build_caricature_prompt(
+    name: str, kind: str, marks: str, *, age_profile: str = "6-9 years"
+) -> str:
+    """A head-and-shoulders caricature, composed for a round badge.
+
+    The default level is 6-9 rather than the toddler default because a
+    caricature is nothing but a face, so the detail belongs everywhere.
+    """
+
+    level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS["6-9 years"])
+    subject = "person" if kind == "person" else "character"
+    marks_line = f" {marks.strip()}" if marks.strip() else ""
+
+    prompt = f"""
+    Create an original black-and-white colouring-book caricature.
+
+    Subject: a good-natured caricature of {name}, the {subject} in the attached
+    picture, head and shoulders only, facing forward.{marks_line}
+
+    {CHARACTER_LIKENESS_RULE}
+
+    Caricature direction: this is a seaside caricature, so exaggerate boldly and
+    comically. Draw the head much larger than the body. Push the two or three
+    most distinctive features far beyond life while keeping them unmistakably
+    recognisable. Warm and affectionate, never unkind or ugly. A polite,
+    accurate, flattering portrait is the wrong answer.
+
+    Visual rules:
+    {VISUAL_RULES}
+
+    {BADGE_CORNERS_RULE}
+
+    Line profile: {level.line_rule}
+    Detail profile: {level.texture_rule}
     """
 
     return dedent(prompt).strip()

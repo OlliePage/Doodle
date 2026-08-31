@@ -37,7 +37,6 @@ def test_prompt_contains_concept_and_print_rules() -> None:
     assert "Black line work only" in prompt
     assert "No border, words" in prompt
     assert "circular crop" in prompt
-    assert "existing television" in prompt
 
 
 def test_a_variation_brief_replaces_the_bare_concept() -> None:

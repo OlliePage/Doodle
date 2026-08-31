@@ -74,8 +74,8 @@ _ENTRIES: dict[str, Guidance] = {
             "brand name."
         ),
         fix=(
-            "Describe the picture in your own words instead of naming a character from "
-            "television or film."
+            "The provider's own filter rejected that wording. Describing the "
+            "picture in your own words usually gets through."
         ),
         control="Picture idea, on the generation form",
     ),
