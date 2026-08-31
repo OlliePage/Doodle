@@ -275,6 +275,51 @@ def test_a_change_moves_the_picture_and_its_badge(monkeypatch) -> None:
     assert new_key in at.session_state["badge_previews"]
 
 
+def test_going_back_moves_the_picture_and_its_badge() -> None:
+    """ "Go back to this" must move the picture on screen, and the badge with it.
+
+    The button set current_version and called _set_current_artwork but never
+    _prepare_quick_outputs, so quick_processed (what the result screen and the
+    badge strip both read) stayed on the version the user had just left: the
+    picture on screen looked untouched by the click.
+    """
+
+    original = GeneratedArtwork(
+        image_bytes=ARTWORK, prompt="original", provider="OpenAI", model="gpt-image-2"
+    )
+    changed = GeneratedArtwork(
+        image_bytes=NEW_ARTWORK,
+        prompt="changed",
+        provider="OpenAI",
+        model="gpt-image-2",
+    )
+    chain = history.append(history.start(original), changed, "give it a hat", parent=0)
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = NEW_ARTWORK
+    at.session_state["quick_processed"] = NEW_ARTWORK
+    at.session_state["quick_pdf"] = PDF
+    at.session_state["current_title"] = "Blue dinosaur"
+    at.session_state["current_metadata"] = {
+        "source": "test",
+        "concept": "Blue dinosaur",
+    }
+    at.session_state["doodle_versions"] = chain
+    at.session_state["current_version"] = 1
+    at.run()
+
+    at = _button(at, "Go back to this").click().run()
+
+    assert not at.exception
+    assert at.session_state["current_version"] == 0
+    assert at.session_state["current_raw"] == ARTWORK
+    assert at.session_state["quick_processed"] is not None
+    assert at.session_state["quick_processed"] != NEW_ARTWORK
+    new_key = _content_key(at.session_state["quick_processed"])
+    assert new_key in at.session_state["badge_previews"]
+
+
 def test_swapping_an_alternative_moves_the_badge_too() -> None:
     at = _result_screen()
     at.session_state["candidates"] = [

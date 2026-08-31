@@ -1324,6 +1324,10 @@ def _render_refine_controls(*, key_prefix: str) -> None:
                             title=st.session_state.current_title,
                             metadata=st.session_state.current_metadata,
                         )
+                        # _set_current_artwork only sets current_raw: without
+                        # rebuilding quick_processed/quick_pdf here too, the
+                        # result screen kept showing the version just left.
+                        _prepare_quick_outputs()
                         st.rerun()
 
     with st.form(f"{key_prefix}_refine", clear_on_submit=True):
