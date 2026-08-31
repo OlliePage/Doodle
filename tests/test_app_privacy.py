@@ -53,6 +53,26 @@ def test_the_privacy_paragraph_discloses_the_photograph_being_sent() -> None:
     ), "no sentence discloses that a photograph is sent to draw the portrait"
 
 
+def test_the_privacy_paragraph_discloses_the_name_and_marks_being_sent() -> None:
+    """FB-10: the paragraph enumerated what leaves as though the list were
+    complete, omitting the character's name and the sentence the parent
+    wrote describing their face — both sent with every picture alongside
+    the photograph (build_caricature_prompt and build_character_scene_prompt
+    in colouring_factory/prompts.py both interpolate name and marks)."""
+
+    sentences = re.split(r"(?<=[.!?])\s+", _about_tab_text())
+    assert any(
+        "name" in sentence.lower()
+        and "photograph" in sentence.lower()
+        and ("sent" in sentence.lower() or "sends" in sentence.lower())
+        for sentence in sentences
+    ), "no sentence discloses that the character's name is sent"
+    assert any(
+        "recognisable" in sentence.lower() or "description" in sentence.lower()
+        for sentence in sentences
+    ), "no sentence discloses that the marks/description text is sent"
+
+
 def test_the_privacy_paragraph_does_not_claim_everything_else_stays_put() -> None:
     """Regression guard for the specific false claim this fix removed.
 
