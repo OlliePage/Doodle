@@ -1380,6 +1380,17 @@ def _render_characters_screen() -> None:
 
     st.divider()
     st.subheader("Add a character")
+    # The only screen that asks for a photograph of a child, so the fact and
+    # the consequence belong right here, not on a Studio tab this journey
+    # never visits. The photograph is sent every time a picture is drawn
+    # with this character, not just once: see _draw_character_portrait and
+    # every load_character_image(..., portrait=False) call site.
+    st.caption(
+        "Their photograph is sent to the drawing service you have "
+        "connected, each time a picture is drawn with them — now, for "
+        "their portrait, and again for every scene or badge afterwards. "
+        "Removing a character deletes the copy Doodle holds."
+    )
 
     uploaded = st.file_uploader(
         "Add a picture",

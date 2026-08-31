@@ -1124,3 +1124,17 @@ def test_the_add_screen_offers_a_route_to_connect_when_no_key_is_present(
     assert at.session_state["screen"] == "characters"
 
 
+def test_a_privacy_statement_is_on_the_characters_screen_itself() -> None:
+    """FB-09: the only screen that asks for a photograph of a child said
+    nothing about where it goes; the disclosure lived only on Doodle
+    Studio's About tab, a route this journey never visits."""
+
+    at = _characters_screen()
+
+    captions = " ".join(str(caption.value) for caption in at.caption).lower()
+    assert "photograph" in captions
+    assert "sent" in captions
+    assert "removing a character" in captions
+    assert "deletes" in captions
+
+
