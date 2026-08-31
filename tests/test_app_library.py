@@ -115,7 +115,14 @@ def test_the_library_returns_to_the_doodle_you_came_from() -> None:
     assert at.session_state["screen"] == "result"
 
 
-def test_opening_a_saved_doodle_loads_it_into_the_studio() -> None:
+def test_opening_a_saved_doodle_lands_where_a_new_one_does() -> None:
+    """One picture, one screen. Opening a saved doodle used to go to Doodle
+    Studio while drawing one went to the result screen, so the same doodle had
+    two entirely different interfaces depending on how you reached it — a
+    friendly page with the drawing and four buttons, or a numbered form with
+    threshold sliders and a despeckle menu. Studio is still one click away
+    under "Other sizes & advanced options"."""
+
     _seed()
     at = AppTest.from_file(APP, default_timeout=120)
     at.session_state["screen"] = "library"
@@ -123,10 +130,32 @@ def test_opening_a_saved_doodle_loads_it_into_the_studio() -> None:
 
     at = _button(at, "open").click().run()
     assert not at.exception
-    assert at.session_state["screen"] == "studio"
+    assert at.session_state["screen"] == "result"
     assert at.session_state["current_title"] == "Blue dinosaur"
     assert at.session_state["current_raw"] == ARTWORK
-    assert "Blue dinosaur is open" in _text(at)
+    # It arrives ready to print, the same as a freshly drawn one.
+    assert at.session_state["quick_processed"]
+    assert at.session_state["quick_pdf"]
+    # And already saved, because it came out of the library.
+    assert at.session_state["quick_saved"] is True
+
+
+def test_opening_a_saved_doodle_leaves_no_pair_behind() -> None:
+    """The result screen shows a grown-up sheet beside the children's one when
+    a pair was drawn. A saved doodle has no pair, and the previous doodle's
+    must not be standing next to it."""
+
+    _seed()
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "library"
+    at.session_state["pair_processed"] = ARTWORK
+    at.session_state["pair_pdf"] = b"%PDF-1.4 stale"
+    at.run()
+
+    at = _button(at, "open").click().run()
+    assert not at.exception
+    assert not at.session_state["pair_processed"]
+    assert not at.session_state["pair_pdf"]
 
 
 def test_deleting_a_saved_doodle_asks_before_it_happens() -> None:
