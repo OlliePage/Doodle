@@ -55,7 +55,7 @@ class _FakeStreamlit(types.ModuleType):
     def tabs(self, labels):
         return [_Context() for _ in labels]
 
-    def columns(self, spec):
+    def columns(self, spec, *args, **kwargs):
         count = spec if isinstance(spec, int) else len(spec)
         return [_Context() for _ in range(count)]
 

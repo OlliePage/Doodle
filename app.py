@@ -36,7 +36,7 @@ from colouring_factory.characters import (
     update_character,
     update_character_portrait,
 )
-from colouring_factory.demo import list_demo_artwork
+from colouring_factory.demo import assets_directory, list_demo_artwork
 from colouring_factory.credentials import (
     delete_provider_key,
     mask_key,
@@ -1377,6 +1377,83 @@ def _remember_chosen(character_id: str) -> None:
     )
 
 
+# What each style gives you, in one line, shown under its name. The example
+# pictures beside them were drawn by Doodle itself at that setting, so a parent
+# is looking at the real answer rather than a schematic of it.
+# Not a STYLE_PRESETS entry and never written to settings.json. It is a mode
+# with a session-scoped prerequisite — the dropped picture — dressed as a
+# style, so keeping it out of the persisted list is what stops the app booting
+# tomorrow into a caricature with nothing to caricature.
+CARICATURE_STYLE = "A caricature"
+
+STYLE_BLURBS = {
+    "A scene": "The subject doing something, somewhere.",
+    "Just the things": "One to three big objects, nothing behind them.",
+    CARICATURE_STYLE: "Your picture drawn the way a seaside artist would.",
+}
+
+STYLE_EXAMPLES = {
+    "A scene": "style_a_scene.png",
+    "Just the things": "style_just_the_things.png",
+    CARICATURE_STYLE: "style_a_caricature.png",
+}
+
+
+@st.cache_data(show_spinner=False)
+def _style_example(filename: str) -> bytes | None:
+    """The committed example drawing for a style, or nothing if it is missing.
+
+    Missing is survivable on purpose: the picker still lists the style by name
+    with its sentence, so a lost or not-yet-drawn example costs the illustration
+    and not the control.
+    """
+
+    path = assets_directory() / filename
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
+def _render_style_picker(current: str, *, caricature: bool) -> str:
+    """One row per style: an example drawing, its name, and what it gives you.
+
+    `caricature` is the only style that cannot be chosen ahead of time, because
+    it needs a picture to work from. It is offered only while one is attached
+    and is never written to the settings file — a style saved to disk would
+    bring the app back tomorrow set to caricature with nothing to caricature.
+    """
+
+    offered = [*QUICK_STYLE_CHOICES]
+    if caricature:
+        offered.append(CARICATURE_STYLE)
+
+    chosen = current if current in offered else QUICK_STYLE_CHOICES[0]
+    if st.session_state.get("home_style") in offered:
+        chosen = str(st.session_state["home_style"])
+
+    st.caption("Drawing style")
+    for name in offered:
+        example = _style_example(STYLE_EXAMPLES.get(name, ""))
+        picture_col, words_col = st.columns([1, 3], vertical_alignment="center")
+        with picture_col:
+            if example is not None:
+                st.image(example, width=76)
+        with words_col:
+            picked = name == chosen
+            if st.button(
+                name,
+                key=f"home_style_pick_{_slug(name)}",
+                type="primary" if picked else "tertiary",
+                width="stretch",
+                disabled=picked,
+            ):
+                st.session_state.home_style = name
+                st.rerun()
+            st.caption(STYLE_BLURBS.get(name, ""))
+    return chosen
+
+
 def _render_home_options() -> None:
     """The questions the homepage asks before it draws anything.
 
@@ -1391,6 +1468,7 @@ def _render_home_options() -> None:
 
     settings = load_settings()
     options = quick_drawing_options(settings)
+    dropped = _dropped_picture()
 
     # Read the widgets' own state for the labels. The saved settings are one
     # rerun behind the control the user has just moved, so a label built from
@@ -1453,12 +1531,11 @@ def _render_home_options() -> None:
             else:
                 pair_grown_up = False
         with st.popover(str(shown_style).lower(), type="tertiary"):
-            style = st.selectbox(
-                "Drawing style",
-                list(QUICK_STYLE_CHOICES),
-                index=list(QUICK_STYLE_CHOICES).index(options["style"]),
-                key="home_style",
-            )
+            # A name and an example, not a name alone. "Simple objects" and
+            # "Badge portrait" told a parent nothing about what they would get,
+            # so the only way to find out was to buy a drawing and look at it.
+            # Each row is the picture Doodle actually returns at that setting.
+            style = _render_style_picker(options["style"], caricature=bool(dropped))
         # Rendered from the first run, unlike Saved doodles (n) in the
         # corner: hiding this until a cast existed left no control anywhere
         # that reached the characters screen, so a parent could never add
@@ -1537,7 +1614,16 @@ def _render_home_options() -> None:
     chosen = {
         "quick_alternatives": int(alternatives or options["alternatives"]),
         "quick_age_profile": str(age_profile or options["age_profile"]),
-        "quick_style": str(style or options["style"]),
+        # The caricature is deliberately excluded, so choosing it keeps
+        # whatever was saved before. It needs a dropped picture to mean
+        # anything, and a picture lives only in this session — saving it would
+        # bring the app back tomorrow set to a style it cannot honour, with
+        # the badge redraw and Studio's own profile list inheriting it too.
+        "quick_style": str(
+            options["style"]
+            if style == CARICATURE_STYLE
+            else (style or options["style"])
+        ),
         "quick_pair_grown_up": bool(pair_grown_up),
     }
     if any(settings.get(key) != value for key, value in chosen.items()):
@@ -2818,6 +2904,36 @@ def _build_generation_plan(idea: str) -> None:
 
     chosen = _cast_for_drawing()
     dropped = _dropped_picture()
+
+    # A caricature is one picture of one thing, not a scene, so it takes the
+    # short road out of here before any of the scene machinery runs. Several
+    # alternatives would be identical, because the caricature builder takes no
+    # variation brief; pairing would draw the same face twice; and the picture
+    # is composed for a square rather than an A4 page.
+    if dropped and str(st.session_state.get("home_style", "")) == CARICATURE_STYLE:
+        st.session_state.generation_jobs = [
+            {
+                "prompt": build_caricature_prompt(
+                    "",
+                    "object",
+                    "",
+                    str(st.session_state.get("dropped_picture_appearance", "")),
+                    age_profile=str(options["age_profile"]),
+                ),
+                "level": str(options["age_profile"]),
+                "brief": "",
+                "square": True,
+            }
+        ]
+        st.session_state.generation_collected = []
+        st.session_state.generation_seconds = []
+        st.session_state.generation_uses_references = True
+        st.session_state.generation_references = (dropped,)
+        st.session_state.generation_chosen_ids = []
+        st.session_state.generation_pairing = False
+        st.session_state.generation_random_seed_base = 0
+        return
+
     if dropped and chosen:
         # The cast picker gives a slot back while a picture is attached, but
         # only by disabling further ticks — an already-ticked box stays enabled
@@ -2943,7 +3059,10 @@ def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
             prompt=job["prompt"],
             reference_images=st.session_state.generation_references,
             model=model,
-            size=spec.portrait_size,
+            # A caricature is framed with clear space all round rather than
+            # composed for a portrait page, and the characters screen already
+            # draws its own on a square for the same reason.
+            size=spec.square_size if job.get("square") else spec.portrait_size,
             quality=quality,
         )
     else:
