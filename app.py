@@ -272,17 +272,26 @@ st.markdown(
 st.html(
     f"""
     <style>
+      /* Selectable on purpose. The badge exists so two people can confirm
+         they are running the same code, which means reading it out is not
+         enough — it has to be copyable. One click takes the whole label. */
       .doodle-build {{
         position: fixed;
-        right: .75rem;
-        bottom: .5rem;
+        right: .4rem;
+        bottom: .15rem;
         z-index: 1000;
+        padding: .35rem .5rem;
         font-size: .7rem;
         font-variant-numeric: tabular-nums;
         color: var(--doodle-muted, #676b70);
-        opacity: .7;
-        pointer-events: none;
-        user-select: none;
+        opacity: .55;
+        cursor: text;
+        -webkit-user-select: all;
+        user-select: all;
+        transition: opacity .15s ease;
+      }}
+      .doodle-build:hover {{
+        opacity: 1;
       }}
     </style>
     <div class="doodle-build">{build_label()}</div>
