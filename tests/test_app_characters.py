@@ -15,7 +15,7 @@ import pytest
 from PIL import Image
 from streamlit.testing.v1 import AppTest
 
-from colouring_factory import appearance, generators
+from colouring_factory import appearance, characters, generators
 from colouring_factory.characters import (
     characters_root,
     delete_character,
@@ -1786,3 +1786,69 @@ def test_redrawing_a_portrait_is_disabled_when_the_provider_cannot_use_reference
     assert redraw.disabled is True
     captions = " ".join(str(caption.value) for caption in at.caption)
     assert "recraft cannot draw from a picture" in captions.lower()
+
+
+def test_the_character_list_is_not_re_read_from_disk_on_every_rerun(
+    monkeypatch,
+) -> None:
+    """FB-19/ARCH-02: every other disk-heavy read in app.py is cached; this
+    one re-parsed every character's JSON (and, through the portrait
+    thumbnail, re-decoded every PNG) on every single interaction anywhere on
+    the screen, whether or not it had anything to do with the cast."""
+
+    save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    calls = {"n": 0}
+    real_list_characters = characters.list_characters
+
+    def counting_list_characters():
+        calls["n"] += 1
+        return real_list_characters()
+
+    monkeypatch.setattr(characters, "list_characters", counting_list_characters)
+
+    at = _characters_screen()
+    first_run_calls = calls["n"]
+    assert first_run_calls >= 1
+
+    # An interaction on the very same screen with nothing to do with the
+    # cast: typing a name for a character not yet saved.
+    at.text_input(key="character_name").set_value("Someone else").run()
+
+    assert calls["n"] == first_run_calls
+
+
+def test_adding_a_character_directly_is_visible_on_the_very_next_rerun() -> None:
+    """Guards against a cache keyed on a counter this feature would have to
+    remember to bump at every mutation site, rather than on the store's
+    real state: a character saved by any means must show up the moment the
+    screen renders again, not only inside whichever run happened to save
+    it."""
+
+    at = _characters_screen()
+    assert not any("Ida" in str(block.value) for block in at.markdown)
+
+    save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    # An unrelated rerun of the same already-open screen, not a fresh
+    # AppTest instance: this is what must notice the change.
+    at.text_input(key="character_name").set_value("").run()
+
+    assert any("Ida" in str(block.value) for block in at.markdown)
+
+
+def test_deleting_a_character_directly_is_invisible_on_the_very_next_rerun() -> None:
+    save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+    at = _characters_screen()
+    assert any("Ida" in str(block.value) for block in at.markdown)
+
+    delete_character(list_characters()[0].id)
+    at.text_input(key="character_name").set_value("").run()
+
+    assert not any("Ida" in str(block.value) for block in at.markdown)

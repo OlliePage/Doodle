@@ -7,7 +7,9 @@ import pytest
 from PIL import Image
 
 from colouring_factory.characters import (
+    character_portrait_mtime,
     characters_root,
+    characters_signature,
     delete_character,
     list_characters,
     load_character,
@@ -375,3 +377,46 @@ def test_a_character_json_whose_id_disagrees_with_its_folder_uses_the_folder() -
 
     loaded = load_character(character_id)
     assert loaded.id == character_id
+
+
+def test_the_signature_changes_when_a_character_is_added() -> None:
+    before = characters_signature()
+    save_character(photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks="")
+    assert characters_signature() != before
+
+
+def test_the_signature_changes_when_a_character_is_deleted() -> None:
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+    )
+    before = characters_signature()
+    delete_character(character_id)
+    assert characters_signature() != before
+
+
+def test_the_signature_changes_when_a_portrait_is_redrawn() -> None:
+    character_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+    )
+    before = characters_signature()
+    update_character_portrait(character_id, PORTRAIT + b"-redrawn")
+    assert characters_signature() != before
+
+
+def test_the_signature_is_unchanged_when_nothing_changes() -> None:
+    save_character(photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks="")
+    assert characters_signature() == characters_signature()
+
+
+def test_the_portrait_mtime_changes_only_for_the_character_that_was_redrawn() -> None:
+    kept_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Kept", kind="person", marks=""
+    )
+    redrawn_id = save_character(
+        photo=PHOTO, portrait=PORTRAIT, name="Redrawn", kind="person", marks=""
+    )
+    kept_before = character_portrait_mtime(kept_id)
+
+    update_character_portrait(redrawn_id, PORTRAIT + b"-redrawn")
+
+    assert character_portrait_mtime(kept_id) == kept_before

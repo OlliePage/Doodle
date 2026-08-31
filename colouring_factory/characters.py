@@ -203,6 +203,45 @@ def list_characters() -> list[Character]:
     return sorted(found, key=lambda character: character.created_at, reverse=True)
 
 
+def _mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def characters_signature() -> tuple[tuple[str, int, int], ...]:
+    """A cheap fingerprint of the whole store's current state.
+
+    app.py reruns whichever screen lists or thumbnails characters on every
+    interaction anywhere on it — Streamlit's own model, not a bug in this
+    feature — so caching those reads (a full JSON parse and, for a
+    thumbnail, a full PNG decode, per character) needs a way to know when to
+    invalidate that costs far less than the read itself. One stat() call per
+    file, no open, no parse, no decode, changes on exactly the occasions
+    that matter: a folder's own timestamp on an add or a delete,
+    character.json's or portrait.png's on an edit or a redraw. Trusting the
+    real filesystem here rather than a counter this module would have to
+    remember to bump at every call site also means a character saved
+    directly (as every test in this file does, and as a future caller might)
+    is picked up correctly with no extra wiring.
+    """
+
+    root = characters_root()
+    signature = []
+    for folder in sorted(root.iterdir()):
+        if not folder.is_dir():
+            continue
+        signature.append(
+            (
+                folder.name,
+                _mtime_ns(folder / "character.json"),
+                _mtime_ns(folder / "portrait.png"),
+            )
+        )
+    return tuple(signature)
+
+
 def load_character(character_id: str) -> Character:
     character = _read(_folder_for(character_id))
     if character is None:
@@ -215,6 +254,13 @@ def load_character_image(character_id: str, *, portrait: bool = True) -> bytes:
     if not chosen.exists():
         raise FileNotFoundError(f"Character {character_id} has no such picture.")
     return chosen.read_bytes()
+
+
+def character_portrait_mtime(character_id: str) -> int:
+    """The portrait file's own modification time, for cache-busting a
+    decoded copy of it without reading or decoding the file to check."""
+
+    return _mtime_ns(_folder_for(character_id) / "portrait.png")
 
 
 def load_character_portrait(character_id: str) -> bytes | None:

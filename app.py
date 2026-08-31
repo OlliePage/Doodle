@@ -16,6 +16,9 @@ from colouring_factory.browser_print import print_trigger_html
 from colouring_factory.calibration import profile_from_measurements
 from colouring_factory.characters import (
     CHARACTER_KINDS,
+    Character,
+    character_portrait_mtime,
+    characters_signature,
     delete_character,
     list_characters,
     load_character_image,
@@ -691,6 +694,38 @@ def _calibration_pdf() -> bytes:
     return create_calibration_pdf()
 
 
+@st.cache_data(show_spinner=False)
+def _cached_characters(signature: tuple) -> list[Character]:
+    return list_characters()
+
+
+def _characters() -> list[Character]:
+    """The saved cast, re-parsed from disk only when something about it has
+    actually changed (FB-19/ARCH-02): every other disk-heavy read in this
+    file is cached, but this one used to re-read and re-parse every
+    character's JSON on every interaction anywhere on the screen it renders
+    into, including one that has nothing to do with the cast."""
+
+    return _cached_characters(characters_signature())
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def _cached_character_portrait(
+    character_id: str, portrait_mtime_ns: int
+) -> bytes | None:
+    return load_character_portrait(character_id)
+
+
+def _character_portrait(character_id: str) -> bytes | None:
+    """A character's portrait, decoded once and reused until that specific
+    portrait file is rewritten — a redraw changes its own mtime and busts
+    only its own cache entry, leaving every other character's untouched."""
+
+    return _cached_character_portrait(
+        character_id, character_portrait_mtime(character_id)
+    )
+
+
 def _set_current_artwork(raw: bytes, *, title: str, metadata: dict) -> None:
     st.session_state.current_raw = raw
     st.session_state.current_title = title
@@ -981,7 +1016,7 @@ def _render_home_options() -> None:
     # quick_drawing_options applies to the saved settings: an id left over
     # from a character who has since been deleted must not be counted.
     chosen_ids = set(st.session_state.get("chosen_characters", []))
-    cast = list_characters()
+    cast = _characters()
     active_spec = get_provider(_active_provider_id())
 
     with st.container(
@@ -1061,7 +1096,7 @@ def _render_home_options() -> None:
                             [1, 4], vertical_alignment="center"
                         )
                         with portrait_col:
-                            portrait = load_character_portrait(character.id)
+                            portrait = _character_portrait(character.id)
                             if portrait is not None:
                                 st.image(portrait, width=36)
                             else:
@@ -1391,7 +1426,7 @@ def _render_characters_screen() -> None:
     # even though nothing about it stops it drawing a portrait.
     can_describe = bool(api_key) and bool(spec.text_model)
 
-    characters = list_characters()
+    characters = _characters()
     if not characters:
         st.info("No characters yet. Add your first one below.")
     else:
@@ -1405,7 +1440,7 @@ def _render_characters_screen() -> None:
                     # character after the bad one, and the add form, gone
                     # with no control left on the page to reach it. Degrading
                     # to a placeholder keeps the name and the delete button.
-                    portrait = load_character_portrait(character.id)
+                    portrait = _character_portrait(character.id)
                     if portrait is not None:
                         st.image(portrait, width="stretch")
                     else:
@@ -2192,7 +2227,7 @@ def _resolve_cast(character_ids) -> list[tuple[str, str, str, str, str]]:
     and breaking the caller.
     """
 
-    by_id = {character.id: character for character in list_characters()}
+    by_id = {character.id: character for character in _characters()}
     return [
         (
             character.id,
