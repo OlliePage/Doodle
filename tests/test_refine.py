@@ -203,6 +203,28 @@ def test_a_missing_key_is_refused_before_any_request() -> None:
         assert caught.value.code == "missing_key"
 
 
+def test_a_request_with_no_picture_at_all_is_refused_the_same_way_everywhere() -> None:
+    """The design allows either image_bytes or reference_images to be empty,
+    never both. Before this check existed, whichever provider happened to be
+    active answered differently: OpenAI raised a bare ValueError with no
+    code, Recraft raised an IndexError indexing into an empty list, and
+    Google silently sent a text-only request — none of which the interface
+    can show as this app's own error, so guidance() never even saw it.
+    Unreachable today because every real caller supplies one or the other,
+    but the next one will collide with it."""
+
+    for provider in ("openai", "google", "recraft"):
+        with pytest.raises(GeneratorError) as caught:
+            refine_with_provider(
+                provider_id=provider,
+                api_key="k",
+                prompt="give it a hat",
+                model="m",
+                size="3:4",
+            )
+        assert caught.value.code == "missing_picture"
+
+
 def test_an_unknown_provider_says_so() -> None:
     with pytest.raises(GeneratorError) as caught:
         refine_with_provider(
