@@ -195,6 +195,25 @@ PORTRAIT_MATCH_RULE = (
     "particular thing it shows, down to a hair clip or a pattern on a top."
 )
 
+# The portrait a character is drawn from is one forward-facing smile, and
+# nothing told the model that only the face was being copied. So every scene
+# came back with the same expression at the same angle whatever was happening
+# in it, which reads as unsettling rather than familiar. Confirmed on
+# 2026-08-31: with this rule a girl asked to look out to sea shaded her eyes
+# and turned three quarters away, and her sister knelt side-on to dig, both
+# still plainly themselves.
+POSE_FREEDOM_RULE = (
+    "The attached drawing tells you who they are, not how they are standing. "
+    "Take their face, hair and features from it; take their pose, their "
+    "expression and the direction they are looking from the scene. Draw them "
+    "from whatever angle the action calls for \u2014 in profile, three "
+    "quarters, from behind, looking up, looking away \u2014 and wearing "
+    "whatever expression fits what they are doing, whether that is laughing, "
+    "concentrating, shouting or thinking. Repeating the drawing's "
+    "forward-facing smile in every picture makes them look like a doll rather "
+    "than a person."
+)
+
 GENERIC_FACE_REFUSAL = (
     "A generic cartoon child with large round eyes and a button nose is the "
     "wrong answer and will be rejected."
@@ -209,16 +228,20 @@ TOLD_APART_RULE = (
 # Asked for a walk in a forest, the model drew three full-length figures in a
 # landscape and gave each head about a ninth of the picture's height, which at
 # this size is a hundred-odd pixels: too few for the features that make one
-# child different from another. Drawing them close and cropped at the waist is
-# what fixed it, and it leaves the scene behind them intact.
+# child different from another.
+#
+# The first attempt at this over-corrected, demanding every head be at least a
+# fifth of the page and telling the face exemption to draw heads larger than
+# proportion allows. Every child then came back with the same oversized head at
+# the same distance, page after page — a nodding doll rather than a person. So
+# it asks for closeness and leaves the amount to the scene, and says plainly
+# that heads are a normal size.
 CAST_FOREGROUND_RULE = (
-    "Composition override for the named characters, which takes precedence "
-    "over the composition profile: place them in the near foreground, standing "
-    "close to the viewer, cropped at the waist or thigh rather than drawn head "
-    "to toe. Each named character's head must be at least one fifth of the "
-    "picture's height. The setting goes behind them and may be as simple as it "
-    "likes. A wide shot of small full-length figures in a large landscape is "
-    "the wrong answer."
+    "Composition note for the named characters: draw them near enough to the "
+    "viewer that their faces read clearly, and let the action decide how near. "
+    "Their heads are an ordinary size for their bodies and are never enlarged. "
+    "A wide shot of small full-length figures lost in a landscape is the wrong "
+    "answer, and so is a head too big for the body it is on."
 )
 
 # A face is small on a page and carries all of the recognition, so it gets its
@@ -228,8 +251,7 @@ CAST_FOREGROUND_RULE = (
 FACE_DETAIL_EXEMPTION = (
     "Detail exception, which overrides the reader profile for one part of the "
     "picture only: each person's head — the face, the hair and the glasses — may "
-    "carry as much fine line work as it takes to be recognisably them, and should "
-    "be drawn larger in the frame than realistic proportion would suggest. "
+    "carry as much fine line work as it takes to be recognisably them. "
     "Everything else in the picture, including bodies, clothes and the whole "
     "setting, obeys the reader profile exactly: few, large, simple shapes with "
     "wide gaps."
@@ -515,6 +537,7 @@ def build_character_scene_prompt(
 
     likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
     likeness_block += "\n\n" + _spliced(PORTRAIT_MATCH_RULE)
+    likeness_block += "\n\n" + _spliced(POSE_FREEDOM_RULE)
     if any(kind == "toy" for _, kind, _, _ in characters):
         likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
     if any(kind == "character" for _, kind, _, _ in characters):

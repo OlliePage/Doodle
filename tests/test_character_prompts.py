@@ -3,6 +3,7 @@ import pytest
 from colouring_factory.prompts import (
     BADGE_CORNERS_RULE,
     CAST_FOREGROUND_RULE,
+    POSE_FREEDOM_RULE,
     FACE_DETAIL_EXEMPTION,
     GENERIC_FACE_REFUSAL,
     NAMED_CHARACTER_RULE,
@@ -286,3 +287,42 @@ def test_a_blank_appearance_adds_nothing_to_either_prompt() -> None:
     caricature_default = build_caricature_prompt("Bear", "toy", "A bald ear.")
     assert caricature_blank == caricature_default
     assert "  " not in caricature_blank
+
+
+def test_heads_are_never_asked_to_be_bigger_than_they_should_be() -> None:
+    """The first attempt at making faces recognisable over-corrected.
+
+    It told the face exemption to draw heads larger than proportion allows and
+    demanded every head fill a fifth of the page, so every child came back with
+    the same oversized head at the same distance, page after page. A parent
+    called it a nodding doll, and was right.
+    """
+
+    prompt = build_character_scene_prompt(
+        "surfing next to dolphins", [("Ida", "person", "Curly hair.", "")]
+    )
+
+    assert "larger in the frame than realistic proportion" not in prompt
+    assert "one fifth of the picture" not in prompt
+    assert "ordinary size for their bodies and are never enlarged" in prompt
+
+
+def test_the_drawing_fixes_who_they_are_and_the_scene_fixes_the_pose() -> None:
+    """A character is stored as one forward-facing smile.
+
+    Nothing said only the face was being copied, so that smile turned up at
+    that angle in every picture whatever was happening. Confirmed fixed on
+    2026-08-31: a girl asked to look out to sea shaded her eyes and turned
+    three quarters away while her sister knelt side-on to dig, both still
+    plainly themselves.
+    """
+
+    prompt = build_character_scene_prompt(
+        "building a sandcastle",
+        [("Ida", "person", "", ""), ("Bo", "toy", "", "")],
+    )
+
+    assert POSE_FREEDOM_RULE in prompt
+    # The two halves of the rule, either of which alone leaves the doll.
+    assert "tells you who they are, not how they are standing" in prompt
+    assert "take their pose, their expression and the direction they are looking" in prompt
