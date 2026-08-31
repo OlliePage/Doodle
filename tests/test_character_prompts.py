@@ -326,3 +326,40 @@ def test_the_drawing_fixes_who_they_are_and_the_scene_fixes_the_pose() -> None:
     # The two halves of the rule, either of which alone leaves the doll.
     assert "tells you who they are, not how they are standing" in prompt
     assert "take their pose, their expression and the direction they are looking" in prompt
+
+
+def test_a_characters_clothes_obey_the_age_setting_not_the_portrait() -> None:
+    """A complicated outfit would otherwise make every drawing complicated.
+
+    The rule once asked for every particular thing the stored drawing showed,
+    down to a pattern on a top. A girl saved in a flowery dress then wore it at
+    every age setting, and a toddler page came back with about forty separate
+    flowers on one dress, each far too small for a crayon, while the rest of
+    the page obeyed the toddler rules perfectly.
+    """
+
+    prompt = build_character_scene_prompt(
+        "petting a baby fox", [("Ida", "person", "", "")]
+    )
+
+    assert "down to a hair clip or a pattern on a top" not in prompt
+    assert "Their clothes are not part of who they are" in prompt
+    assert "must not become a patterned top" in prompt
+    assert "a dress at the toddler level is two or three large plain shapes" in prompt
+
+
+def test_the_face_exemption_still_covers_only_the_head() -> None:
+    """The exemption is what makes a likeness possible, and also the thing most
+    likely to leak into the rest of the page if it is ever loosened."""
+
+    prompt = build_character_scene_prompt(
+        "petting a baby fox", [("Ida", "person", "", "")]
+    )
+
+    exemption = prompt[prompt.index("Detail exception") :]
+    head_words = exemption[: exemption.index("Everything else")]
+    assert "the face, the hair and the glasses" in head_words
+    for elsewhere in ("dress", "clothes", "trousers", "shoes"):
+        assert elsewhere not in head_words, (
+            f"{elsewhere} has crept into the part of the page allowed fine detail"
+        )

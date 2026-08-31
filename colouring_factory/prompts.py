@@ -185,14 +185,26 @@ CHARACTER_LIKENESS_RULE = (
 # portrait does not have, because two references of one face invite an average
 # of the two. It also cost a reference slot per character, halving how many
 # could appear in one picture.
+# The likeness has to stop at the head. An earlier version of this asked for
+# every particular thing the drawing showed, "down to a hair clip or a pattern
+# on a top", and a saved character wearing a flowery dress then wore it in
+# every picture at every age setting: a toddler page came back with roughly
+# forty separate flowers on one dress, each far too small for a crayon, while
+# the rest of the page obeyed the toddler rules perfectly. A character whose
+# outfit is complicated makes every drawing of them complicated, however simple
+# the setting asks for. Proved on 2026-08-31 by drawing the same fox scene both
+# ways: the same girl came back in plain dungarees, still recognisably herself.
 PORTRAIT_MATCH_RULE = (
     "Each attached picture is the line drawing Doodle has already made of that "
-    "character and shows their family. It is the authority on how they are "
-    "drawn. Copy the face from it \u2014 the shape of the eyes, the nose, the "
-    "mouth, the eyebrows, the hairline and the way the hair falls \u2014 so "
-    "that the character in your picture and the character in that drawing are "
-    "plainly the same one drawn twice, not two who look similar. Keep every "
-    "particular thing it shows, down to a hair clip or a pattern on a top."
+    "character and shows their family. It is the authority on who they are. "
+    "Take from it the face \u2014 the shape of the eyes, the nose, the mouth, "
+    "the eyebrows \u2014 along with the hair and anything worn on the head, "
+    "such as glasses or a hair clip, so that the character in your picture and "
+    "the character in that drawing are plainly the same one drawn twice, not "
+    "two who look similar. Their clothes are not part of who they are: dress "
+    "them for the scene, and draw whatever they wear the way the reader "
+    "profile demands. A patterned top in the drawing must not become a "
+    "patterned top in your picture unless the reader profile allows pattern."
 )
 
 # The portrait a character is drawn from is one forward-facing smile, and
@@ -254,7 +266,9 @@ FACE_DETAIL_EXEMPTION = (
     "carry as much fine line work as it takes to be recognisably them. "
     "Everything else in the picture, including bodies, clothes and the whole "
     "setting, obeys the reader profile exactly: few, large, simple shapes with "
-    "wide gaps."
+    "wide gaps. Clothing is part of everything else: a dress at the toddler "
+    "level is two or three large plain shapes, however patterned it was in the "
+    "reference."
 )
 
 # "Person" and "toy" each need their own instruction because they fail in
