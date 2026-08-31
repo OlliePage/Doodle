@@ -4,6 +4,7 @@ import html
 import hashlib
 import json
 import re
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 
@@ -93,6 +94,35 @@ from colouring_factory.storage import (
 # black/white pass then breaks into a dotted line. Medium produces fewer of
 # those strokes in the first place.
 DEFAULT_QUALITY = "medium"
+
+
+def _drawing_already_in_flight(flag_key: str) -> bool:
+    """Whether a paid call under this key is already running.
+
+    Streamlit can queue a click made while that same control's previous
+    press is still blocked in a network call, and replay it the moment the
+    call returns — which used to buy a second picture from one press.
+    Callers check this before starting work and skip the click outright
+    when it is already true.
+    """
+
+    return bool(st.session_state.get(flag_key))
+
+
+@contextmanager
+def _mark_in_flight(flag_key: str):
+    """Flags a paid call as running for the width of the call.
+
+    Always cleared on the way out, success or exception, so a call that
+    fails leaves its control pressable again rather than wedged shut for
+    the rest of the session.
+    """
+
+    st.session_state[flag_key] = True
+    try:
+        yield
+    finally:
+        st.session_state[flag_key] = False
 
 
 st.set_page_config(
@@ -285,6 +315,8 @@ def _initialise_state() -> None:
         "pdf_summary": "",
         "pdf_signature": "",
         "library_notice": "",
+        "character_notice": "",
+        "character_duplicate_notice": "",
         "library_return": "home",
         "pending_delete": "",
         # The picker's ticks live here rather than in per-character widget keys.
@@ -1262,13 +1294,42 @@ def _draw_character_portrait(
     )
 
 
+def _open_character_portrait_as_doodle(character) -> None:
+    """Adopt an already-drawn portrait as the current doodle.
+
+    Reads the picture already on disk rather than drawing anything new, so
+    this costs nothing: adding someone to the cast and getting a printable
+    cartoon of their photograph are two different things a parent can want,
+    and this is the deliberate route to the second one, for a character
+    added just now or weeks ago alike.
+    """
+
+    portrait_bytes = load_character_image(character.id, portrait=True)
+    concept = f"{character.name}, drawn by Doodle"
+    # A portrait has no scene idea behind it, but "Draw this idea again" on
+    # the result screen always reads generation_idea: leaving it empty made
+    # that button raise missing_prompt the first time this route was used.
+    st.session_state.generation_idea = concept
+    _adopt_artwork(
+        GeneratedArtwork(
+            image_bytes=portrait_bytes, prompt="", provider="Doodle", model=""
+        ),
+        concept,
+        characters=[character.id],
+    )
+    _prepare_quick_outputs()
+    st.session_state.screen = "result"
+    st.rerun()
+
+
 def _render_characters_screen() -> None:
     """Add a face to the cast, and see who is already in it.
 
-    Adding a character draws their caricature through the same mechanism as
-    every other picture Doodle makes, so the result becomes the current doodle
-    via _adopt_artwork and inherits the A4 page, printing, saving and the
-    coloured preview for free.
+    Adding someone to the cast and getting a printable cartoon of their
+    photograph are two different things a parent can want, so this screen
+    stays on itself once a character is drawn or redrawn: a confirmation
+    names who changed, and every tile carries its own route to open that
+    portrait as a doodle when a print of it is what was actually wanted.
     """
 
     _render_top_bar(where="characters")
@@ -1280,6 +1341,13 @@ def _render_characters_screen() -> None:
         st.rerun()
 
     st.header("Your characters")
+
+    if st.session_state.get("character_notice"):
+        st.success(st.session_state.character_notice, icon=":material/check:")
+        st.session_state.character_notice = ""
+    if st.session_state.get("character_duplicate_notice"):
+        st.info(st.session_state.character_duplicate_notice, icon=":material/info:")
+        st.session_state.character_duplicate_notice = ""
 
     provider_id = _active_provider_id()
     spec = get_provider(provider_id)
@@ -1314,6 +1382,18 @@ def _render_characters_screen() -> None:
                             icon=":material/broken_image:",
                         )
                     st.markdown(f"**{character.name}**")
+
+                    if portrait is not None and st.button(
+                        "Open as a doodle",
+                        key=f"open_as_doodle_{character.id}",
+                        width="stretch",
+                        icon=":material/open_in_new:",
+                        help=(
+                            "Prints, saves and colours their portrait like "
+                            "any other doodle. Draws nothing new."
+                        ),
+                    ):
+                        _open_character_portrait_as_doodle(character)
 
                     if st.session_state.get("pending_character_delete") == character.id:
                         # Deleting a character removes the only copy of their
@@ -1404,6 +1484,7 @@ def _render_characters_screen() -> None:
                                 "someone. Connect OpenAI or Google Gemini to "
                                 "redraw a portrait."
                             )
+                        redraw_busy_key = f"busy_redraw_{character.id}"
                         if st.button(
                             "Redraw their portrait",
                             key=f"redraw_character_{character.id}",
@@ -1414,30 +1495,33 @@ def _render_characters_screen() -> None:
                                 "Draws a fresh portrait from the photo "
                                 "already on file. Costs one generation."
                             ),
-                        ):
+                        ) and not _drawing_already_in_flight(redraw_busy_key):
                             try:
                                 stored_photo = load_character_image(
                                     character.id, portrait=False
                                 )
-                                new_portrait = _draw_character_portrait(
-                                    stored_photo,
-                                    character.name,
-                                    character.kind,
-                                    character.marks,
-                                )
+                                with _mark_in_flight(redraw_busy_key):
+                                    with st.spinner(f"Redrawing {character.name}…"):
+                                        new_portrait = _draw_character_portrait(
+                                            stored_photo,
+                                            character.name,
+                                            character.kind,
+                                            character.marks,
+                                        )
                             except GeneratorError as exc:
                                 _show_guidance(exc.code, detail=str(exc))
                             else:
                                 update_character_portrait(
                                     character.id, new_portrait.image_bytes
                                 )
-                                concept = f"{character.name}, drawn by Doodle"
-                                st.session_state.generation_idea = concept
-                                _adopt_artwork(
-                                    new_portrait, concept, characters=[character.id]
+                                # A repair to the cast, like "Save changes"
+                                # beside it, not a doodle: stay here, naming
+                                # who was redrawn, rather than jump to the
+                                # result screen as if a fresh idea had been
+                                # drawn.
+                                st.session_state.character_notice = (
+                                    f"{character.name}'s portrait has been redrawn."
                                 )
-                                _prepare_quick_outputs()
-                                st.session_state.screen = "result"
                                 st.rerun()
 
     st.divider()
@@ -1503,10 +1587,16 @@ def _render_characters_screen() -> None:
         icon=":material/auto_awesome:",
         help="Draws their portrait and saves them to your cast. Costs one generation.",
     ):
+        if _drawing_already_in_flight("busy_add_character"):
+            # A queued replay of a click already being handled. Drawing
+            # again from here bought a real parent six identical characters
+            # from what he experienced as one press each.
+            return
         if not uploaded:
             st.error("Add a picture first.")
             return
-        if not name.strip():
+        typed_name = name.strip()
+        if not typed_name:
             st.error("Give them a name.")
             return
 
@@ -1517,30 +1607,39 @@ def _render_characters_screen() -> None:
             return
 
         kind = CHARACTER_KIND_LABELS.get(kind_label or "A person", "person")
+        # Read before saving: a name shared with someone already in the cast
+        # is a duplicate worth mentioning, not a reason to compare the new
+        # arrival with themselves.
+        is_duplicate_name = typed_name.casefold() in {
+            existing.name.casefold() for existing in characters
+        }
         try:
-            artwork = _draw_character_portrait(photo, name.strip(), kind, marks)
+            with _mark_in_flight("busy_add_character"):
+                with st.spinner(f"Drawing {typed_name}…"):
+                    artwork = _draw_character_portrait(photo, typed_name, kind, marks)
         except GeneratorError as exc:
             # Nothing is saved on a decline: a character with no portrait must
             # never reach the store.
             _show_guidance(exc.code, detail=str(exc))
             return
 
-        character_id = save_character(
+        save_character(
             photo=photo,
             portrait=artwork.image_bytes,
-            name=name.strip(),
+            name=typed_name,
             kind=kind,
             marks=marks,
         )
-        concept = f"{name.strip()}, drawn by Doodle"
-        # A portrait has no scene idea behind it, but "Draw this idea again"
-        # on the result screen always reads generation_idea: leaving it
-        # empty made that button raise missing_prompt on the very first
-        # picture this screen ever produces.
-        st.session_state.generation_idea = concept
-        _adopt_artwork(artwork, concept, characters=[character_id])
-        _prepare_quick_outputs()
-        st.session_state.screen = "result"
+        # Adding someone to the cast is its own action, not a doodle in
+        # disguise: stay here, naming who was added, rather than jump to a
+        # screen headed "Your Doodle is ready" for a picture with no scene.
+        st.session_state.character_notice = f"{typed_name} is in your characters now."
+        if is_duplicate_name:
+            st.session_state.character_duplicate_notice = (
+                f'Another character is already named "{typed_name}". Doodle '
+                "keeps both — their photograph is what tells them apart in "
+                "the picker."
+            )
         st.rerun()
 
 

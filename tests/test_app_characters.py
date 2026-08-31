@@ -143,22 +143,28 @@ def test_adding_a_character_draws_a_portrait_and_saves_it(monkeypatch) -> None:
 
     assert not at.exception
     assert [c.name for c in list_characters()] == ["Ida"]
-    # The portrait is a doodle like any other, so it lands on the result screen.
-    assert at.session_state["screen"] == "result"
-    assert at.session_state["quick_processed"]
+    # Adding someone to the cast is its own action, not a doodle in disguise:
+    # it stays on this screen, with a confirmation naming who was added.
+    assert at.session_state["screen"] == "characters"
+    assert at.session_state["quick_processed"] is None
+    confirmations = " ".join(str(s.value) for s in at.success)
+    assert "ida" in confirmations.lower()
+    assert "characters" in confirmations.lower()
 
 
-def test_drawing_the_idea_again_after_a_character_portrait_does_not_trap_on_connect(
+def test_drawing_the_idea_again_after_opening_a_portrait_does_not_trap_on_connect(
     monkeypatch,
 ) -> None:
-    """FB-01: the characters screen used to land on the result screen with no
-    generation_idea set, since a portrait has no scene idea behind it. The
-    result screen's leftmost button, "Draw this idea again", always reads
-    that same key, so it raised missing_prompt — which
-    _render_generating_screen then misrouted to the Connect screen: a screen
-    that simultaneously said OpenAI was already connected and that a
-    description was needed, with two of its three buttons looping back to
-    themselves and Back escaping to Doodle Studio."""
+    """FB-01: the result screen's leftmost button, "Draw this idea again",
+    always reads generation_idea. A portrait opened as a doodle has no scene
+    idea behind it, so if that route ever left the key unset the button
+    would raise missing_prompt — which _render_generating_screen then
+    misrouted to the Connect screen: a screen that simultaneously said
+    OpenAI was already connected and that a description was needed, with
+    two of its three buttons looping back to themselves and Back escaping
+    to Doodle Studio. Opening a portrait as a doodle must carry an idea
+    forward the same way the portrait-drawing path this regression was
+    first written for did."""
 
     def fake_refine(**kwargs):
         return GeneratedArtwork(
@@ -189,9 +195,19 @@ def test_drawing_the_idea_again_after_a_character_portrait_does_not_trap_on_conn
     else:
         raise AssertionError("Draw them button not found")
 
+    assert at.session_state["screen"] == "characters"
+    ida_id = list_characters()[0].id
+
+    for button in at.button:
+        if button.key == f"open_as_doodle_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Open as a doodle button not found")
+
     assert at.session_state["screen"] == "result"
     assert str(at.session_state["generation_idea"]).strip(), (
-        "no idea was carried forward from the new portrait"
+        "no idea was carried forward from the opened portrait"
     )
 
     for button in at.button:
@@ -460,9 +476,336 @@ def test_redrawing_a_portrait_uses_the_stored_photo_with_no_new_upload(
     )
     assert load_character_image(ida_id) == OTHER_ARTWORK
     assert load_character_image(ida_id, portrait=False) == PHOTO_BYTES
-    # A redraw is a doodle like any other, so it becomes the current picture.
+    # A redraw is a repair to the cast, like "Save changes" beside it, not a
+    # doodle: it stays here, with a confirmation naming who was redrawn.
+    assert at.session_state["screen"] == "characters"
+    confirmations = " ".join(str(s.value) for s in at.success)
+    assert "ida" in confirmations.lower()
+
+
+def test_a_click_while_draw_them_is_already_in_flight_draws_nothing_more(
+    monkeypatch,
+) -> None:
+    """Streamlit can queue a click made while a control's own previous press
+    is still blocked in the drawing service's call, and replay it the
+    instant that call returns — which bought a real parent six identical
+    characters called Aria from what he experienced as one press each. The
+    busy flag must stop the replay before it ever reaches the drawing
+    service, not merely explain the picture afterwards."""
+
+    calls = []
+
+    def fake_refine(**kwargs):
+        calls.append(kwargs)
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("ida.png", PHOTO_BYTES, "image/png"))
+    at.text_input(key="character_name").set_value("Ida").run()
+    # Stands in for the second, queued click: its own previous press has not
+    # returned yet, so the flag it set is still true when this one lands.
+    at.session_state["busy_add_character"] = True
+
+    for button in at.button:
+        if button.label == "Draw them":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    assert calls == [], "a click arriving while one is in flight must draw nothing"
+    assert list_characters() == []
+
+
+def test_draw_them_is_pressable_again_once_its_own_drawing_finishes(
+    monkeypatch,
+) -> None:
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("ida.png", PHOTO_BYTES, "image/png"))
+    at.text_input(key="character_name").set_value("Ida").run()
+    for button in at.button:
+        if button.label == "Draw them":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    assert at.session_state["busy_add_character"] is False
+
+
+def test_a_failed_draw_them_leaves_the_control_pressable_again(monkeypatch) -> None:
+    """A guard that never lets go of its flag on a failure would wedge the
+    button shut for the rest of the session — a worse bug than the one it
+    fixes."""
+
+    def refuse(**kwargs):
+        raise GeneratorError(
+            "OpenAI would not draw from that picture.",
+            provider="OpenAI",
+            code="photo_declined",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", refuse)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("ida.png", PHOTO_BYTES, "image/png"))
+    at.text_input(key="character_name").set_value("Ida").run()
+    for button in at.button:
+        if button.label == "Draw them":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    assert at.session_state["busy_add_character"] is False
+    assert list_characters() == []
+
+
+def test_draw_them_shows_progress_while_it_draws(monkeypatch) -> None:
+    """Pressed with no feedback, this button looked broken and got pressed
+    again — the defect the busy-flag tests above guard the wallet against.
+    This checks the other half: something on screen actually says a
+    drawing is under way, named for who it is drawing, before the paid call
+    is made — not only that the call eventually happens."""
+
+    import streamlit
+
+    spinner_texts: list[str] = []
+
+    class _RecordingSpinner:
+        def __init__(self, text: str = "") -> None:
+            spinner_texts.append(text)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc) -> bool:
+            return False
+
+    monkeypatch.setattr(streamlit, "spinner", _RecordingSpinner)
+
+    def fake_refine(**kwargs):
+        assert any("ida" in text.lower() for text in spinner_texts), (
+            "no progress naming Ida was shown before the drawing call"
+        )
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("ida.png", PHOTO_BYTES, "image/png"))
+    at.text_input(key="character_name").set_value("Ida").run()
+    for button in at.button:
+        if button.label == "Draw them":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    assert spinner_texts, "Draw them must show progress while it draws"
+
+
+def test_a_click_while_a_redraw_is_already_in_flight_draws_nothing_more(
+    monkeypatch,
+) -> None:
+    calls = []
+
+    def fake_refine(**kwargs):
+        calls.append(kwargs)
+        return GeneratedArtwork(
+            image_bytes=OTHER_ARTWORK,
+            prompt="p",
+            provider="OpenAI",
+            model="gpt-image-2",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    ida_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _characters_screen()
+    at.session_state[f"busy_redraw_{ida_id}"] = True
+    for button in at.button:
+        if button.key == f"redraw_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Redraw their portrait button not found")
+
+    assert not at.exception
+    assert calls == []
+    assert load_character_image(ida_id) == ARTWORK, "the old portrait must be untouched"
+
+
+def test_a_failed_redraw_leaves_the_control_pressable_again(monkeypatch) -> None:
+    def refuse(**kwargs):
+        raise GeneratorError(
+            "OpenAI would not draw from that picture.",
+            provider="OpenAI",
+            code="photo_declined",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", refuse)
+    ida_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _characters_screen()
+    for button in at.button:
+        if button.key == f"redraw_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Redraw their portrait button not found")
+
+    assert not at.exception
+    assert at.session_state[f"busy_redraw_{ida_id}"] is False
+    assert load_character_image(ida_id) == ARTWORK
+
+
+def test_redraw_shows_progress_while_it_draws(monkeypatch) -> None:
+    import streamlit
+
+    spinner_texts: list[str] = []
+
+    class _RecordingSpinner:
+        def __init__(self, text: str = "") -> None:
+            spinner_texts.append(text)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc) -> bool:
+            return False
+
+    monkeypatch.setattr(streamlit, "spinner", _RecordingSpinner)
+
+    def fake_refine(**kwargs):
+        assert any("ida" in text.lower() for text in spinner_texts), (
+            "no progress naming Ida was shown before the redraw call"
+        )
+        return GeneratedArtwork(
+            image_bytes=OTHER_ARTWORK,
+            prompt="p",
+            provider="OpenAI",
+            model="gpt-image-2",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    ida_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _characters_screen()
+    for button in at.button:
+        if button.key == f"redraw_character_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Redraw their portrait button not found")
+
+    assert not at.exception
+    assert spinner_texts, "Redraw their portrait must show progress while it draws"
+
+
+def test_saving_a_character_whose_name_already_exists_is_noted(monkeypatch) -> None:
+    """Six identical characters from one accident is a real defect; two
+    deliberate ones sharing a name is allowed by design. The difference is
+    telling the parent, not blocking the save or asking them to confirm."""
+
+    save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Aria", kind="person", marks=""
+    )
+
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=OTHER_ARTWORK,
+            prompt="p",
+            provider="OpenAI",
+            model="gpt-image-2",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("aria2.png", PHOTO_BYTES, "image/png"))
+    at.text_input(key="character_name").set_value("Aria").run()
+    for button in at.button:
+        if button.label == "Draw them":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    assert [c.name for c in list_characters()].count("Aria") == 2
+    notices = " ".join(str(i.value) for i in at.info)
+    assert "aria" in notices.lower()
+    assert "already" in notices.lower()
+
+
+def test_a_character_with_a_new_name_gets_no_duplicate_note(monkeypatch) -> None:
+    def fake_refine(**kwargs):
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+
+    at = _characters_screen()
+    at.get("file_uploader")[0].set_value(("ida.png", PHOTO_BYTES, "image/png"))
+    at.text_input(key="character_name").set_value("Ida").run()
+    for button in at.button:
+        if button.label == "Draw them":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
+
+    assert not at.exception
+    assert not at.info, [str(i.value) for i in at.info]
+
+
+def test_a_saved_characters_portrait_can_be_opened_as_a_doodle() -> None:
+    """Every tile, not only a freshly-drawn one, gets a deliberate route to
+    the result screen with printing, the badge strip and the colour preview
+    — the other half of what a picture of a photograph is for, now that
+    adding someone to the cast no longer doubles as that route."""
+
+    ida_id, _bo_id = _save_two_characters()
+
+    at = _characters_screen()
+    for button in at.button:
+        if button.key == f"open_as_doodle_{ida_id}":
+            at = button.click().run()
+            break
+    else:
+        raise AssertionError("Open as a doodle button not found")
+
+    assert not at.exception
     assert at.session_state["screen"] == "result"
+    assert at.session_state["current_raw"] == ARTWORK
+    assert at.session_state["quick_processed"]
     assert at.session_state["current_metadata"]["generation"]["characters"] == [ida_id]
+    assert str(at.session_state["generation_idea"]).strip()
 
 
 def test_starting_a_new_doodle_keeps_the_chosen_cast() -> None:
