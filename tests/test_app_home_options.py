@@ -8,6 +8,7 @@ of the result screen.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -38,11 +39,20 @@ def isolated(monkeypatch, tmp_path):
 
 @pytest.fixture
 def drawn(monkeypatch):
-    """Draw fixed pictures instead of calling a provider."""
+    """Draw fixed pictures instead of calling a provider.
+
+    Each alternative is now one call to generate_with_provider rather than
+    one entry in a prompts list handed to a single call, so the picture
+    returned is picked from the "reading N of ..." brief fake_briefs bakes
+    into that job's own prompt, not from its position in a shared list.
+    """
 
     images = [ARTWORK, OTHER, ARTWORK, OTHER]
 
     def fake_generate(**kwargs):
+        prompt = kwargs["prompts"][0]
+        match = re.search(r"reading (\d+) of", prompt)
+        index = int(match.group(1)) - 1 if match else 0
         return [
             GeneratedArtwork(
                 image_bytes=images[index % len(images)],
@@ -50,7 +60,6 @@ def drawn(monkeypatch):
                 provider="OpenAI",
                 model="gpt-image-2",
             )
-            for index, prompt in enumerate(kwargs["prompts"])
         ]
 
     def fake_briefs(idea, count, **kwargs):

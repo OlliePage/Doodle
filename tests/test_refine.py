@@ -132,6 +132,63 @@ def test_openai_asks_to_stay_faithful_to_the_original(monkeypatch) -> None:
     assert calls[0]["prompt"] == "give the bear a hat"
 
 
+def _stub_openai_content_refusal(monkeypatch) -> None:
+    class _Images:
+        def edit(self, **kwargs):
+            raise Exception("Your request was rejected by our safety system.")
+
+    class _Client:
+        def __init__(self, **kwargs):
+            self.images = _Images()
+
+    fake_module = types.ModuleType("openai")
+    fake_module.OpenAI = _Client
+    monkeypatch.setitem(sys.modules, "openai", fake_module)
+
+
+def test_a_refusal_that_carried_a_photograph_gets_its_own_code(monkeypatch) -> None:
+    """A refused photograph must not be explained as a wording problem.
+
+    _normalise_error classifies on the response text alone and cannot know a
+    picture was attached, so the only layer that can tell is the one that
+    attached it.
+    """
+
+    _stub_openai_content_refusal(monkeypatch)
+
+    with pytest.raises(GeneratorError) as raised:
+        refine_with_provider(
+            provider_id="openai",
+            api_key="sk-test",
+            prompt="draw her on a beach",
+            reference_images=(b"photo",),
+            model="gpt-image-2",
+            size="1024x1536",
+        )
+    assert raised.value.code == "photo_declined"
+
+
+def test_a_refusal_with_no_picture_stays_a_content_refusal(monkeypatch) -> None:
+    """Doodle's own malformed Google requests also reach code="content".
+
+    Translating every one of them into a declined photograph would blame the
+    user's picture for Doodle's bug.
+    """
+
+    _stub_openai_content_refusal(monkeypatch)
+
+    with pytest.raises(GeneratorError) as raised:
+        refine_with_provider(
+            provider_id="openai",
+            api_key="sk-test",
+            image_bytes=b"line art",
+            prompt="add a hat",
+            model="gpt-image-2",
+            size="1024x1536",
+        )
+    assert raised.value.code == "content"
+
+
 def test_a_missing_key_is_refused_before_any_request() -> None:
     for provider in ("openai", "google", "recraft"):
         with pytest.raises(GeneratorError) as caught:
@@ -144,6 +201,28 @@ def test_a_missing_key_is_refused_before_any_request() -> None:
                 size="3:4",
             )
         assert caught.value.code == "missing_key"
+
+
+def test_a_request_with_no_picture_at_all_is_refused_the_same_way_everywhere() -> None:
+    """The design allows either image_bytes or reference_images to be empty,
+    never both. Before this check existed, whichever provider happened to be
+    active answered differently: OpenAI raised a bare ValueError with no
+    code, Recraft raised an IndexError indexing into an empty list, and
+    Google silently sent a text-only request — none of which the interface
+    can show as this app's own error, so guidance() never even saw it.
+    Unreachable today because every real caller supplies one or the other,
+    but the next one will collide with it."""
+
+    for provider in ("openai", "google", "recraft"):
+        with pytest.raises(GeneratorError) as caught:
+            refine_with_provider(
+                provider_id=provider,
+                api_key="k",
+                prompt="give it a hat",
+                model="m",
+                size="3:4",
+            )
+        assert caught.value.code == "missing_picture"
 
 
 def test_an_unknown_provider_says_so() -> None:

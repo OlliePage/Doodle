@@ -73,4 +73,7 @@ def test_badge_renders_in_the_app() -> None:
     assert badge is not None, "version badge missing from the rendered app"
     assert f"v{__version__}" in badge
     assert "position: fixed" in badge
-    assert "pointer-events: none" in badge
+    assert "user-select: all" in badge, "the badge must be selectable to be copyable"
+    assert "pointer-events: none" not in badge, (
+        "pointer-events: none puts the badge out of the mouse's reach"
+    )

@@ -1,5 +1,5 @@
-import inspect
 import re
+from pathlib import Path
 
 from colouring_factory import generators, variations
 from colouring_factory.guidance import GUIDANCE_CODES, Guidance, guidance_for
@@ -9,9 +9,31 @@ from colouring_factory.layouts import (
 )
 from colouring_factory.models import CalibrationProfile, CircleSheetConfig
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CODE_PATTERN = re.compile(r'code="([a-z_]+)"')
+
+
+def _codes_raised_in_source(source: str) -> set[str]:
+    return set(CODE_PATTERN.findall(source))
+
 
 def _codes_raised_in(module) -> set[str]:
-    return set(re.findall(r'code="([a-z_]+)"', inspect.getsource(module)))
+    return _codes_raised_in_source(Path(module.__file__).read_text(encoding="utf-8"))
+
+
+def _every_raisable_code() -> set[str]:
+    """Every error code raised anywhere in the project.
+
+    Reading the files as text rather than importing them keeps app.py out of
+    the import path: importing it runs the Streamlit script.
+    """
+
+    paths = sorted((PROJECT_ROOT / "colouring_factory").glob("*.py"))
+    paths.append(PROJECT_ROOT / "app.py")
+    codes: set[str] = set()
+    for path in paths:
+        codes |= _codes_raised_in_source(path.read_text(encoding="utf-8"))
+    return codes
 
 
 def test_every_generator_error_code_has_guidance() -> None:
@@ -24,6 +46,20 @@ def test_every_generator_error_code_has_guidance() -> None:
 def test_every_variation_error_code_has_guidance() -> None:
     missing = _codes_raised_in(variations) - GUIDANCE_CODES
     assert not missing, f"no guidance for: {sorted(missing)}"
+
+
+def test_every_module_that_raises_a_code_is_scanned() -> None:
+    """A new module's codes must be guarded too.
+
+    On 2026-08-30 a module raising an unguarded code passed this file
+    completely, because only two modules were ever scanned by name.
+    """
+
+    scanned = _every_raisable_code()
+    # app.py raises billing, missing_prompt and missing_key and was never scanned.
+    assert {"billing", "missing_prompt", "missing_key"} <= scanned
+    missing = sorted(code for code in scanned if code not in GUIDANCE_CODES)
+    assert not missing, f"no guidance for: {missing}"
 
 
 def test_every_guidance_entry_is_complete() -> None:
@@ -137,3 +173,16 @@ def test_a_badge_only_too_large_once_calibrated_is_reported_as_such() -> None:
         largest_margin_that_fits(config, CalibrationProfile(x_scale=1.05, y_scale=1.05))
         is None
     )
+
+
+def test_the_rate_limit_guidance_names_nothing_absent_from_the_characters_screen() -> (
+    None
+):
+    """FB-20/ACC-11: rate_limit can fire from adding a character, which
+    always draws exactly one picture and has no Alternatives control and
+    never reaches the generation form the old wording pointed at."""
+
+    entry = guidance_for("rate_limit")
+    assert "alternatives" not in entry.fix.lower()
+    assert "alternatives" not in entry.control.lower()
+    assert "generation form" not in entry.control.lower()

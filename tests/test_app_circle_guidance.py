@@ -111,7 +111,11 @@ def test_the_homepage_shows_one_prompt_bar_and_a_button() -> None:
     assert len(at.text_input) == 1
     body = " ".join(block.value for block in at.markdown)
     assert "doodle-logo--hero" in body
-    assert [button.label for button in at.button] == ["Draw it"]
+    # "Draw it" is the one button sitting directly on the page; "Add a character"
+    # lives inside the characters popover, one of the settings line's
+    # floating panels, which AppTest still renders (and so still counts)
+    # even though nothing has to be clicked open to see it.
+    assert [button.label for button in at.button] == ["Draw it", "Add a character"]
 
 
 def _all_rendered(at: AppTest) -> str:
@@ -177,6 +181,26 @@ def test_the_applied_margin_makes_the_badges_fit() -> None:
 
     assert not at.exception
     assert not any("No badges fit" in error.value for error in at.error)
+
+
+def test_a_missing_idea_routes_home_with_the_idea_box_restored_not_to_connect() -> None:
+    """FB-01, layer 2: missing_prompt is a wording problem, not a connection
+    problem. Before this fix it fell into the same branch as an
+    authentication failure, landing on the Connect screen with a message
+    that named no provider, next to a "such-and-such is connected" success
+    banner it directly contradicted."""
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = ""
+    at.session_state["quick_mode"] = "ai"
+    at.run()
+
+    assert not at.exception
+    assert at.session_state["screen"] == "home"
+    assert not at.session_state["connection_error"]
+    errors = " ".join(str(e.value) for e in at.error)
+    assert "describe" in errors.lower()
 
 
 def test_gemini_users_are_not_given_recrafts_instructions() -> None:

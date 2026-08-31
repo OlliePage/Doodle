@@ -7,7 +7,13 @@ textColor = "#171717"
 font = "sans serif"
 
 [server]
-maxUploadSize = 25
+# Streamlit's own default, restored: a photograph straight off a phone can be
+# 30 MB or more, and the old 25 MB ceiling refused one before Doodle ever saw
+# it. Nothing downstream carries the weight — prepare_photo caps the long edge
+# at 1536 pixels and re-encodes, so a 33 MB original is stored as a few hundred
+# kilobytes, and Pillow's own decompression guard refuses an absurd one with a
+# message rather than eating the machine.
+maxUploadSize = 200
 
 [browser]
 gatherUsageStats = false

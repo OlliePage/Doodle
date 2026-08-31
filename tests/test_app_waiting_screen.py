@@ -1,0 +1,371 @@
+"""The waiting screen: the distribution, the clocks and the escalating notes.
+
+The screen moves itself on after every picture, so these freeze the frame the
+way tests/test_app_stop_generation.py does — an uncaught error raised from
+inside the drawing call stops the script exactly where it is and leaves the
+half-drawn frame inspectable.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from streamlit.testing.v1 import AppTest
+
+from colouring_factory import generators, timings
+
+APP = str(Path(__file__).resolve().parent.parent / "app.py")
+
+KEY = timings.settings_key(
+    provider="openai",
+    model="gpt-image-2",
+    quality="medium",
+    size="1024x1536",
+    with_references=False,
+)
+
+
+@pytest.fixture(autouse=True)
+def _data_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOODLE_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("COLOURING_FACTORY_DATA_DIR", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    for name in ("GEMINI_API_KEY", "RECRAFT_API_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    return tmp_path
+
+
+def _frozen(monkeypatch, *, idea: str = "a blue dinosaur") -> AppTest:
+    """The drawing screen, stopped mid-picture so it can be read."""
+
+    def never_returns(**kwargs):
+        raise RuntimeError("stand-in for a drawing that is still going")
+
+    monkeypatch.setattr(generators, "generate_with_provider", never_returns)
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = idea
+    at.run()
+    return at
+
+
+def _record(count: int, seconds: float = 44.0) -> None:
+    for index in range(count):
+        timings.record_timing(seconds=seconds + index, settings_key=KEY)
+
+
+def test_the_chart_is_drawn_from_the_very_first_wait(monkeypatch) -> None:
+    """With nothing recorded there is still an axis and a marker walking it.
+
+    The screen used to hold back the chart until it had three drawings at
+    matching settings, and print an apology in the meantime. Those groups fill
+    up so slowly for one household that the apology was what a parent normally
+    saw, and an empty axis with a moving marker tells them more about whether
+    anything is happening than a sentence explaining that Doodle cannot say.
+    """
+
+    at = _frozen(monkeypatch)
+
+    charts = [
+        str(block.value)
+        for block in at.markdown
+        if "wait-hist__bars" in str(block.value)
+    ]
+    assert charts, "no chart on a first-ever wait"
+    assert "puts the first mark on the chart" in charts[0]
+    assert not any(
+        "nothing yet to say how long" in str(caption.value) for caption in at.caption
+    )
+
+
+def test_with_history_the_chart_is_drawn_and_counts_the_real_drawings(
+    monkeypatch,
+) -> None:
+    """Every drawing counts towards it, whatever settings produced it."""
+
+    _record(3)
+    _record(2, seconds=90.0)  # a different settings group, still on the chart
+    at = _frozen(monkeypatch)
+
+    charts = [
+        str(block.value)
+        for block in at.markdown
+        if "wait-hist__bars" in str(block.value)
+    ]
+    assert charts, "the distribution never reached the page"
+    chart = charts[0]
+
+    assert chart.count("<i style=") == timings.BUCKET_COUNT
+    assert "Your last 5 drawings, and where this one has got to." in chart
+
+
+def test_a_single_drawing_is_named_rather_than_called_a_distribution(
+    monkeypatch,
+) -> None:
+    """One bar is a fact, not a shape, so the caption says what it is."""
+
+    timings.record_timing(seconds=44.0, settings_key=KEY)
+    at = _frozen(monkeypatch)
+    chart = next(
+        str(block.value)
+        for block in at.markdown
+        if "wait-hist__bars" in str(block.value)
+    )
+
+    assert "One drawing so far, which took 44 seconds" in chart
+
+
+def test_every_animation_is_named_for_its_picture(monkeypatch) -> None:
+    """The markup is identical between pictures of a batch, so a shared
+    keyframe name lets the browser carry the old timeline over: picture two
+    would open with its chart already coloured in and its "taking a while"
+    note already showing. A changed name always restarts an animation."""
+
+    _record(5)
+    at = _frozen(monkeypatch)
+    chart = next(
+        str(block.value)
+        for block in at.markdown
+        if "wait-hist__bars" in str(block.value)
+    )
+
+    for name in ("wait-fill-0", "wait-spark-0", "wait-note-0"):
+        assert name in chart, f"{name} is not carrying the picture's index"
+
+
+def test_the_slow_note_opens_at_the_slowest_drawing_on_record(monkeypatch) -> None:
+    """ "Longer than any of those" has to mean the times actually on the chart,
+    so the delay is read from them rather than from a fixed number."""
+
+    timings.record_timing(seconds=30.0, settings_key=KEY)
+    timings.record_timing(seconds=40.0, settings_key=KEY)
+    timings.record_timing(seconds=61.0, settings_key=KEY)
+
+    at = _frozen(monkeypatch)
+    chart = next(
+        str(block.value)
+        for block in at.markdown
+        if "wait-hist__bars" in str(block.value)
+    )
+
+    assert ".wait-note--slow{animation-delay:61s}" in chart.replace(" ", "").replace(
+        "\n", ""
+    )
+    assert ".wait-note--stuck{animation-delay:240s}" in chart.replace(" ", "").replace(
+        "\n", ""
+    )
+
+
+def test_the_four_minute_note_states_what_the_drawing_code_will_really_do(
+    monkeypatch,
+) -> None:
+    """Four minutes and three attempts are not a guess: generators.py builds
+    its client with timeout=240.0 and max_retries=2. If either changes, this
+    sentence becomes a lie told to a waiting parent."""
+
+    source = (
+        Path(__file__).resolve().parent.parent / "colouring_factory" / "generators.py"
+    ).read_text()
+    assert "timeout=240.0" in source
+    assert "max_retries=2" in source
+
+    _record(5)
+    at = _frozen(monkeypatch)
+    chart = next(
+        str(block.value)
+        for block in at.markdown
+        if "wait-hist__bars" in str(block.value)
+    )
+    assert "allows four minutes for each attempt" in chart
+    assert "up to three attempts in all" in chart
+
+
+def test_the_typed_idea_is_the_biggest_thing_on_the_screen(monkeypatch) -> None:
+    at = _frozen(monkeypatch, idea="a dinosaur on a skateboard")
+
+    blocks = [str(block.value) for block in at.markdown]
+    assert any("Now drawing" in text for text in blocks)
+    assert any(
+        'class="drawing-idea">a dinosaur on a skateboard' in text for text in blocks
+    )
+    style = next(text for text in blocks if ".drawing-idea{" in text.replace(" ", ""))
+    flat = style.replace(" ", "").replace("\n", "")
+    assert "font-size:1.5rem" in flat.split(".drawing-idea{")[1][:120]
+
+
+def test_the_screen_still_keeps_its_count_its_stop_button_and_no_progress_bar(
+    monkeypatch,
+) -> None:
+    """The three things the existing tests pin, re-checked here because this
+    change rebuilt the middle of the same screen."""
+
+    _record(5)
+    at = _frozen(monkeypatch)
+
+    assert any("Drawing 1 of" in str(block.value) for block in at.markdown)
+    assert [button for button in at.button if button.label == "Stop drawing"]
+    assert not at.get("progress")
+
+
+class TestTheTimeItTook:
+    def _result(self, seconds: list[float]) -> AppTest:
+        artwork = (
+            Path(__file__).resolve().parent.parent / "assets" / "demo_dinosaur.png"
+        ).read_bytes()
+        at = AppTest.from_file(APP, default_timeout=120)
+        at.session_state["screen"] = "result"
+        at.session_state["current_raw"] = artwork
+        at.session_state["quick_processed"] = artwork
+        at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+        at.session_state["current_title"] = "a blue dinosaur"
+        at.session_state["current_metadata"] = {"source": "test"}
+        at.session_state["generation_seconds"] = seconds
+        at.run()
+        return at
+
+    def test_one_picture_reports_its_own_seconds(self) -> None:
+        at = self._result([52.4])
+        assert any("That took 52 seconds." in str(c.value) for c in at.caption)
+
+    def test_a_batch_reports_the_whole_wait_in_minutes(self) -> None:
+        at = self._result([48.0, 44.0, 51.0, 49.0])
+        assert any(
+            "Those 4 took 3 minutes and 12 seconds altogether." in str(c.value)
+            for c in at.caption
+        )
+
+    def test_a_batch_under_a_minute_does_not_say_zero_minutes(self) -> None:
+        at = self._result([20.0, 21.0])
+        assert any(
+            "Those 2 took 41 seconds altogether." in str(c.value) for c in at.caption
+        )
+
+    def test_nothing_is_claimed_when_nothing_was_timed(self) -> None:
+        at = self._result([])
+        assert not any(
+            "took" in str(c.value) and "second" in str(c.value) for c in at.caption
+        )
+
+
+def test_a_new_batch_does_not_inherit_the_last_one_s_clock(monkeypatch) -> None:
+    """Planning a batch clears the running total.
+
+    Without this the second batch of an evening reports its own time plus the
+    first one's, and the number the parent is shown grows all night.
+    """
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "a blue dinosaur"
+    at.session_state["generation_seconds"] = [99.0, 98.0]
+
+    def never_returns(**kwargs):
+        raise RuntimeError("stand-in for a drawing that is still going")
+
+    monkeypatch.setattr(generators, "generate_with_provider", never_returns)
+    at.run()
+
+    assert at.session_state["generation_seconds"] == [], (
+        "the previous batch's seconds survived into this one"
+    )
+
+
+def _generating_style(at: AppTest) -> str:
+    """The generating screen's own stylesheet, flattened for matching."""
+
+    block = next(
+        str(b.value)
+        for b in at.markdown
+        if "<style>" in str(b.value) and ".drawing-title" in str(b.value)
+    )
+    return block.replace(" ", "").replace("\n", "")
+
+
+def test_the_screen_insists_on_its_own_centring(monkeypatch) -> None:
+    """Marked important because Streamlit's stylesheet outranks it otherwise.
+
+    This screen shipped with its width marked and its centring not, so it kept
+    the 650px column and lost both the horizontal and the vertical centring:
+    everything rendered hard against the left edge with white space below. The
+    rule reads correctly either way, which is why it went unnoticed, so the
+    marking itself is what this pins.
+    """
+
+    style = _generating_style(_frozen(monkeypatch))
+    container = style.split(".block-container,[data-testid=", 1)[1]
+
+    for declaration in (
+        "max-width:650px!important",
+        "min-height:100dvh!important",
+        "display:flex!important",
+        "flex-direction:column!important",
+        "justify-content:center!important",
+        "text-align:center!important",
+    ):
+        assert declaration in container, f"{declaration} is not marked important"
+
+
+def test_the_craft_tools_cannot_be_clipped(monkeypatch) -> None:
+    """They used to scroll past a window, and were sliced by it.
+
+    A step of 2.4rem is 38.4 pixels while the window rounded to 38, and the
+    error accumulated until a sliver of the next shape showed above the
+    current one. Stacking them removes the window entirely, so this checks
+    that the scrolling strip has not crept back.
+    """
+
+    at = _frozen(monkeypatch)
+    style = _generating_style(at)
+
+    assert "drawing-reel__strip" not in style, "the scrolling strip is back"
+    assert "position:absolute" in style.split(".drawing-reelsvg{", 1)[1][:140]
+
+    markup = next(
+        str(b.value) for b in at.markdown if 'class="drawing-reel"' in str(b.value)
+    )
+    assert "drawing-reel__strip" not in markup
+    assert markup.count("<svg") == 6, "six tools, one per wordmark colour"
+
+
+def test_the_waiting_shapes_are_things_from_a_craft_table(monkeypatch) -> None:
+    """The shapes these replaced were circles, triangles and squares, which
+    moved but meant nothing in a drawing app. Each one carries the name a
+    screen reader reads out, which is also what makes this checkable."""
+
+    at = _frozen(monkeypatch)
+    markup = next(
+        str(b.value) for b in at.markdown if 'class="drawing-reel"' in str(b.value)
+    )
+
+    for tool in (
+        "a pencil",
+        "a pencil sharpener",
+        "a ruler",
+        "an eraser",
+        "a sheet of paper",
+        "a pair of scissors",
+    ):
+        assert f'aria-label="{tool}"' in markup, f"{tool} is missing"
+
+    # Drawn rather than typed, so nothing here can fall foul of the rule
+    # against emoji or land on a font that does not have the character.
+    assert "viewBox" in markup and "stroke" not in markup.split(">")[0]
+
+
+def test_the_charging_small_print_is_behind_a_question_mark(monkeypatch) -> None:
+    """It answers a question asked once, and until it is asked it is four grey
+    lines between the child's sentence and the button."""
+
+    at = _frozen(monkeypatch)
+
+    printed = [str(caption.value) for caption in at.caption]
+    assert not any("charged regardless" in text for text in printed), (
+        "the charging note is still printed in plain sight"
+    )
+
+    tucked = [str(block.value) for block in at.markdown]
+    assert any("charged regardless" in text for text in tucked), (
+        "the charging note has gone missing altogether"
+    )

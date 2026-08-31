@@ -190,6 +190,56 @@ def test_a_second_refinement_builds_on_the_first(monkeypatch, tmp_path) -> None:
     assert [v.parent for v in chain] == [None, 0, 1]
 
 
+def test_a_click_while_a_change_is_already_in_flight_changes_nothing_more(
+    monkeypatch, tmp_path
+) -> None:
+    """Streamlit can queue a click made while this control's own previous
+    press is still blocked in the drawing service's call, and replay it the
+    instant that call returns — a second generation from one press."""
+
+    from colouring_factory.storage import load_settings, save_settings
+
+    at = _connected_studio(history.start(_art("original")))
+    settings = load_settings()
+    settings["image_provider"] = "google"
+    save_settings(settings)
+    _stub_google(monkeypatch, ARTWORK + b"one")
+    at.run()
+
+    _change_box(at).set_value("add a hat")
+    at.session_state["busy_refine_studio"] = True
+    [b for b in at.button if b.label == "Change it"][0].click().run()
+
+    assert not at.exception
+    assert len(at.session_state["doodle_versions"]) == 1
+
+
+def test_a_failed_change_leaves_the_control_pressable_again(monkeypatch) -> None:
+    from colouring_factory import generators
+    from colouring_factory.storage import load_settings, save_settings
+
+    def refuse(**kwargs):
+        raise generators.GeneratorError(
+            "Google Gemini declined that description.",
+            provider="Google Gemini",
+            code="content",
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", refuse)
+
+    at = _connected_studio(history.start(_art("original")))
+    settings = load_settings()
+    settings["image_provider"] = "google"
+    save_settings(settings)
+    at.run()
+
+    _change_box(at).set_value("give it a hat")
+    [b for b in at.button if b.label == "Change it"][0].click().run()
+
+    assert not at.exception
+    assert at.session_state["busy_refine_studio"] is False
+
+
 def test_the_version_strip_shows_the_chain_and_can_step_back() -> None:
     chain = history.start(_art("original"))
     chain = history.append(chain, _art("hatted"), "add a hat", parent=0)
@@ -239,3 +289,123 @@ def test_the_result_screen_carries_the_same_control() -> None:
 
     assert not at.exception
     assert _change_box(at) is not None
+
+
+def test_a_new_doodle_leaves_no_version_chain_behind() -> None:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = ARTWORK
+    at.session_state["quick_processed"] = ARTWORK
+    at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+    at.session_state["doodle_versions"] = history.start(_art("original"))
+    at.session_state["current_version"] = 0
+    at.run()
+
+    for button in at.button:
+        if button.label == "New doodle":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("New doodle button not found")
+
+    assert at.session_state["doodle_versions"] == ()
+    assert at.session_state["current_version"] == 0
+
+
+def test_a_demo_doodle_starts_its_own_version_chain() -> None:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "generate"
+    at.session_state["quick_mode"] = "demo"
+    at.session_state["generation_idea"] = "a blue dinosaur"
+    at.session_state["doodle_versions"] = history.start(_art("earlier"))
+    at.run()
+
+    chain = at.session_state["doodle_versions"]
+    assert len(chain) == 1
+    assert chain[0].artwork.image_bytes == at.session_state["current_raw"]
+
+
+def test_the_result_screen_survives_unprepared_outputs() -> None:
+    """Reaching the result screen without preparing outputs must not crash.
+
+    _render_first_result hands quick_processed straight to sha256, so a None
+    raises TypeError and the whole page dies rather than showing anything.
+    """
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = ARTWORK
+    at.session_state["quick_processed"] = None
+    at.session_state["quick_pdf"] = None
+    at.run()
+
+    assert not at.exception
+
+
+# Screens that draw the wordmark and deliberately do not make it a route,
+# each with the reason. Anything not listed here must go home when pressed.
+BRAND_WITHOUT_A_ROUTE = {
+    "home": "already home",
+    "generate": "a drawing is in flight and has been paid for; leaving it "
+    "silently would waste the picture, and Stop drawing is the way out",
+}
+
+
+def _screens_that_draw_the_wordmark() -> list[str]:
+    """Read them out of the source rather than listing them by hand.
+
+    The earlier version of this test named two screens, so the saved doodles
+    screen and the connection screen each shipped a wordmark that did nothing
+    when pressed, and no test noticed. Anything calling _render_brand_home or
+    _render_top_bar is checked now, and a new screen joins automatically.
+    """
+
+    source = Path(APP).read_text()
+    where = set()
+    for call in ("_render_brand_home(", '_render_top_bar(where='):
+        for fragment in source.split(call)[1:]:
+            argument = fragment.split(")")[0].split(",")[0].strip()
+            if argument.startswith(("'", '"')):
+                where.add(argument.strip("'\""))
+    return sorted(where)
+
+
+def test_the_wordmark_goes_home_from_every_screen_that_carries_it() -> None:
+    """The logo in the corner is a route, not decoration.
+
+    Every app with a wordmark in the top-left has taught people that pressing
+    it goes home, and this one did nothing. Streamlit cannot make a markdown
+    block clickable and a plain anchor cannot be clicked in a test, so a real
+    button is laid over the logo, which means this test has to click it or the
+    invisible button could sit there dead and nobody would know.
+    """
+
+    screens = _screens_that_draw_the_wordmark()
+    assert len(screens) >= 5, f"only found {screens}; the scan has stopped working"
+
+    for screen in screens:
+        if screen in BRAND_WITHOUT_A_ROUTE:
+            continue
+        at = AppTest.from_file(APP, default_timeout=120)
+        at.session_state["screen"] = "library" if screen == "library" else screen
+        at.session_state["current_raw"] = ARTWORK
+        at.session_state["current_title"] = "A blue dinosaur"
+        at.session_state["current_metadata"] = {"source": "test"}
+        at.session_state["quick_processed"] = ARTWORK
+        at.session_state["quick_pdf"] = b"%PDF-1.4 test"
+        at.run()
+
+        brand = [
+            button
+            for button in at.button
+            if button.label == "Doodle, back to the homepage"
+        ]
+        assert brand, f"the wordmark on the {screen} screen does nothing"
+
+        brand[0].click().run()
+
+        assert not at.exception, f"{screen}: {[str(e.value) for e in at.exception]}"
+        assert at.session_state["screen"] == "home", (
+            f"the wordmark did not go home from the {screen} screen"
+        )
+        assert at.session_state["current_raw"] is None

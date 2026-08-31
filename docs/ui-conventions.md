@@ -75,6 +75,14 @@ route onward, so the library it wrote to was effectively invisible. The rules:
 - Opening a saved doodle always lands in Doodle Studio's Create tab, with a
   confirmation naming the doodle, because laying it out is the reason to reopen
   one.
+- Adding someone to the cast, and redrawing an existing character's portrait,
+  both stay on the characters screen with a confirmation naming who changed.
+  Neither is a doodle: a saved character with no route back to a printable
+  copy of their portrait once looked like one, headed "Your Doodle is ready"
+  with buttons that made no sense for a face with no scene behind it. Every
+  character tile carries its own `Open as a doodle` button instead, which
+  costs nothing and works for a character added weeks ago as well as one
+  just drawn.
 
 Deleting a saved doodle asks first. It removes the only copy.
 
@@ -115,6 +123,37 @@ the bottom of one and inside a tab on another.
 homepage. The two used to read `Draw another` and `New doodle`, which describe
 each other.
 
+## While it draws
+
+A batch of more than one picture is drawn one at a time, in one script run
+each, rather than inside a single blocking call: the page comes back to life
+between pictures with a live "Drawing 2 of 4" and a Stop drawing button,
+where a whole-batch call would leave nothing on the page pressable until
+every picture was done. The count is plain text, never a progress bar —
+there is no fraction of a picture to show, only whole ones finished.
+
+Stopping keeps whatever has already been drawn and goes straight to the
+result screen with it, exactly as if that many had been asked for. Only
+when nothing at all has been drawn yet does it return to the homepage, idea
+still in the box. A request already sent to the drawing service finishes
+and is charged regardless of when Stop is pressed — the copy says so
+plainly rather than implying the picture in flight can be recalled.
+
+Pairing still draws exactly two pictures this way, and a scene starring
+saved characters still draws one at a time through its own call
+(refine_with_provider, carrying reference photographs) rather than
+generate_with_provider's — restructuring the loop changed nothing about
+either rule, only how many network calls happen inside one script run.
+
+The built-in-sample path draws nothing and costs nothing, so it keeps its
+single blocking call and gains no Stop button: there would be nothing for
+it to stop.
+
+The homepage's settings line has no business on this screen — those
+questions are already answered — and is hidden here outright rather than
+left to not be drawn, the same defensiveness the corner "Saved doodles (n)"
+link and the settings-row CSS elsewhere already show it.
+
 ## One idea, two readers
 
 "Who it is for" runs from a toddler's dozen large regions to a grown-up's
@@ -144,3 +183,62 @@ always the line art, because a colouring page a child cannot colour is not one.
 The coloured copy is kept for as long as the picture is unchanged, so looking
 at it again is free. Changing the picture, or choosing a different alternative,
 asks again, because the copy no longer matches what is on screen.
+
+## Who's in the picture
+
+Three decisions from adding a saved cast of characters, recorded so a later
+change has to argue with them rather than quietly undo them.
+
+- The homepage settings line names a count, `3 characters`, never the
+  characters themselves. That line is a row of two-or-three-word popovers
+  built specifically to stay one row regardless of how many pictures Doodle
+  can draw; a cast of names would grow with every character added and break
+  the row it sits in. Opening the popover still lists every name, with a
+  checkbox each, so nothing is hidden — only the closed line stays short.
+- A person is always drawn at full facial fidelity, with no setting to turn
+  it down. Whenever any character in a scene is a person, the prompt exempts
+  their head from the reader's line profile, so a toddler sheet's few, large,
+  simple shapes still leave a face carrying as much fine line work as it
+  takes to be recognisably them. A face that is not recognisable has failed
+  at the one job it had, at any age level.
+- Every picture Doodle makes reaches the badge machinery the same way: it
+  becomes `quick_processed`, and the badge strip looks up (or builds) its own
+  fit from whatever `quick_processed` currently is. A newly drawn character's
+  portrait, a redraw, a refinement and an earlier version picked back up from
+  the version strip all pass through that one door; nothing sets the badge
+  preview directly, so nothing can leave it pointing at a picture no longer
+  on screen.
+- Unlike `Saved doodles (n)` in the corner, the characters popover is not
+  hidden until there is something to show. Copying that rule here once left
+  no control anywhere on a clean install that reached the characters screen,
+  so a parent could never add their first character. It renders from the
+  first run, inviting the parent to add someone, and is hidden only when the
+  active drawing service declares it cannot look at a reference picture at
+  all — in which case nothing behind the control could work regardless of
+  what is saved.
+- A doodle records which characters it was actually drawn with, on the
+  artwork's own metadata, rather than the badge redraw reading whoever
+  happens to be ticked when that button is pressed. Ticking someone after a
+  picture is drawn — a sample, or an ordinary idea drawn with no cast — must
+  never put them into a redraw of a picture that never had them.
+- Two characters sharing a name is allowed by design — a girl and her teddy
+  may both be called Ida — so saving one does not ask for confirmation or
+  block the save. It does say so afterwards, plainly, because six identical
+  entries from one accident is a different problem from two deliberate
+  ones, and only the parent can tell the two apart.
+
+## Paid controls cannot fire twice from one press
+
+Every button that spends a generation sets a session-state flag before it
+calls out and clears it in a `finally`, whatever the call's own name for the
+flag (`busy_add_character`, `busy_redraw_<id>`, and so on). Streamlit can
+queue a click made while that same control's previous press is still
+blocked in the call, and replay it the moment the call returns; without the
+flag, a parent who pressed a silent-looking button a second time paid for a
+second picture, and once for a second saved character. The flag is checked
+before the call starts and always released afterwards, success or failure,
+so a failed call leaves its button pressable again rather than wedged shut
+for the rest of the session. Every such button also names what it is doing
+while it runs, in `st.spinner`, because a button with no visible effect is
+indistinguishable from a broken one and invites exactly the second press
+this guard exists to survive.

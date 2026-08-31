@@ -5,12 +5,54 @@ import pytest
 
 from colouring_factory import variations
 from colouring_factory.generators import GeneratorError
+from colouring_factory.models import GeneratedArtwork
 from colouring_factory.variations import (
     VARIATION_AXES,
     axis_briefs,
     build_variation_briefs,
+    split_pairing_results,
     written_briefs,
 )
+
+
+def _art(tag: str) -> GeneratedArtwork:
+    return GeneratedArtwork(
+        image_bytes=tag.encode(), prompt=tag, provider="test", model="test"
+    )
+
+
+def test_a_finished_pair_splits_into_one_child_sheet_and_one_grown_up_sheet() -> None:
+    child, grown_up = _art("child"), _art("grown-up")
+    for_children, pair = split_pairing_results(
+        [child, grown_up], pairing=True, total_jobs=2
+    )
+    assert for_children == [child]
+    assert pair is grown_up
+
+
+def test_stopping_after_only_the_childs_half_of_a_pair_has_no_grown_up_sheet() -> None:
+    """Pairing draws exactly two pictures, the second at grown-up detail. If
+    the parent stops after only the first has been drawn, there is no
+    grown-up sheet to attach — attaching one anyway would print a page
+    nobody asked to see next to a caption claiming Doodle drew it."""
+
+    child = _art("child")
+    for_children, pair = split_pairing_results([child], pairing=True, total_jobs=2)
+    assert for_children == [child]
+    assert pair is None
+
+
+def test_an_ordinary_batch_of_alternatives_has_no_grown_up_sheet() -> None:
+    pictures = [_art("one"), _art("two"), _art("three")]
+    for_children, pair = split_pairing_results(pictures, pairing=False, total_jobs=4)
+    assert for_children == pictures
+    assert pair is None
+
+
+def test_nothing_drawn_yet_splits_into_nothing() -> None:
+    for_children, pair = split_pairing_results([], pairing=True, total_jobs=2)
+    assert for_children == []
+    assert pair is None
 
 
 def test_axis_briefs_returns_the_requested_count() -> None:

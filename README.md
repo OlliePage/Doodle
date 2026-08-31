@@ -30,6 +30,11 @@ The application keeps two jobs separate:
 - Optional captions added as proper PDF text
 - PDF preview and download
 - Local saved-doodle library
+- Saved characters — people, toys or anything else recognisable — kept on this computer from a reference photograph
+- Any picture drawn with your saved characters in it, in their likeness
+- A caricature portrait drawn for each saved character as soon as they are added
+- A free 58 mm badge preview beneath every finished doodle, with a redraw composed for the circle
+- HEIC/HEIF photo upload for a character's reference photo, via `pillow-heif`, since an iPhone saves photos in a format Pillow cannot open on its own
 - Printer calibration with optional horizontal and vertical compensation
 - Automated tests for geometry and PDF page boxes
 

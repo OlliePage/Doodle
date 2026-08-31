@@ -101,6 +101,20 @@ def test_every_provider_has_its_own_setup_instructions() -> None:
     assert len(set(hints.values())) == len(hints), "two providers share a setup hint"
 
 
+def test_every_provider_declares_how_many_pictures_it_can_look_at() -> None:
+    """Capability is data on the spec, never a branch on a provider's name.
+
+    OpenAI documents sixteen input pictures for the GPT image models. Google
+    documents ten object plus four character references for its default image
+    model. Recraft's imageToImage takes one multipart field called "image", so
+    it cannot carry a cast at all.
+    """
+
+    assert PROVIDERS["openai"].max_reference_images == 16
+    assert PROVIDERS["google"].max_reference_images == 4
+    assert PROVIDERS["recraft"].max_reference_images == 0
+
+
 def test_no_setup_hint_names_a_different_provider() -> None:
     for provider_id, spec in PROVIDERS.items():
         for other_id, other in PROVIDERS.items():

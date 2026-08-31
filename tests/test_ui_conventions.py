@@ -47,6 +47,14 @@ def _layout(name: str) -> AppTest:
     raise AssertionError("Output format control not found")
 
 
+def _upload() -> AppTest:
+    at = _studio()
+    for radio in at.radio:
+        if radio.label == "Artwork source":
+            return radio.set_value("Upload artwork").run()
+    raise AssertionError("Artwork source control not found")
+
+
 def _result() -> AppTest:
     at = AppTest.from_file(APP, default_timeout=120)
     at.session_state["screen"] = "result"
@@ -73,6 +81,30 @@ def _connect() -> AppTest:
     return at
 
 
+def _library() -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "library"
+    at.session_state["library_return"] = "home"
+    at.run()
+    return at
+
+
+def _generate() -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "a blue dinosaur"
+    at.session_state["quick_mode"] = "demo"
+    at.run()
+    return at
+
+
+def _characters() -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "characters"
+    at.run()
+    return at
+
+
 def _every_screen() -> list[AppTest]:
     """All six screens. A guard that skips one lets a defect through it."""
 
@@ -83,6 +115,10 @@ def _every_screen() -> list[AppTest]:
         _studio(),
         _layout("A4 circle sheet"),
         _layout("Custom-size page"),
+        _upload(),
+        _library(),
+        _generate(),
+        _characters(),
     ]
 
 
@@ -100,9 +136,82 @@ def _all_labels(at: AppTest) -> list[str]:
         at.checkbox,
         at.slider,
         at.segmented_control,
+        at.get("file_uploader"),
+        at.get("toggle"),
+        at.get("multiselect"),
     ):
         labels.extend(widget.label for widget in group)
     return [label for label in labels if label]
+
+
+def test_uploader_and_toggle_labels_are_checked() -> None:
+    """The label sweep must see every widget family a screen can hold.
+
+    On 2026-08-30 _all_labels iterated eleven families and missed
+    file_uploader, toggle and multiselect, so an uploader's label was
+    subject to neither the glyph rule nor the sentence-case rule.
+    """
+
+    labels = _all_labels(_upload())
+    assert any("upload" in label.lower() for label in labels)
+
+
+class _FakeFamily(list):
+    """One widget family's worth of labelled stand-ins, from a fake AppTest."""
+
+
+class _FakeWidget:
+    def __init__(self, label: str) -> None:
+        self.label = label
+
+
+class _FakeAt:
+    """Stands in for AppTest so the sweep can be proven to visit every
+    family without app.py needing a real toggle or multiselect of its own —
+    neither widget type is used anywhere in the app today, so a sweep over
+    the real app can never prove those two lines of _all_labels still run."""
+
+    def __init__(self, families: dict[str, list[str]]) -> None:
+        self._families = families
+
+    def __getattr__(self, name: str) -> _FakeFamily:
+        return _FakeFamily(_FakeWidget(label) for label in self._families.get(name, []))
+
+    def get(self, name: str) -> _FakeFamily:
+        return _FakeFamily(_FakeWidget(label) for label in self._families.get(name, []))
+
+
+def test_the_label_sweep_visits_every_widget_family_it_names() -> None:
+    """On 2026-08-30 dropping file_uploader, toggle and multiselect from
+    _all_labels left every existing test green, because the only test
+    naming them (above) drives the real app, which has no toggle or
+    multiselect for the dropped lines to have ever caught. One label per
+    family, on a fake double, proves each accessor is actually reached:
+    drop any one of the three .get(...) calls this test names and this
+    test fails by the label going missing."""
+
+    fake = _FakeAt(
+        {
+            "button": ["real button"],
+            "link_button": ["real link button"],
+            "download_button": ["real download button"],
+            "text_input": ["real text input"],
+            "text_area": ["real text area"],
+            "number_input": ["real number input"],
+            "selectbox": ["real selectbox"],
+            "radio": ["real radio"],
+            "checkbox": ["real checkbox"],
+            "slider": ["real slider"],
+            "segmented_control": ["real segmented control"],
+            "file_uploader": ["Add a picture"],
+            "toggle": ["Show suggested colours"],
+            "multiselect": ["Choose several"],
+        }
+    )
+
+    labels = _all_labels(fake)
+    for expected in ("Add a picture", "Show suggested colours", "Choose several"):
+        assert expected in labels, f"{expected!r} missing from {labels}"
 
 
 def test_no_control_uses_a_typed_glyph_as_an_icon() -> None:

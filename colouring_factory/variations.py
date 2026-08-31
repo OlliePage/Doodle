@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .generators import GOOGLE_ENDPOINT, GeneratorError
+from .models import GeneratedArtwork
 from .providers import get_provider
 
 VARIATION_AXES: dict[str, tuple[str, ...]] = {
@@ -212,3 +214,22 @@ def build_variation_briefs(
         return written_briefs(concept, count, provider_id=provider_id, api_key=api_key)
     except (GeneratorError, ValueError):
         return axis_briefs(concept, count)
+
+
+def split_pairing_results(
+    artworks: Sequence[GeneratedArtwork], *, pairing: bool, total_jobs: int
+) -> tuple[list[GeneratedArtwork], GeneratedArtwork | None]:
+    """Divide finished pictures into the child-facing set and an optional
+    grown-up sheet.
+
+    Pairing draws exactly two pictures, the second at grown-up detail, and
+    that rule holds regardless of whether every picture actually finished:
+    stopping after only the first of the two must not attach a grown-up
+    sheet that was never drawn. A batch that was never pairing at all has
+    no grown-up sheet no matter how many of its alternatives finished.
+    """
+
+    pairing_completed = pairing and total_jobs > 0 and len(artworks) >= total_jobs
+    if pairing_completed:
+        return list(artworks[:-1]), artworks[-1]
+    return list(artworks), None

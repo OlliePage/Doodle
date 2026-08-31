@@ -4,14 +4,32 @@ import html
 import hashlib
 import json
 import re
+import time
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 
 import streamlit as st
 
+from colouring_factory.appearance import describe_appearance
 from colouring_factory.badge_preview import render_badge_preview
 from colouring_factory.browser_print import print_trigger_html
 from colouring_factory.calibration import profile_from_measurements
+from colouring_factory.characters import (
+    CHARACTER_KINDS,
+    Character,
+    character_portrait_mtime,
+    characters_signature,
+    delete_character,
+    list_characters,
+    load_character_image,
+    load_character_portrait,
+    resolve_cast,
+    save_character,
+    toggle_chosen,
+    update_character,
+    update_character_portrait,
+)
 from colouring_factory.demo import list_demo_artwork
 from colouring_factory.credentials import (
     delete_provider_key,
@@ -27,6 +45,15 @@ from colouring_factory.generators import (
 )
 from colouring_factory import history
 from colouring_factory.guidance import guidance_for
+from colouring_factory.timings import (
+    AXIS_SECONDS,
+    bar_heights,
+    histogram,
+    load_timings,
+    recent_durations,
+    record_timing,
+    settings_key,
+)
 from colouring_factory.version import build_label
 from colouring_factory.image_processing import analyse_line_art, normalise_line_art
 from colouring_factory.layouts import (
@@ -38,6 +65,7 @@ from colouring_factory.models import (
     CircleSheetConfig,
     CustomPageConfig,
     FullPageConfig,
+    GeneratedArtwork,
     ProcessingOptions,
 )
 from colouring_factory.pdf_export import (
@@ -46,6 +74,7 @@ from colouring_factory.pdf_export import (
     create_custom_page_pdf,
     create_full_page_pdf,
 )
+from colouring_factory.photos import MAX_ARTWORK_EDGE_PX, prepare_photo
 from colouring_factory.preview import render_pdf_preview
 from colouring_factory.providers import (
     DEFAULT_PROVIDER,
@@ -55,11 +84,13 @@ from colouring_factory.providers import (
 )
 from colouring_factory.prompts import (
     STYLE_PRESETS,
+    build_caricature_prompt,
+    build_character_scene_prompt,
     build_colouring_prompt,
     build_colour_suggestion_prompt,
     build_refinement_prompt,
 )
-from colouring_factory.variations import build_variation_briefs
+from colouring_factory.variations import build_variation_briefs, split_pairing_results
 from colouring_factory.storage import (
     GROWN_UP_LEVEL,
     QUICK_AGE_CHOICES,
@@ -79,6 +110,35 @@ from colouring_factory.storage import (
 # black/white pass then breaks into a dotted line. Medium produces fewer of
 # those strokes in the first place.
 DEFAULT_QUALITY = "medium"
+
+
+def _drawing_already_in_flight(flag_key: str) -> bool:
+    """Whether a paid call under this key is already running.
+
+    Streamlit can queue a click made while that same control's previous
+    press is still blocked in a network call, and replay it the moment the
+    call returns — which used to buy a second picture from one press.
+    Callers check this before starting work and skip the click outright
+    when it is already true.
+    """
+
+    return bool(st.session_state.get(flag_key))
+
+
+@contextmanager
+def _mark_in_flight(flag_key: str):
+    """Flags a paid call as running for the width of the call.
+
+    Always cleared on the way out, success or exception, so a call that
+    fails leaves its control pressable again rather than wedged shut for
+    the rest of the session.
+    """
+
+    st.session_state[flag_key] = True
+    try:
+        yield
+    finally:
+        st.session_state[flag_key] = False
 
 
 st.set_page_config(
@@ -222,17 +282,26 @@ st.markdown(
 st.html(
     f"""
     <style>
+      /* Selectable on purpose. The badge exists so two people can confirm
+         they are running the same code, which means reading it out is not
+         enough — it has to be copyable. One click takes the whole label. */
       .doodle-build {{
         position: fixed;
-        right: .75rem;
-        bottom: .5rem;
+        right: .4rem;
+        bottom: .15rem;
         z-index: 1000;
+        padding: .35rem .5rem;
         font-size: .7rem;
         font-variant-numeric: tabular-nums;
         color: var(--doodle-muted, #676b70);
-        opacity: .7;
-        pointer-events: none;
-        user-select: none;
+        opacity: .55;
+        cursor: text;
+        -webkit-user-select: all;
+        user-select: all;
+        transition: opacity .15s ease;
+      }}
+      .doodle-build:hover {{
+        opacity: 1;
       }}
     </style>
     <div class="doodle-build">{build_label()}</div>
@@ -260,6 +329,7 @@ def _initialise_state() -> None:
         "screen": "home",
         "home_prompt": "",
         "home_error": "",
+        "home_error_code": "",
         "generation_idea": "",
         "candidates": [],
         "current_raw": None,
@@ -270,14 +340,23 @@ def _initialise_state() -> None:
         "pdf_summary": "",
         "pdf_signature": "",
         "library_notice": "",
+        "character_notice": "",
+        "character_duplicate_notice": "",
         "library_return": "home",
         "pending_delete": "",
+        # The picker's ticks live here rather than in per-character widget keys.
+        # Streamlit garbage-collects a widget key the moment its widget is not
+        # rendered, so ticking someone, visiting this screen and coming back
+        # would silently lose every tick.
+        "chosen_characters": [],
+        "pending_character_delete": "",
         "quick_processed": None,
         "quick_pdf": None,
         "quick_saved": False,
         "pair_raw": None,
         "pair_processed": None,
         "pair_pdf": None,
+        "badge_previews": {},
         "colour_previews": {},
         "showing_colours": False,
         "session_provider_keys": {},
@@ -289,6 +368,23 @@ def _initialise_state() -> None:
         "pending_provider": "",
         "quick_mode": "ai",
         "generation_nonce": 0,
+        # A batch in progress on the generate screen: which pictures remain
+        # to be drawn, and what has been drawn of them so far. Reset to
+        # empty whenever a batch finishes, is stopped, or fails — see
+        # _clear_generation_plan — so a fresh visit never continues a stale
+        # one left over from an earlier idea.
+        "generation_jobs": [],
+        "generation_collected": [],
+        "generation_uses_cast": False,
+        "generation_references": (),
+        "generation_chosen_ids": [],
+        "generation_pairing": False,
+        "generation_random_seed_base": 0,
+        "generation_stop_requested": False,
+        # Read and cleared at the top of the result screen: a failure that
+        # still kept what had already been drawn (unlike a stop, which the
+        # parent already knows they pressed) needs to say what happened.
+        "generation_notice": "",
         "doodle_versions": (),
         "current_version": 0,
     }
@@ -323,17 +419,32 @@ def _provider_key(provider_id: str | None = None) -> tuple[str, str]:
     return resolve_provider_key(provider, session_keys)
 
 
+def _model_for(provider_id: str, spec, settings: dict) -> str:
+    """Resolve the saved model choice, falling back when it is unset or stale.
+
+    Was three copies of the same two lines, each of which a fourth generation
+    site would otherwise have repeated a fourth time.
+    """
+
+    model = str(settings.get(f"{provider_id}_model", spec.default_model))
+    return model if model in spec.models else spec.default_model
+
+
 def _submit_home_prompt() -> None:
     prompt = str(st.session_state.get("home_prompt", "")).strip()
     if not prompt:
         return
     st.session_state.generation_idea = prompt
     st.session_state.home_error = ""
+    st.session_state.home_error_code = ""
     st.session_state.connection_error = None
     st.session_state.connect_return = "generate"
     st.session_state.connect_replace = False
     st.session_state.quick_mode = "ai"
     st.session_state.generation_nonce = 0
+    # A batch left behind by a stopped or finished earlier drawing must not
+    # be picked back up as though it belonged to this new idea.
+    _clear_generation_plan()
     api_key, _source = _provider_key()
     st.session_state.screen = "generate" if api_key else "connect"
 
@@ -342,6 +453,7 @@ def _start_new_doodle() -> None:
     st.session_state.screen = "home"
     st.session_state.home_prompt = ""
     st.session_state.home_error = ""
+    st.session_state.home_error_code = ""
     st.session_state.generation_idea = ""
     st.session_state.candidates = []
     st.session_state.current_raw = None
@@ -356,10 +468,21 @@ def _start_new_doodle() -> None:
     st.session_state.pair_raw = None
     st.session_state.pair_processed = None
     st.session_state.pair_pdf = None
+    # badge_previews is deliberately left alone, the same rule colour_previews
+    # already follows: both are content-addressed caches, so an entry for a
+    # picture no longer on screen is just unused, never wrong.
     st.session_state.showing_colours = False
     st.session_state.connection_error = None
     st.session_state.quick_mode = "ai"
     st.session_state.generation_nonce = 0
+    _clear_generation_plan()
+    # A chain left behind points the change box at the previous picture, so a
+    # refinement quietly edits a doodle that is no longer on screen.
+    st.session_state.doodle_versions = ()
+    st.session_state.current_version = 0
+    # chosen_characters is deliberately left alone: a parent drawing for the
+    # same children wants the same cast next time, the same reasoning the
+    # homepage settings already follow.
     st.rerun()
 
 
@@ -523,7 +646,14 @@ def _render_homepage() -> None:
         if st.session_state.screen != "home":
             st.rerun()
     if st.session_state.get("home_error"):
-        st.error(st.session_state.home_error)
+        code = str(st.session_state.get("home_error_code") or "")
+        if code:
+            # A code carries the named control that owns the fix, not just
+            # the bare failure message: "Untick some characters and draw
+            # again," rather than a sentence naming no provider at all.
+            _show_guidance(code, detail=st.session_state.home_error)
+        else:
+            st.error(st.session_state.home_error)
 
     _render_home_options()
 
@@ -567,9 +697,58 @@ def _cached_badge_preview(
     return render_badge_preview(image_bytes, config, calibration)
 
 
+@st.cache_data(show_spinner=False, max_entries=32)
+def _cached_badge_sheet_pdf(
+    image_bytes: bytes, config_payload: str, calibration_payload: str
+) -> bytes:
+    """The actual A4 sheet of badges the strip's preview only shows a hint of.
+
+    Built through the same create_circle_sheet_pdf every other circle-sheet
+    export uses, so a printed sheet cannot drift from what Doodle Studio's own
+    "A4 circle sheet" layout would produce from the identical config.
+    """
+
+    config = CircleSheetConfig(**json.loads(config_payload))
+    calibration = CalibrationProfile.from_dict(json.loads(calibration_payload))
+    pdf_bytes, _count = create_circle_sheet_pdf(image_bytes, config, calibration)
+    return pdf_bytes
+
+
 @st.cache_data(show_spinner=False)
 def _calibration_pdf() -> bytes:
     return create_calibration_pdf()
+
+
+@st.cache_data(show_spinner=False)
+def _cached_characters(signature: tuple) -> list[Character]:
+    return list_characters()
+
+
+def _characters() -> list[Character]:
+    """The saved cast, re-parsed from disk only when something about it has
+    actually changed (FB-19/ARCH-02): every other disk-heavy read in this
+    file is cached, but this one used to re-read and re-parse every
+    character's JSON on every interaction anywhere on the screen it renders
+    into, including one that has nothing to do with the cast."""
+
+    return _cached_characters(characters_signature())
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def _cached_character_portrait(
+    character_id: str, portrait_mtime_ns: int
+) -> bytes | None:
+    return load_character_portrait(character_id)
+
+
+def _character_portrait(character_id: str) -> bytes | None:
+    """A character's portrait, decoded once and reused until that specific
+    portrait file is rewritten — a redraw changes its own mtime and busts
+    only its own cache entry, leaving every other character's untouched."""
+
+    return _cached_character_portrait(
+        character_id, character_portrait_mtime(character_id)
+    )
 
 
 def _set_current_artwork(raw: bytes, *, title: str, metadata: dict) -> None:
@@ -610,6 +789,52 @@ def _start_version_chain(artwork) -> None:
     st.session_state.current_version = 0
 
 
+def _render_brand_home(where: str, *, centred: bool = False) -> None:
+    """The wordmark, and it goes home when pressed.
+
+    Every app with a logo in the corner has taught people that pressing it
+    goes home. Streamlit cannot make a markdown block clickable and an anchor
+    cannot be clicked in a test, so a real button is laid over the wordmark:
+    it carries the label a screen reader announces, and the styling below
+    makes it invisible.
+
+    This is a function rather than four copies because it was three copies,
+    and the two screens that drew the wordmark on their own — the saved
+    doodles and the connection screen — each drew a dead one. Any screen
+    wanting the wordmark now gets the route with it.
+    """
+
+    # The one place besides the homepage where injected styling is needed, and
+    # for the same reason recorded there: the defect lives inside Streamlit's
+    # own chrome and no native API reaches it. Nothing here changes what the
+    # button does, only whether the parent sees a button or the wordmark.
+    st.markdown(
+        """
+        <style>
+          [class*="st-key-doodle-brand-"] {position:relative;}
+          [class*="st-key-doodle-brand-"] [data-testid="stButton"] {
+            position:absolute; inset:0; margin:0;
+          }
+          [class*="st-key-doodle-brand-"] [data-testid="stButton"] button {
+            width:100%; height:100%; opacity:0; cursor:pointer;
+            padding:0; min-height:0; border:none; background:transparent;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key=f"doodle-brand-{where}"):
+        st.markdown(
+            _doodle_logo("compact", centred=centred), unsafe_allow_html=True
+        )
+        if st.button(
+            "Doodle, back to the homepage",
+            key=f"top_brand_{where}",
+            type="tertiary",
+        ):
+            _start_new_doodle()
+
+
 def _render_top_bar(*, where: str) -> None:
     """The logo and the two routes that must never be more than one click away.
 
@@ -620,7 +845,7 @@ def _render_top_bar(*, where: str) -> None:
 
     brand, saved, fresh = st.columns([3, 1.5, 1.3])
     with brand:
-        st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
+        _render_brand_home(where)
     with saved:
         count = _saved_doodle_count()
         if st.button(
@@ -711,22 +936,30 @@ def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
         disabled=not api_key,
     ):
         return
+    colour_busy_key = f"busy_colour_{key_prefix}"
+    if _drawing_already_in_flight(colour_busy_key):
+        # A queued replay of a click already being handled.
+        return
 
     settings = load_settings()
-    model = str(settings.get(f"{provider_id}_model", spec.default_model))
-    if model not in spec.models:
-        model = spec.default_model
+    model = _model_for(provider_id, spec, settings)
 
     try:
-        with st.spinner("Choosing colours…"):
-            artwork = refine_with_provider(
-                provider_id=provider_id,
-                api_key=api_key,
-                image_bytes=image_bytes,
-                prompt=build_colour_suggestion_prompt(),
-                model=model,
-                size=spec.portrait_size,
-            )
+        with _mark_in_flight(colour_busy_key):
+            with st.spinner("Choosing colours…"):
+                artwork = refine_with_provider(
+                    provider_id=provider_id,
+                    api_key=api_key,
+                    image_bytes=image_bytes,
+                    prompt=build_colour_suggestion_prompt(
+                        [
+                            (name, appearance)
+                            for _, name, _, _, appearance in _recorded_cast()
+                        ]
+                    ),
+                    model=model,
+                    size=spec.portrait_size,
+                )
     except GeneratorError as exc:
         _show_guidance(exc.code, detail=str(exc))
         return
@@ -759,6 +992,7 @@ def _render_alternatives_picker() -> None:
                 _adopt_artwork(
                     candidate,
                     st.session_state.current_metadata.get("concept", "Doodle"),
+                    characters=candidate.metadata.get("characters", []),
                 )
                 _prepare_quick_outputs()
                 st.rerun()
@@ -771,15 +1005,30 @@ def _render_alternatives_picker() -> None:
             )
 
 
+def _remember_chosen(character_id: str) -> None:
+    """Widget keys vanish when their widget is not rendered, so the answer
+    lives in a plain key and each box is told its value on the way in.
+
+    toggle_chosen (colouring_factory.characters) is the pure add-or-remove
+    logic; this is only the session-state read and write around it.
+    """
+
+    ticked = bool(st.session_state.get(f"character_pick_{character_id}"))
+    st.session_state.chosen_characters = toggle_chosen(
+        st.session_state.get("chosen_characters", []), character_id, ticked=ticked
+    )
+
+
 def _render_home_options() -> None:
-    """The three questions the homepage asks before it draws anything.
+    """The questions the homepage asks before it draws anything.
 
     Pressing Enter used to draw one picture on fixed settings, with the only
     controls for them buried in Doodle Studio, behind the drawing that had
     already been paid for. Answering them in a panel below the bar turned the
     page into a stack of boxes, so the answers are a line of small grey text
     instead, and each one opens its choices in a floating panel rather than
-    pushing the page around.
+    pushing the page around. Who is in the picture joins the same line, once
+    there is a saved cast to put in it.
     """
 
     settings = load_settings()
@@ -798,6 +1047,13 @@ def _render_home_options() -> None:
     pairing = bool(st.session_state.get("home_pair_grown_up", options["pair_grown_up"]))
     pairing = pairing and shown_age != GROWN_UP_LEVEL
     age_label = f"{shown_age} + grown-up" if pairing else str(shown_age)
+
+    # Read-through against the current cast, the same discipline
+    # quick_drawing_options applies to the saved settings: an id left over
+    # from a character who has since been deleted must not be counted.
+    chosen_ids = set(st.session_state.get("chosen_characters", []))
+    cast = _characters()
+    active_spec = get_provider(_active_provider_id())
 
     with st.container(
         key="doodle-home-settings",
@@ -845,6 +1101,70 @@ def _render_home_options() -> None:
                 index=list(QUICK_STYLE_CHOICES).index(options["style"]),
                 key="home_style",
             )
+        # Rendered from the first run, unlike Saved doodles (n) in the
+        # corner: hiding this until a cast existed left no control anywhere
+        # that reached the characters screen, so a parent could never add
+        # their first character. Hidden only when the active service cannot
+        # look at a reference picture at all, in which case nothing here
+        # could work regardless of what is saved.
+        if active_spec.max_reference_images >= 1:
+            cast_ids = {character.id for character in cast}
+            count = len(chosen_ids & cast_ids)
+            limit = active_spec.max_reference_images
+            # A face rather than a word, because this item answers "who" while
+            # its three neighbours answer "how", and the icon says so at a
+            # glance without spending any of the line's width. The count sits
+            # beside it when there is one; alone, the face reads as nobody yet.
+            label = "" if not count else str(count)
+            # The trigger label stays a count, never a list of names: the
+            # settings line it sits on cannot shrink or ellipsise. The portrait
+            # is what tells two same-named characters apart (a girl and her
+            # teddy both called Ida), so it lives inside the panel instead.
+            with st.popover(label, type="tertiary", icon=":material/face:"):
+                if cast:
+                    st.caption(
+                        "Doodle draws these characters into the picture. "
+                        f"{active_spec.label} looks at up to {limit} at once."
+                    )
+                    for character in cast:
+                        ticked = character.id in chosen_ids
+                        portrait_col, tick_col = st.columns(
+                            [1, 4], vertical_alignment="center"
+                        )
+                        with portrait_col:
+                            portrait = _character_portrait(character.id)
+                            if portrait is not None:
+                                st.image(portrait, width=36)
+                            else:
+                                st.markdown(":material/broken_image:")
+                        with tick_col:
+                            st.checkbox(
+                                character.name,
+                                key=f"character_pick_{character.id}",
+                                value=ticked,
+                                on_change=_remember_chosen,
+                                args=(character.id,),
+                                # Ticking past what the connected service will
+                                # look at builds a request that cannot
+                                # succeed, so the box is disabled once the cap
+                                # is reached rather than left to fail later.
+                                # An already-ticked box stays enabled, so
+                                # unticking back under the cap is possible.
+                                disabled=not ticked and count >= limit,
+                            )
+                else:
+                    st.caption(
+                        "Save a person, toy or character once, then put them "
+                        "in any picture Doodle draws."
+                    )
+                if st.button("Add a character", width="stretch"):
+                    st.session_state.screen = "characters"
+                    st.rerun()
+        else:
+            st.caption(
+                f"{active_spec.label} cannot draw from a picture of someone. "
+                "Connect OpenAI or Google Gemini to add characters."
+            )
 
     # A segmented control returns None when its selection is cleared, which
     # would otherwise write a null into the settings file.
@@ -858,8 +1178,18 @@ def _render_home_options() -> None:
         save_settings({**settings, **chosen})
 
 
-def _adopt_artwork(artwork, idea: str) -> None:
-    """Make one generated picture the current doodle, starting its history."""
+def _adopt_artwork(artwork, idea: str, *, characters: list[str]) -> None:
+    """Make one generated picture the current doodle, starting its history.
+
+    `characters` is who the picture was actually drawn with, stamped here
+    rather than trusted to already be on artwork.metadata: this is the one
+    function every adoption path shares, so it is the one place a cast
+    cannot be silently dropped by a caller that forgets to carry it
+    forward. A badge redraw used to lose the cast this way on its very
+    first press, because the fresh artwork it adopted carried the
+    provider's own metadata, not the characters key the previous picture
+    had recorded.
+    """
 
     _set_current_artwork(
         artwork.image_bytes,
@@ -869,7 +1199,7 @@ def _adopt_artwork(artwork, idea: str) -> None:
             "concept": idea,
             "prompt": artwork.prompt,
             "model": artwork.model,
-            "generation": artwork.metadata,
+            "generation": {**artwork.metadata, "characters": characters},
         },
     )
     _start_version_chain(artwork)
@@ -1012,7 +1342,7 @@ def _render_library_grid() -> None:
 
 
 def _render_library_screen() -> None:
-    st.markdown(_doodle_logo("compact"), unsafe_allow_html=True)
+    _render_brand_home("library")
     st.header("Saved doodles")
     st.caption(f"Kept on this computer, in {data_root()}.")
 
@@ -1029,6 +1359,489 @@ def _render_library_screen() -> None:
     with new_col:
         if st.button("New doodle", width="stretch", icon=":material/add:"):
             _start_new_doodle()
+
+
+# The segmented control speaks the way a parent would ("A toy"); the storage
+# layer speaks its own fixed vocabulary. Built from CHARACTER_KINDS, not
+# hardcoded, so the two cannot drift apart if a kind is ever added there.
+CHARACTER_KIND_LABELS = dict(
+    zip(("A person", "A toy", "Something else"), CHARACTER_KINDS)
+)
+
+
+def _draw_character_portrait(
+    photo: bytes, name: str, kind: str, marks: str, appearance: str = ""
+) -> GeneratedArtwork:
+    """Draw one caricature from a reference photograph.
+
+    Uses the provider's square size, not its portrait size: a caricature is
+    nothing but a face, and a face is the most badge-shaped thing Doodle draws.
+    """
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+    settings = load_settings()
+    return refine_with_provider(
+        provider_id=provider_id,
+        api_key=api_key,
+        prompt=build_caricature_prompt(name, kind, marks, appearance),
+        reference_images=(photo,),
+        model=_model_for(provider_id, spec, settings),
+        size=spec.square_size,
+        quality=str(settings.get("openai_quality", DEFAULT_QUALITY)),
+    )
+
+
+def _open_character_portrait_as_doodle(character) -> None:
+    """Adopt an already-drawn portrait as the current doodle.
+
+    Reads the picture already on disk rather than drawing anything new, so
+    this costs nothing: adding someone to the cast and getting a printable
+    cartoon of their photograph are two different things a parent can want,
+    and this is the deliberate route to the second one, for a character
+    added just now or weeks ago alike.
+    """
+
+    portrait_bytes = load_character_image(character.id, portrait=True)
+    concept = f"{character.name}, drawn by Doodle"
+    # A portrait has no scene idea behind it, but "Draw this idea again" on
+    # the result screen always reads generation_idea: leaving it empty made
+    # that button raise missing_prompt the first time this route was used.
+    st.session_state.generation_idea = concept
+    _adopt_artwork(
+        GeneratedArtwork(
+            image_bytes=portrait_bytes, prompt="", provider="Doodle", model=""
+        ),
+        concept,
+        characters=[character.id],
+    )
+    _prepare_quick_outputs()
+    st.session_state.screen = "result"
+    st.rerun()
+
+
+def _render_characters_screen() -> None:
+    """Add a face to the cast, and see who is already in it.
+
+    Adding someone to the cast and getting a printable cartoon of their
+    photograph are two different things a parent can want, so this screen
+    stays on itself once a character is drawn or redrawn: a confirmation
+    names who changed, and every tile carries its own route to open that
+    portrait as a doodle when a print of it is what was actually wanted.
+    """
+
+    _render_top_bar(where="characters")
+
+    # The homepage's "Add a character" button is the only route here, so Back
+    # always has exactly one place to return to.
+    if st.button("Back", width="stretch", icon=":material/arrow_back:"):
+        st.session_state.screen = "home"
+        st.rerun()
+
+    st.header("Your characters")
+
+    if st.session_state.get("character_notice"):
+        st.success(st.session_state.character_notice, icon=":material/check:")
+        st.session_state.character_notice = ""
+    if st.session_state.get("character_duplicate_notice"):
+        st.info(st.session_state.character_duplicate_notice, icon=":material/info:")
+        st.session_state.character_duplicate_notice = ""
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+    kind_label_for_kind = {kind: label for label, kind in CHARACTER_KIND_LABELS.items()}
+    # A redraw always sends the stored photograph as a reference picture, the
+    # same call shape as drawing a character in for the first time, so it
+    # needs the same capability rather than only a key: on Recraft it used to
+    # disable on nothing, fail after the click, and explain itself only then.
+    can_redraw = bool(api_key) and spec.max_reference_images >= 1
+    # Describing a photograph is a text call, not an image one, so it needs
+    # a text model rather than reference-image support — Recraft fails this
+    # even though nothing about it stops it drawing a portrait.
+    can_describe = bool(api_key) and bool(spec.text_model)
+
+    characters = _characters()
+    if not characters:
+        st.info("No characters yet. Add your first one below.")
+    else:
+        columns = st.columns(3)
+        for index, character in enumerate(characters):
+            with columns[index % 3]:
+                with st.container(border=True):
+                    # A zero-byte or truncated portrait.png (a cloud-sync
+                    # placeholder, a disk fault) used to raise deep inside
+                    # st.image and take the whole screen down with it — every
+                    # character after the bad one, and the add form, gone
+                    # with no control left on the page to reach it. Degrading
+                    # to a placeholder keeps the name and the delete button.
+                    portrait = _character_portrait(character.id)
+                    if portrait is not None:
+                        st.image(portrait, width="stretch")
+                    else:
+                        st.info(
+                            "This picture could not be shown.",
+                            icon=":material/broken_image:",
+                        )
+                    st.markdown(f"**{character.name}**")
+
+                    if portrait is not None and st.button(
+                        "Open as a doodle",
+                        key=f"open_as_doodle_{character.id}",
+                        width="stretch",
+                        icon=":material/open_in_new:",
+                        help=(
+                            "Prints, saves and colours their portrait like "
+                            "any other doodle. Draws nothing new."
+                        ),
+                    ):
+                        _open_character_portrait_as_doodle(character)
+
+                    if st.session_state.get("pending_character_delete") == character.id:
+                        # Deleting a character removes the only copy of their
+                        # picture, so the second click is the one that does it.
+                        st.warning("Delete this character? This cannot be undone.")
+                        confirm_col, cancel_col = st.columns(2)
+                        with confirm_col:
+                            if st.button(
+                                "Delete for good",
+                                key=f"confirm_delete_character_{character.id}",
+                                width="stretch",
+                                icon=":material/delete_forever:",
+                            ):
+                                delete_character(character.id)
+                                st.session_state.pending_character_delete = ""
+                                st.session_state.chosen_characters = [
+                                    chosen
+                                    for chosen in st.session_state.chosen_characters
+                                    if chosen != character.id
+                                ]
+                                st.rerun()
+                        with cancel_col:
+                            if st.button(
+                                "Keep them",
+                                key=f"cancel_delete_character_{character.id}",
+                                width="stretch",
+                            ):
+                                st.session_state.pending_character_delete = ""
+                                st.rerun()
+                    elif st.button(
+                        "Delete",
+                        key=f"delete_character_{character.id}",
+                        width="stretch",
+                        icon=":material/delete:",
+                    ):
+                        st.session_state.pending_character_delete = character.id
+                        st.rerun()
+
+                    with st.expander("Edit"):
+                        # The repair for a typo or a bad likeness: change the
+                        # words with no redraw, or redraw from the photograph
+                        # already on disk with no fresh upload. Delete was
+                        # the only control before this, and it destroys the
+                        # photograph, so fixing a spelling mistake used to
+                        # cost a re-upload and a paid drawing.
+                        edit_name = st.text_input(
+                            "Name",
+                            value=character.name,
+                            key=f"edit_name_{character.id}",
+                        )
+                        edit_kind_label = st.segmented_control(
+                            "What are they",
+                            list(CHARACTER_KIND_LABELS),
+                            default=kind_label_for_kind.get(character.kind, "A person"),
+                            key=f"edit_kind_{character.id}",
+                        )
+                        edit_marks = st.text_area(
+                            "What makes them recognisable",
+                            value=character.marks,
+                            key=f"edit_marks_{character.id}",
+                            height=90,
+                        )
+                        edit_appearance = st.text_area(
+                            "How they really look",
+                            value=character.appearance,
+                            key=f"edit_appearance_{character.id}",
+                            height=90,
+                            placeholder=(
+                                "Brown eyes, wavy dark-brown hair to her "
+                                "shoulders, light-brown skin."
+                            ),
+                            help=(
+                                "Used to keep their hair, eyes and skin "
+                                "right when Doodle draws and colours them in."
+                            ),
+                        )
+                        if st.button(
+                            "Save changes",
+                            key=f"save_character_{character.id}",
+                            width="stretch",
+                            icon=":material/save:",
+                        ):
+                            if not edit_name.strip():
+                                st.error("Give them a name.")
+                            else:
+                                update_character(
+                                    character.id,
+                                    name=edit_name,
+                                    kind=CHARACTER_KIND_LABELS.get(
+                                        edit_kind_label or "A person", "person"
+                                    ),
+                                    marks=edit_marks,
+                                    appearance=edit_appearance,
+                                )
+                                st.rerun()
+
+                        if not character.appearance.strip():
+                            # The repair an existing character with no
+                            # description needs, without a fresh upload: the
+                            # redraw button below already loads this same
+                            # stored photograph.
+                            describe_busy_key = f"busy_describe_{character.id}"
+                            if st.button(
+                                "Fill in from their photo",
+                                key=f"describe_character_{character.id}",
+                                width="stretch",
+                                icon=":material/auto_fix_high:",
+                                disabled=not can_describe,
+                                help=(
+                                    "Drafts their hair, eyes and skin from "
+                                    "the photo already on file. Costs one "
+                                    "short text description."
+                                ),
+                            ) and not _drawing_already_in_flight(describe_busy_key):
+                                try:
+                                    stored_photo = load_character_image(
+                                        character.id, portrait=False
+                                    )
+                                    with _mark_in_flight(describe_busy_key):
+                                        with st.spinner(
+                                            f"Describing {character.name}…"
+                                        ):
+                                            description = describe_appearance(
+                                                stored_photo,
+                                                provider_id=provider_id,
+                                                api_key=api_key,
+                                            )
+                                except GeneratorError as exc:
+                                    _show_guidance(exc.code, detail=str(exc))
+                                else:
+                                    update_character(
+                                        character.id,
+                                        name=character.name,
+                                        kind=character.kind,
+                                        marks=character.marks,
+                                        appearance=description,
+                                    )
+                                    st.rerun()
+
+                        if not can_redraw and api_key:
+                            # The key exists, so this is the capability gap,
+                            # not the missing-key one: name it in advance
+                            # rather than let the button fail after a click.
+                            st.caption(
+                                f"{spec.label} cannot draw from a picture of "
+                                "someone. Connect OpenAI or Google Gemini to "
+                                "redraw a portrait."
+                            )
+                        redraw_busy_key = f"busy_redraw_{character.id}"
+                        if st.button(
+                            "Redraw their portrait",
+                            key=f"redraw_character_{character.id}",
+                            width="stretch",
+                            icon=":material/auto_awesome:",
+                            disabled=not can_redraw,
+                            help=(
+                                "Draws a fresh portrait from the photo "
+                                "already on file. Costs one generation."
+                            ),
+                        ) and not _drawing_already_in_flight(redraw_busy_key):
+                            try:
+                                stored_photo = load_character_image(
+                                    character.id, portrait=False
+                                )
+                                with _mark_in_flight(redraw_busy_key):
+                                    with st.spinner(f"Redrawing {character.name}…"):
+                                        new_portrait = _draw_character_portrait(
+                                            stored_photo,
+                                            character.name,
+                                            character.kind,
+                                            character.marks,
+                                            character.appearance,
+                                        )
+                            except GeneratorError as exc:
+                                _show_guidance(exc.code, detail=str(exc))
+                            else:
+                                update_character_portrait(
+                                    character.id, new_portrait.image_bytes
+                                )
+                                # A repair to the cast, like "Save changes"
+                                # beside it, not a doodle: stay here, naming
+                                # who was redrawn, rather than jump to the
+                                # result screen as if a fresh idea had been
+                                # drawn.
+                                st.session_state.character_notice = (
+                                    f"{character.name}'s portrait has been redrawn."
+                                )
+                                st.rerun()
+
+    st.divider()
+    st.subheader("Add a character")
+    # The only screen that asks for a photograph of a child, so the fact and
+    # the consequence belong right here, not on a Studio tab this journey
+    # never visits. The photograph is sent every time a picture is drawn
+    # with this character, not just once: see _draw_character_portrait and
+    # every load_character_image(..., portrait=False) call site.
+    st.caption(
+        "Their photograph is sent to the drawing service you have "
+        "connected, each time a picture is drawn with them — now, for "
+        "their portrait, and again for every scene or badge afterwards. "
+        "As soon as you choose it, the same service is also asked to "
+        "describe their hair, eyes and skin, so drawings and colouring "
+        "match them — check the description below and correct anything it "
+        "gets wrong. Removing a character deletes the copy Doodle holds."
+    )
+
+    uploaded = st.file_uploader(
+        "Add a picture",
+        type=["png", "jpg", "jpeg", "webp", "heic"],
+        accept_multiple_files=False,
+        help="A clear photo of their face works best.",
+    )
+
+    if uploaded is not None and api_key and spec.text_model:
+        # Fired once per distinct photo, not on every rerun: every widget on
+        # this form triggers one, and Streamlit gives no other signal that
+        # the file itself, rather than some other field, is what changed.
+        photo_hash = hashlib.sha256(uploaded.getvalue()).hexdigest()
+        if st.session_state.get("character_appearance_draft_hash") != photo_hash:
+            try:
+                draft_photo = prepare_photo(uploaded.getvalue())
+                draft = describe_appearance(
+                    draft_photo, provider_id=provider_id, api_key=api_key
+                )
+            except (ValueError, GeneratorError):
+                # Best-effort: a photo that cannot be described yet is not a
+                # reason to block the form. The text area below is still
+                # there, blank, for the parent to fill in by hand.
+                draft = ""
+            st.session_state.character_appearance = draft
+            st.session_state.character_appearance_draft_hash = photo_hash
+
+    name = st.text_input("Name", key="character_name")
+    kind_label = st.segmented_control(
+        "What are they",
+        list(CHARACTER_KIND_LABELS),
+        default="A person",
+        key="character_kind",
+    )
+    marks = st.text_area(
+        "What makes them recognisable",
+        key="character_marks",
+        height=90,
+        placeholder="Curly hair, round glasses, a gap in her front teeth.",
+    )
+    appearance = st.text_area(
+        "How they really look",
+        key="character_appearance",
+        height=90,
+        placeholder="Brown eyes, wavy dark-brown hair to her shoulders, light-brown skin.",
+        help=(
+            "Drafted from the photo, so the drawing and the colouring both "
+            "match them. Correct anything it gets wrong."
+        ),
+    )
+
+    if spec.max_reference_images < 1:
+        # The same rule as "Colour it in for me": read the capability and do
+        # not offer a button that can only fail, rather than let the parent
+        # press it and be told to change provider on a screen they are not on.
+        st.caption(
+            f"{spec.label} cannot draw from a picture of someone. Connect "
+            "OpenAI or Google Gemini to add a character."
+        )
+        return
+
+    if not api_key:
+        # Mirrors the capability guard above: a disabled button with no
+        # explanation and no route to the Connect screen was a dead end for
+        # any parent who explored the cast before typing an idea, which the
+        # settings-line popover's own copy invites them to do.
+        st.caption(f"Connect {spec.label}, or another provider, to add a character.")
+        if st.button("Connect a provider", width="stretch", icon=":material/link:"):
+            st.session_state.connect_return = "characters"
+            st.session_state.screen = "connect"
+            st.rerun()
+        return
+
+    if st.button(
+        "Draw them",
+        type="primary",
+        width="stretch",
+        icon=":material/auto_awesome:",
+        help=(
+            "Draws their portrait and saves them to your cast. Costs one "
+            "generation, plus one short text description from their photo."
+        ),
+    ):
+        if _drawing_already_in_flight("busy_add_character"):
+            # A queued replay of a click already being handled. Drawing
+            # again from here bought a real parent six identical characters
+            # from what he experienced as one press each.
+            return
+        if not uploaded:
+            st.error("Add a picture first.")
+            return
+        typed_name = name.strip()
+        if not typed_name:
+            st.error("Give them a name.")
+            return
+
+        try:
+            photo = prepare_photo(uploaded.getvalue())
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+
+        kind = CHARACTER_KIND_LABELS.get(kind_label or "A person", "person")
+        # Read before saving: a name shared with someone already in the cast
+        # is a duplicate worth mentioning, not a reason to compare the new
+        # arrival with themselves.
+        is_duplicate_name = typed_name.casefold() in {
+            existing.name.casefold() for existing in characters
+        }
+        try:
+            with _mark_in_flight("busy_add_character"):
+                with st.spinner(f"Drawing {typed_name}…"):
+                    artwork = _draw_character_portrait(
+                        photo, typed_name, kind, marks, appearance
+                    )
+        except GeneratorError as exc:
+            # Nothing is saved on a decline: a character with no portrait must
+            # never reach the store.
+            _show_guidance(exc.code, detail=str(exc))
+            return
+
+        save_character(
+            photo=photo,
+            portrait=artwork.image_bytes,
+            name=typed_name,
+            kind=kind,
+            marks=marks,
+            appearance=appearance,
+        )
+        # Adding someone to the cast is its own action, not a doodle in
+        # disguise: stay here, naming who was added, rather than jump to a
+        # screen headed "Your Doodle is ready" for a picture with no scene.
+        st.session_state.character_notice = f"{typed_name} is in your characters now."
+        if is_duplicate_name:
+            st.session_state.character_duplicate_notice = (
+                f'Another character is already named "{typed_name}". Doodle '
+                "keeps both — their photograph is what tells them apart in "
+                "the picker."
+            )
+        st.rerun()
 
 
 def _render_refine_controls(*, key_prefix: str) -> None:
@@ -1066,6 +1879,10 @@ def _render_refine_controls(*, key_prefix: str) -> None:
                             title=st.session_state.current_title,
                             metadata=st.session_state.current_metadata,
                         )
+                        # _set_current_artwork only sets current_raw: without
+                        # rebuilding quick_processed/quick_pdf here too, the
+                        # result screen kept showing the version just left.
+                        _prepare_quick_outputs()
                         st.rerun()
 
     with st.form(f"{key_prefix}_refine", clear_on_submit=True):
@@ -1091,24 +1908,27 @@ def _render_refine_controls(*, key_prefix: str) -> None:
     if not api_key:
         _show_guidance("missing_key")
         return
+    refine_busy_key = f"busy_refine_{key_prefix}"
+    if _drawing_already_in_flight(refine_busy_key):
+        # A queued replay of a click already being handled.
+        return
 
     base = chain[current]
     settings = load_settings()
-    model = str(settings.get(f"{provider_id}_model", spec.default_model))
-    if model not in spec.models:
-        model = spec.default_model
+    model = _model_for(provider_id, spec, settings)
 
     try:
         prompt = build_refinement_prompt(instruction)
-        with st.spinner("Making that change…"):
-            artwork = refine_with_provider(
-                provider_id=provider_id,
-                api_key=api_key,
-                image_bytes=base.artwork.image_bytes,
-                prompt=prompt,
-                model=model,
-                size=spec.portrait_size,
-            )
+        with _mark_in_flight(refine_busy_key):
+            with st.spinner("Making that change…"):
+                artwork = refine_with_provider(
+                    provider_id=provider_id,
+                    api_key=api_key,
+                    image_bytes=base.artwork.image_bytes,
+                    prompt=prompt,
+                    model=model,
+                    size=spec.portrait_size,
+                )
     except GeneratorError as exc:
         # The chain is untouched, so a failed change costs nothing but the call.
         _show_guidance(exc.code, detail=str(exc))
@@ -1126,6 +1946,11 @@ def _render_refine_controls(*, key_prefix: str) -> None:
         title=st.session_state.current_title,
         metadata={**st.session_state.current_metadata, "instruction": instruction},
     )
+    # _set_current_artwork only sets current_raw: without rebuilding
+    # quick_processed/quick_pdf here too, the result screen kept showing the
+    # picture from before the change, so pressing "Change it" appeared to do
+    # nothing at all.
+    _prepare_quick_outputs()
     st.rerun()
 
 
@@ -1181,7 +2006,9 @@ def _continue_after_connection() -> None:
     if destination == "generate":
         st.session_state.quick_mode = "ai"
     st.session_state.screen = (
-        destination if destination in {"generate", "studio", "result"} else "generate"
+        destination
+        if destination in {"generate", "studio", "result", "characters"}
+        else "generate"
     )
     st.rerun()
 
@@ -1225,7 +2052,7 @@ def _render_connection_setup() -> None:
             st.session_state.connection_error = None
             st.rerun()
     with top_middle:
-        st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
+        _render_brand_home("connect", centred=True)
     with top_right:
         st.empty()
 
@@ -1427,58 +2254,198 @@ def _render_connection_setup() -> None:
     )
 
 
-def _quick_generate() -> None:
+def _resolve_cast(character_ids) -> list[tuple[str, str, str, str, str]]:
+    """Wiring only: resolve_cast (colouring_factory.characters) is the pure
+    lookup; this just supplies it with the cached cast rather than reading
+    from disk directly."""
+
+    return resolve_cast(character_ids, _characters())
+
+
+def _cast_for_drawing() -> list[tuple[str, str, str, str, str]]:
+    """The ticked ids, resolved against who is actually still saved."""
+
+    return _resolve_cast(st.session_state.get("chosen_characters", []))
+
+
+def _recorded_cast() -> list[tuple[str, str, str, str, str]]:
+    """Who a doodle was actually drawn with, not who is ticked now.
+
+    _quick_generate records the cast a scene was drawn with on the artwork's
+    own metadata, under "generation" -> "characters". Reading that back here,
+    rather than the live tick list _cast_for_drawing reads, is what stops a
+    redraw putting a character into a picture — a sample, or an ordinary
+    idea drawn with no cast at all — that never had them. A picture drawn
+    without a recorded cast falls back to none, whatever is ticked now.
+    """
+
+    recorded_ids = (
+        st.session_state.get("current_metadata", {})
+        .get("generation", {})
+        .get("characters", [])
+    )
+    return _resolve_cast(recorded_ids)
+
+
+def _current_generation_idea() -> str:
     idea = str(st.session_state.get("generation_idea", "")).strip()
     if not idea:
         raise GeneratorError(
             "Describe what Doodle should draw first.", code="missing_prompt"
         )
+    return idea
 
-    if st.session_state.get("quick_mode") == "demo":
-        demos = list(list_demo_artwork().items())
-        nonce = int(st.session_state.get("generation_nonce", 0))
-        index = int(
-            hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
-        ) % len(demos)
-        demo_name, demo_path = demos[index]
-        raw = demo_path.read_bytes()
-        _set_current_artwork(
-            raw,
-            title=idea,
-            metadata={
-                "source": "Built-in sample",
-                "sample": demo_name,
-                "concept": idea,
-            },
+
+def _quick_generate_demo(idea: str) -> None:
+    """The built-in-sample path: one picture, chosen from disk, no charge.
+
+    Drawn in a single call with no stop button, unlike the AI path below:
+    there is nothing paid in flight to stop, and nothing already drawn to
+    keep if a parent changed their mind partway through.
+    """
+
+    demos = list(list_demo_artwork().items())
+    nonce = int(st.session_state.get("generation_nonce", 0))
+    index = int(
+        hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
+    ) % len(demos)
+    demo_name, demo_path = demos[index]
+    raw = demo_path.read_bytes()
+    _set_current_artwork(
+        raw,
+        title=idea,
+        metadata={
+            "source": "Built-in sample",
+            "sample": demo_name,
+            "concept": idea,
+        },
+    )
+    # A chain left over from an earlier picture would otherwise still be
+    # what the change box and badge redraw act on.
+    sample = GeneratedArtwork(
+        image_bytes=raw,
+        prompt=idea,
+        provider="Built-in sample",
+        model=demo_name,
+        metadata={"sample": demo_name, "concept": idea},
+    )
+    _start_version_chain(sample)
+    st.session_state.candidates = []
+    _prepare_quick_outputs()
+    _prepare_pair_outputs()
+
+
+def _quick_wanted_count() -> int:
+    """How many pictures this batch will draw, before the plan exists.
+
+    Known from the settings alone: pairing always draws exactly two
+    (the children's sheet and the grown-up one), whatever the alternatives
+    count says, and otherwise it is that count directly. Used only to show
+    a true "drawing 1 of N" on the very first render, before
+    _build_generation_plan has resolved the actual list of jobs.
+    """
+
+    options = quick_drawing_options(load_settings())
+    return 2 if options["pair_grown_up"] else int(options["alternatives"])
+
+
+def _clear_generation_plan() -> None:
+    """Forget an in-progress or finished batch's plan and any pictures kept.
+
+    Called whenever the generate screen stops for good — the batch finished,
+    the parent stopped it, or it failed — so the next visit always starts
+    from a fresh plan rather than quietly continuing a stale one.
+    """
+
+    st.session_state.generation_jobs = []
+    st.session_state.generation_collected = []
+    st.session_state.generation_seconds = []
+    st.session_state.generation_uses_cast = False
+    st.session_state.generation_references = ()
+    st.session_state.generation_chosen_ids = []
+    st.session_state.generation_pairing = False
+    st.session_state.generation_random_seed_base = 0
+    st.session_state.generation_stop_requested = False
+
+
+def _build_generation_plan(idea: str) -> None:
+    """One-time setup for a batch: which pictures to draw, and their prompts.
+
+    Everything here used to happen inside one call that then drew the whole
+    batch in the same breath. Splitting the plan out means each picture can
+    be drawn on its own script run — see _draw_next_quick_picture — with the
+    page coming back to life, stop button and all, between each one.
+    """
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+    if not api_key:
+        raise GeneratorError(
+            f"Connect {spec.label} before generating artwork.",
+            provider=spec.label,
+            code="missing_key",
         )
-        st.session_state.candidates = []
-    else:
-        provider_id = _active_provider_id()
-        spec = get_provider(provider_id)
-        api_key, _source = _provider_key(provider_id)
-        if not api_key:
-            raise GeneratorError(
-                f"Connect {spec.label} before generating artwork.",
-                provider=spec.label,
-                code="missing_key",
-            )
 
-        settings = load_settings()
-        options = quick_drawing_options(settings)
-        pairing = bool(options["pair_grown_up"])
-        wanted = 1 if pairing else int(options["alternatives"])
+    settings = load_settings()
+    options = quick_drawing_options(settings)
+    pairing = bool(options["pair_grown_up"])
+    wanted = 1 if pairing else int(options["alternatives"])
 
-        # One alternative needs no plan: the brief exists to pull several
-        # drawings of one idea apart from each other. A pair is the opposite
-        # errand, one scene drawn twice, so it never asks for briefs either.
-        briefs = [""]
-        if wanted > 1:
-            briefs = build_variation_briefs(
+    # One alternative needs no plan: the brief exists to pull several
+    # drawings of one idea apart from each other. A pair is the opposite
+    # errand, one scene drawn twice, so it never asks for briefs either.
+    briefs = [""]
+    if wanted > 1:
+        briefs = list(
+            build_variation_briefs(
                 idea, wanted, provider_id=provider_id, api_key=api_key
             )
+        )
 
-        def _prompt_for(level: str, brief: str) -> str:
-            return build_colouring_prompt(
+    levels = [str(options["age_profile"])] * len(briefs)
+    if pairing:
+        # The same words describe the scene both times, so the two sheets
+        # show the same picture and only the drawing rules differ. True
+        # whether or not a cast is chosen: pairing is one scene drawn at
+        # two detail levels, never two different scenes.
+        levels.append(GROWN_UP_LEVEL)
+        briefs.append(briefs[0])
+
+    chosen = _cast_for_drawing()
+    if chosen:
+        # A character drawing goes through refine_with_provider, the call
+        # that carries pictures, rather than generate_with_provider. The
+        # reference sent is the stored photograph, not the drawn portrait:
+        # the portrait is a deliberate caricature, and sending it as the
+        # likeness reference would draw every scene from that exaggeration
+        # rather than from the child or toy it was drawn from.
+        # The portrait, not the photograph. The library shows the parent
+        # this drawing, so it is what the scene has to agree with; drawing
+        # from the photograph instead produced a second reading of the same
+        # face that was close but not the same child.
+        references = tuple(
+            load_character_image(character_id, portrait=True)
+            for character_id, *_ in chosen
+        )
+        prompts = [
+            build_character_scene_prompt(
+                idea,
+                [
+                    (name, kind, marks, appearance)
+                    for _, name, kind, marks, appearance in chosen
+                ],
+                age_profile=level,
+                style_name=str(options["style"]),
+                target="A4 page",
+                variation_brief=brief,
+            )
+            for level, brief in zip(levels, briefs)
+        ]
+    else:
+        references = ()
+        prompts = [
+            build_colouring_prompt(
                 idea,
                 age_profile=level,
                 style_name=str(options["style"]),
@@ -1486,44 +2453,129 @@ def _quick_generate() -> None:
                 extra_instructions="One clear subject or action, generous white space, no caption or text.",
                 variation_brief=brief,
             )
+            for level, brief in zip(levels, briefs)
+        ]
 
-        levels = [str(options["age_profile"])] * len(briefs)
-        prompts = [_prompt_for(level, brief) for level, brief in zip(levels, briefs)]
-        if pairing:
-            # The same words describe the scene both times, so the two sheets
-            # show the same picture and only the drawing rules differ.
-            levels.append(GROWN_UP_LEVEL)
-            briefs.append(briefs[0])
-            prompts.append(_prompt_for(GROWN_UP_LEVEL, briefs[0]))
-        model = str(settings.get(f"{provider_id}_model", spec.default_model))
-        if model not in spec.models:
-            model = spec.default_model
-        # Medium rather than low: low quality renders more fine detail as pale
-        # grey that the black/white pass then breaks up.
-        quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
-        nonce = int(st.session_state.get("generation_nonce", 0))
-        random_seed = int(
-            hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
+    nonce = int(st.session_state.get("generation_nonce", 0))
+    random_seed_base = int(
+        hashlib.sha256(f"{idea}|{nonce}".encode("utf-8")).hexdigest()[:8], 16
+    )
+
+    st.session_state.generation_jobs = [
+        {"prompt": prompt, "level": level, "brief": brief}
+        for prompt, level, brief in zip(prompts, levels, briefs)
+    ]
+    st.session_state.generation_collected = []
+    st.session_state.generation_seconds = []
+    st.session_state.generation_uses_cast = bool(chosen)
+    st.session_state.generation_references = references
+    st.session_state.generation_chosen_ids = [
+        character_id for character_id, *_ in chosen
+    ]
+    st.session_state.generation_pairing = pairing
+    st.session_state.generation_random_seed_base = random_seed_base
+
+
+def _draw_next_quick_picture(job_index: int) -> GeneratedArtwork:
+    """Draw exactly one picture from the frozen plan: one paid call.
+
+    Whichever provider is connected, generate_with_provider and
+    refine_with_provider each make one request per prompt they are handed,
+    so passing a single-item prompt list is what keeps this to one call.
+    """
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+    settings = load_settings()
+    model = _model_for(provider_id, spec, settings)
+    # Medium rather than low: low quality renders more fine detail as pale
+    # grey that the black/white pass then breaks up.
+    quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
+
+    job = st.session_state.generation_jobs[job_index]
+    chosen_ids = list(st.session_state.generation_chosen_ids)
+
+    started = time.monotonic()
+    if st.session_state.generation_uses_cast:
+        artwork = refine_with_provider(
+            provider_id=provider_id,
+            api_key=api_key,
+            prompt=job["prompt"],
+            reference_images=st.session_state.generation_references,
+            model=model,
+            size=spec.portrait_size,
+            quality=quality,
         )
+    else:
+        # Advances the seed by this job's position, the same offset
+        # generate_with_provider's own per-prompt loop would have applied
+        # had the whole batch still been handed to it as one list.
+        random_seed = int(st.session_state.generation_random_seed_base) + job_index
         artworks = generate_with_provider(
             provider_id=provider_id,
             api_key=api_key,
-            prompts=prompts,
+            prompts=[job["prompt"]],
             model=model,
             size=spec.portrait_size,
             quality=quality,
             random_seed=random_seed,
         )
-        for artwork, brief, level in zip(artworks, briefs, levels):
-            artwork.metadata["brief"] = brief
-            artwork.metadata["detail_level"] = level
+        artwork = artworks[0]
 
-        grown_up = artworks[-1] if pairing else None
-        for_children = artworks[:-1] if pairing else artworks
-        st.session_state.candidates = for_children if len(for_children) > 1 else []
-        _adopt_artwork(for_children[0], idea)
-        st.session_state.pair_raw = grown_up.image_bytes if grown_up else None
+    # Timed around the paid call alone. Timing the whole script run would fold
+    # in the planning call that only the first picture of a batch carries and
+    # the two PDF builds only the last one carries, and neither is time spent
+    # waiting for this picture. Recorded before anything below can raise, so a
+    # slow drawing still teaches the next wait what to expect.
+    drawn_in = time.monotonic() - started
+    record_timing(
+        seconds=drawn_in,
+        settings_key=settings_key(
+            provider=provider_id,
+            model=model,
+            quality=quality,
+            size=spec.portrait_size,
+            with_references=bool(st.session_state.generation_uses_cast),
+        ),
+    )
+    st.session_state.generation_seconds = [
+        *st.session_state.get("generation_seconds", []),
+        drawn_in,
+    ]
 
+    artwork.metadata["brief"] = job["brief"]
+    artwork.metadata["detail_level"] = job["level"]
+    # Recorded so a later badge redraw draws whoever was actually in this
+    # picture, never whoever happens to be ticked when that button is
+    # pressed — see _recorded_cast.
+    artwork.metadata["characters"] = chosen_ids
+    return artwork
+
+
+def _finish_quick_generation() -> None:
+    """Adopt whatever has been drawn and land on the result screen.
+
+    Called both when a batch finishes on its own and when a parent stops it
+    partway through: either way, whatever is in generation_collected is
+    everything that gets kept, exactly as if that many had been asked for.
+    """
+
+    idea = str(st.session_state.get("generation_idea", ""))
+    collected = list(st.session_state.get("generation_collected") or [])
+    jobs = st.session_state.get("generation_jobs") or []
+    pairing = bool(st.session_state.get("generation_pairing"))
+    chosen_ids = list(st.session_state.get("generation_chosen_ids") or [])
+
+    for_children, grown_up = split_pairing_results(
+        collected, pairing=pairing, total_jobs=len(jobs)
+    )
+
+    st.session_state.candidates = for_children if len(for_children) > 1 else []
+    _adopt_artwork(for_children[0], idea, characters=chosen_ids)
+    st.session_state.pair_raw = grown_up.image_bytes if grown_up else None
+
+    _clear_generation_plan()
     _prepare_quick_outputs()
     _prepare_pair_outputs()
     st.session_state.screen = "result"
@@ -1565,6 +2617,10 @@ A4_SHEET = FullPageConfig(
     caption="",
     caption_font_size_pt=17.0,
     caption_area_mm=27.0,
+)
+
+BADGE_58MM = CircleSheetConfig(
+    finished_diameter_mm=58.0, cut_diameter_mm=58.0, safe_diameter_mm=50.0
 )
 
 
@@ -1632,18 +2688,544 @@ def _render_grown_up_sheet() -> None:
         )
 
 
+# TARGET_RULES["Round badge"] already asks for a square, corners-empty
+# composition, but naming the crop explicitly is what actually keeps a model
+# from filling the corners anyway — the same lesson BADGE_CORNERS_RULE
+# records for the caricature prompt.
+_BADGE_REDRAW_EXTRA_INSTRUCTIONS = (
+    "This picture will be cut into a circle to make a badge, so keep the "
+    "four corners empty and fill the frame with one clear subject."
+)
+
+
+def _render_badge_strip() -> None:
+    """Every finished doodle, already fitted to a 58 mm badge for free.
+
+    Keyed by a hash of the picture actually on screen, the same shape
+    colour_previews already uses for the coloured-copy cache: a redraw, a
+    refinement or a swapped alternative all just change quick_processed, and
+    whatever that now is gets looked up (or computed and cached) fresh here.
+    Nothing has to remember to call a separate "keep the badge in sync"
+    function, so no path can leave a stale one behind.
+    """
+
+    processed = st.session_state.get("quick_processed")
+    if not processed:
+        return
+
+    # Read once per run, whether or not the preview cache hits: the badge
+    # sheet built below needs the same profile, and loading it only on a
+    # cache miss left it undefined the rest of the time.
+    calibration = CalibrationProfile.from_dict(load_settings().get("calibration"))
+
+    cache = st.session_state.setdefault("badge_previews", {})
+    key = _colour_key(processed)
+    preview = cache.get(key)
+    if preview is None:
+        preview = _cached_badge_preview(
+            processed,
+            json.dumps(asdict(BADGE_58MM), sort_keys=True),
+            json.dumps(calibration.to_dict(), sort_keys=True),
+        )
+        cache[key] = preview
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+
+    with st.container(border=True):
+        st.markdown("**Your badge**")
+        st.image(preview, width="stretch")
+        st.caption(
+            "Your doodle fitted to a 58 mm badge. Doodle can draw it again "
+            "composed for the circle instead, which costs one generation."
+        )
+        if st.button(
+            "Draw it for a badge",
+            width="stretch",
+            icon=":material/badge:",
+            key="draw_for_badge",
+            disabled=not api_key,
+        ) and not _drawing_already_in_flight("busy_badge"):
+            idea = (
+                str(
+                    st.session_state.get("current_metadata", {}).get("concept")
+                    or st.session_state.get("current_title", "")
+                ).strip()
+                or "Doodle"
+            )
+            settings = load_settings()
+            options = quick_drawing_options(settings)
+            model = _model_for(provider_id, spec, settings)
+            quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
+            # The cast this doodle was actually drawn with, not whoever is
+            # ticked right now: ticking someone after the fact must not put
+            # them into a picture — a sample, or an ordinary idea drawn
+            # with no cast — that never had them.
+            chosen = _recorded_cast()
+
+            try:
+                with _mark_in_flight("busy_badge"):
+                    with st.spinner("Composing it for a badge…"):
+                        if chosen:
+                            # The same portrait the scene was drawn from,
+                            # so a badge of your daughter is the same girl as
+                            # the page it was cut from.
+                            references = tuple(
+                                load_character_image(character_id, portrait=True)
+                                for character_id, *_ in chosen
+                            )
+                            artwork = refine_with_provider(
+                                provider_id=provider_id,
+                                api_key=api_key,
+                                prompt=build_character_scene_prompt(
+                                    idea,
+                                    [
+                                        (name, kind, marks, appearance)
+                                        for _, name, kind, marks, appearance in chosen
+                                    ],
+                                    age_profile=str(options["age_profile"]),
+                                    style_name=str(options["style"]),
+                                    target="Round badge",
+                                    extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
+                                ),
+                                reference_images=references,
+                                model=model,
+                                size=spec.square_size,
+                                quality=quality,
+                            )
+                        else:
+                            artworks = generate_with_provider(
+                                provider_id=provider_id,
+                                api_key=api_key,
+                                prompts=[
+                                    build_colouring_prompt(
+                                        idea,
+                                        age_profile=str(options["age_profile"]),
+                                        style_name=str(options["style"]),
+                                        target="Round badge",
+                                        extra_instructions=_BADGE_REDRAW_EXTRA_INSTRUCTIONS,
+                                    )
+                                ],
+                                model=model,
+                                size=spec.square_size,
+                                quality=quality,
+                            )
+                            artwork = artworks[0]
+            except GeneratorError as exc:
+                _show_guidance(exc.code, detail=str(exc))
+            else:
+                st.session_state.candidates = []
+                _adopt_artwork(
+                    artwork,
+                    idea,
+                    characters=[character_id for character_id, *_ in chosen],
+                )
+                _prepare_quick_outputs()
+                st.rerun()
+
+        # The strip previewed a badge and, above, can charge a generation to
+        # compose one, so it has to be able to produce an actual badge too:
+        # the same circle-sheet layout Doodle Studio's "A4 circle sheet"
+        # export uses, at the 58 mm size this strip already advertises.
+        sheet_pdf = _cached_badge_sheet_pdf(
+            processed,
+            json.dumps(asdict(BADGE_58MM), sort_keys=True),
+            json.dumps(calibration.to_dict(), sort_keys=True),
+        )
+        st.caption("An A4 sheet of these badges, ready to cut out.")
+        if st.button(
+            "Print your badges",
+            type="primary",
+            width="stretch",
+            icon=":material/print:",
+            key="print_badges",
+        ):
+            _send_to_printer(sheet_pdf)
+        _render_print_help(
+            sheet_pdf,
+            file_name=f"{_slug(st.session_state.current_title)}-58mm-badges.pdf",
+            key="badges",
+            scale_note=False,
+        )
+
+
+# A failure about the picture or the cast Doodle was asked to draw, not
+# about the connection: routing these to the Connect screen showed "such-
+# and-such is connected" next to a message naming no provider at all, and
+# on a provider the Connect screen's stale-provider filter did not match
+# (Google Gemini, reached only through this feature's reference-image
+# call), the parent was moved there with nothing shown at all.
+_PICTURE_OR_CAST_CODES = frozenset(
+    {
+        "content",
+        "missing_prompt",
+        "photo_declined",
+        "too_many_references",
+        "no_reference_support",
+        "missing_picture",
+    }
+)
+
+
+def _route_generation_failure(exc: GeneratorError) -> None:
+    """Send a failed drawing attempt to the screen its kind of failure needs.
+
+    A failure about the picture or the cast Doodle was asked to draw, not
+    about the connection: routing these to the Connect screen showed "such-
+    and-such is connected" next to a message naming no provider at all, and
+    on a provider the Connect screen's stale-provider filter did not match
+    (Google Gemini, reached only through this feature's reference-image
+    call), the parent was moved there with nothing shown at all.
+    """
+
+    provider_id = _active_provider_id()
+    _key, source = _provider_key(provider_id)
+    if exc.code in _PICTURE_OR_CAST_CODES:
+        st.session_state.home_error = str(exc)
+        st.session_state.home_error_code = exc.code
+        st.session_state.home_prompt = st.session_state.generation_idea
+        st.session_state.screen = "home"
+    else:
+        st.session_state.home_error_code = ""
+        st.session_state.connection_error = _provider_connection_message(exc)
+        st.session_state.connect_return = "generate"
+        st.session_state.connect_replace = exc.code in {
+            "authentication",
+            "permission",
+        }
+        if exc.code == "authentication":
+            session_keys = dict(st.session_state.get("session_provider_keys", {}))
+            session_keys.pop(provider_id, None)
+            st.session_state.session_provider_keys = session_keys
+            if source == "this Mac":
+                delete_provider_key(provider_id)
+        st.session_state.screen = "connect"
+
+
+def _route_generation_value_error(exc: ValueError) -> None:
+    # Undecodable image bytes, or artwork the layout cannot place. Without
+    # this the user sees a traceback and the screen stays on "generate", so
+    # every rerun fires another paid generation.
+    st.session_state.home_error = (
+        f"That picture could not be prepared for printing: {exc}"
+    )
+    st.session_state.home_error_code = ""
+    st.session_state.home_prompt = st.session_state.generation_idea
+    st.session_state.screen = "home"
+
+
+def _stop_quick_generation() -> None:
+    """Handle a press of Stop: keep whatever is drawn, or go home with
+    nothing lost if nothing has been drawn yet.
+
+    The request already sent for the picture in flight, if any, still
+    finishes and is still charged — this only stops the ones after it, by
+    never starting them.
+    """
+
+    if st.session_state.get("generation_collected"):
+        _finish_quick_generation()
+        return
+    st.session_state.home_prompt = st.session_state.get("generation_idea", "")
+    st.session_state.screen = "home"
+    _clear_generation_plan()
+
+
+def _keep_partial_batch_progress(message: str) -> bool:
+    """A failure partway through a batch should keep what already
+    succeeded, the way a parent-pressed Stop does — those pictures were
+    already drawn and already charged for. Returns False, doing nothing,
+    when nothing has been collected yet: there is nothing to keep, so the
+    caller falls through to its usual failure routing unchanged.
+    """
+
+    if not st.session_state.get("generation_collected"):
+        return False
+    done = len(st.session_state.generation_collected)
+    total = len(st.session_state.get("generation_jobs") or [])
+    st.session_state.generation_notice = (
+        f"Doodle drew {done} of the {total} pictures you asked for; the "
+        f"rest could not be drawn: {message} What worked is ready below."
+    )
+    _finish_quick_generation()
+    return True
+
+
+# Every keyframe name carries __I__, replaced with the picture's index, for
+# the reason given in _waiting_chart_html. `width:100%` beside the max-width
+# rather than relying on the auto margins alone: an automatic cross-axis margin
+# on a flex child cancels the stretch that gives it its width, and the bars
+# then share out nothing between them.
+_WAITING_CHART_CSS = """
+  .wait-hist{width:100%;max-width:520px;margin:1.15rem auto .2rem}
+  .wait-hist__bars{display:flex;align-items:flex-end;gap:4px;height:104px;padding-top:6px}
+  .wait-hist__bars i{
+    flex:1 1 0;min-width:0;min-height:10px;
+    border-radius:10px 10px 4px 4px;
+    background:#fff;border:2.5px solid #e6e9ee;
+    display:block;box-sizing:border-box;
+    animation:wait-fill-__I__ 5s ease-out forwards;
+    animation-delay:calc(var(--i) * 5s);
+  }
+  @keyframes wait-fill-__I__{
+    0%{background:#fff;border-color:#e6e9ee;transform:translateY(0)}
+    8%{background:var(--c);border-color:var(--c);transform:translateY(-6px)}
+    56%{background:var(--c);border-color:var(--c);transform:translateY(-6px)}
+    100%{background:var(--c);border-color:var(--c);transform:translateY(0)}
+  }
+  .wait-hist__bars i:nth-child(6n+1){--c:#4f46e5}
+  .wait-hist__bars i:nth-child(6n+2){--c:#f45b69}
+  .wait-hist__bars i:nth-child(6n+3){--c:#f5a623}
+  .wait-hist__bars i:nth-child(6n+4){--c:#16a085}
+  .wait-hist__bars i:nth-child(6n+5){--c:#8b5cf6}
+  .wait-hist__bars i:nth-child(6n){--c:#0ea5e9}
+  .wait-hist__rail{position:relative;height:20px;margin-top:4px}
+  .wait-hist__spark{
+    position:absolute;top:0;left:0;width:calc((100% + 4px)/18);
+    text-align:center;line-height:1;font-family:Georgia,serif;
+    font-size:1.15rem;color:#f5a623;
+    animation:wait-spark-__I__ 90s steps(18,end) forwards;
+  }
+  @keyframes wait-spark-__I__{to{transform:translateX(1800%)}}
+  .wait-hist__axis{display:flex;font-size:.72rem;color:#a9adb5;margin-top:-4px}
+  .wait-hist__axis span{flex:1;text-align:center}
+  .wait-hist__axis span:first-child{text-align:left}
+  .wait-hist__axis span:last-child{text-align:right}
+  .wait-hist__cap{
+    font-size:.82rem;color:#8a8e94;margin:.55rem auto 0;
+    max-width:420px;line-height:1.45;
+  }
+  /* Opening from no height at all, so a note that has not fired yet leaves no
+     reserved gap under the chart waiting to be filled. */
+  .wait-note{
+    opacity:0;max-height:0;overflow:hidden;
+    color:#8a4a3f;font-size:.86rem;max-width:440px;margin:0 auto;line-height:1.45;
+    animation:wait-note-__I__ .45s ease forwards;
+  }
+  @keyframes wait-note-__I__{
+    from{opacity:0;max-height:0}
+    to{opacity:1;max-height:7rem}
+  }
+  .wait-note--slow{animation-delay:__SLOWEST__s}
+  .wait-note--stuck{animation-delay:240s}
+  /* The marching is information rather than decoration, so it keeps going for
+     a reader who asks for less motion; only the bounce is dropped. */
+  @media (prefers-reduced-motion: reduce){
+    @keyframes wait-fill-__I__{
+      0%{background:#fff;border-color:#e6e9ee}
+      8%,100%{background:var(--c);border-color:var(--c)}
+    }
+  }
+"""
+
+
+# The things on a craft table, drawn the way Doodle draws: black outlines on
+# white, nothing filled in. The shapes they replaced were circles, triangles
+# and squares, which moved but meant nothing here.
+#
+# Drawn rather than typed because most of these have no character to type. A
+# pencil and a pair of scissors exist as text symbols, but a sharpener, an
+# eraser and a ruler do not, and the emoji that come closest sit in the range
+# tests/test_ui_conventions.py refuses. Line art also matches the pages this
+# app makes, which a font glyph would not.
+_CRAFT_TOOLS = (
+    (
+        "a pencil",
+        '<path d="M12 52l3-11L41 15l8 8-26 26z"/>'
+        '<path d="M15 41l8 8"/><path d="M35 21l8 8"/>',
+    ),
+    (
+        "a pencil sharpener",
+        '<rect x="22" y="24" width="28" height="18" rx="3"/>'
+        '<path d="M22 28l-10 6 10 6"/><path d="M36 24v18"/>',
+    ),
+    (
+        "a ruler",
+        '<rect x="8" y="25" width="48" height="16" rx="2"/>'
+        '<path d="M18 25v6M28 25v4M38 25v6M48 25v4"/>',
+    ),
+    (
+        "an eraser",
+        '<path d="M16 45l8-20h22l-8 20z"/><path d="M21 33h22"/>',
+    ),
+    (
+        "a sheet of paper",
+        '<path d="M18 10h20l10 10v34H18z"/><path d="M38 10v10h10"/>'
+        '<path d="M25 30h14M25 38h14M25 46h9"/>',
+    ),
+    (
+        "a pair of scissors",
+        '<path d="M18 12l22 30"/><path d="M46 12L24 42"/>'
+        '<circle cx="20" cy="48" r="6"/><circle cx="44" cy="48" r="6"/>',
+    ),
+)
+
+
+def _craft_tools_html() -> str:
+    """The six tools as one block, each taking its turn."""
+
+    drawings = "".join(
+        f'<svg viewBox="0 0 64 64" role="img" aria-label="{label}">{paths}</svg>'
+        for label, paths in _CRAFT_TOOLS
+    )
+    return f'<div class="drawing-reel" aria-hidden="true">{drawings}</div>'
+
+
+def _current_settings_key() -> str:
+    """What makes this drawing comparable with past ones."""
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    settings = load_settings()
+    return settings_key(
+        provider=provider_id,
+        model=_model_for(provider_id, spec, settings),
+        quality=str(settings.get("openai_quality", DEFAULT_QUALITY)),
+        size=spec.portrait_size,
+        with_references=bool(st.session_state.get("generation_uses_cast")),
+    )
+
+
+def _waiting_chart_html(job_index: int) -> str:
+    """Past drawings as a distribution, with a marker that walks along it.
+
+    Every bit of movement here is CSS. While a picture is being drawn the
+    script is inside a network call and sends the browser nothing at all, so a
+    bar that lights every five seconds has to be a keyframe with a delay per
+    bar; anything that asks Python for the time would sit frozen with the rest
+    of the page. A bar ahead of the marker is an empty outline, the way a shape
+    on an uncoloured page is, and fills in as the marker reaches it.
+
+    Every keyframe name carries the picture's index. The markup is otherwise
+    identical between pictures of a batch, so the browser would reuse the old
+    animation timeline and picture two would open with its chart already
+    coloured in and its "taking a while" note already showing.
+    """
+
+    durations = recent_durations(load_timings())
+    counts = histogram(durations)
+    heights = bar_heights(counts, tallest_px=104, floor_px=10)
+    # Drawn even with nothing recorded: an empty axis with the marker walking
+    # along it says more about whether anything is happening than a sentence
+    # explaining that Doodle cannot say.
+    slowest = max(durations) if durations else AXIS_SECONDS
+
+    bars = "".join(
+        f'<i style="--i:{index};height:{height}px"></i>'
+        for index, height in enumerate(heights)
+    )
+    if not durations:
+        caption = "Nothing drawn yet, so this one puts the first mark on the chart."
+    elif len(durations) == 1:
+        caption = (
+            f"One drawing so far, which took {round(durations[0])} seconds, "
+            "and where this one has got to."
+        )
+    else:
+        caption = f"Your last {len(durations)} drawings, and where this one has got to."
+
+    css = _WAITING_CHART_CSS.replace("__I__", str(job_index))
+    css = css.replace("__SLOWEST__", f"{slowest:.0f}")
+    return (
+        f"<style>{css}</style>"
+        f'<div class="wait-hist" aria-hidden="true">'
+        f'<div class="wait-hist__bars">{bars}</div>'
+        f'<div class="wait-hist__rail"><div class="wait-hist__spark">\u2726</div></div>'
+        f'<div class="wait-hist__axis"><span>straight away</span>'
+        f"<span>45 seconds</span><span>a minute and a half</span></div>"
+        f"</div>"
+        f'<div class="wait-hist__cap">{html.escape(caption)}</div>'
+        f'<div class="wait-note wait-note--slow">This one is taking longer than '
+        f"any of those. It is still going, and the screen will move on by "
+        f"itself.</div>"
+        f'<div class="wait-note wait-note--stuck">Doodle allows four minutes for '
+        f"each attempt and then tries again, up to three attempts in all. It "
+        f"will say what happened rather than sitting here.</div>"
+    )
+
+
 def _render_generating_screen() -> None:
     st.markdown(
         """
         <style>
           [data-testid="stHeader"], [data-testid="stToolbar"],
           [data-testid="collapsedControl"], [data-testid="stSidebar"] {display:none!important;}
+          /* Every declaration here is marked important, including the ones
+             that look as though they should not need it. Streamlit's own
+             stylesheet outranks a plain declaration on this container, so this
+             screen kept the 650px width that was marked and silently lost the
+             centring and the full height that were not: everything rendered
+             hard against the left edge with white space below it. */
           .block-container, [data-testid="stMainBlockContainer"] {
-            max-width:650px!important;min-height:100dvh;padding:3rem 1.25rem 5rem!important;
-            display:flex;flex-direction:column;justify-content:center;text-align:center;overflow:visible!important;
+            max-width:650px!important;
+            min-height:100dvh!important;
+            padding:3rem 1.25rem 5rem!important;
+            display:flex!important;
+            flex-direction:column!important;
+            justify-content:center!important;
+            text-align:center!important;
+            overflow:visible!important;
           }
           .drawing-title{font-size:1.35rem;font-weight:760;margin:.8rem 0 .35rem;}
-          .drawing-idea{color:#676b70;max-width:520px;margin:0 auto 1rem;}
+          /* The child's own sentence, promoted from a grey caption to the
+             largest words on the screen. She is the one standing here waiting
+             for it, and she can hear it read back. */
+          .drawing-idea{
+            font-size:1.5rem;font-weight:720;color:#171717;
+            max-width:520px;margin:0 auto 1.1rem;line-height:1.3;
+          }
+          .drawing-label{
+            font-size:.73rem;font-weight:760;letter-spacing:.055em;color:#73777d;
+            text-transform:uppercase;margin:.1rem 0 .35rem;
+          }
+          .drawing-progress{color:#676b70;font-weight:600;margin:0 0 .15rem;}
+          /* Six shapes, one every eight tenths of a second, each rotated by
+             the same angle as the matching letter of the wordmark so the reel
+             reads as this app's rather than as a stock loader. Three of them
+             are PlayStation face buttons, which was the reference asked for.
+             The cross is left out on purpose: a cross reads as an error. */
+          /* The six tools sit on top of one another and take turns being
+             visible, rather than scrolling past a window. The scrolling version
+             clipped: a step of 2.4rem is 38.4 pixels, the window rounded to 38,
+             and the error accumulated until a slice of the next shape showed
+             above the current one. Stacked, there is no window to be sliced by
+             and no arithmetic to drift. */
+          .drawing-reel{
+            position:relative;height:82px;width:82px;margin:1rem auto .45rem;
+          }
+          .drawing-reel svg{
+            position:absolute;inset:0;width:82px;height:82px;
+            fill:none;stroke-width:3.2;
+            stroke-linecap:round;stroke-linejoin:round;
+            opacity:0;animation:drawing-reel 4.8s linear infinite;
+          }
+          @keyframes drawing-reel{
+            0%,16.6%{opacity:1}
+            16.7%,100%{opacity:0}
+          }
+          .drawing-reel svg:nth-child(1){animation-delay:0s}
+          .drawing-reel svg:nth-child(2){animation-delay:.8s}
+          .drawing-reel svg:nth-child(3){animation-delay:1.6s}
+          .drawing-reel svg:nth-child(4){animation-delay:2.4s}
+          .drawing-reel svg:nth-child(5){animation-delay:3.2s}
+          .drawing-reel svg:nth-child(6){animation-delay:4s}
+          .drawing-reel svg:nth-child(1){stroke:#4f46e5;rotate:-4deg;}
+          .drawing-reel svg:nth-child(2){stroke:#f45b69;rotate:3deg;}
+          .drawing-reel svg:nth-child(3){stroke:#f5a623;rotate:-2deg;}
+          .drawing-reel svg:nth-child(4){stroke:#16a085;rotate:3deg;}
+          .drawing-reel svg:nth-child(5){stroke:#8b5cf6;rotate:-3deg;}
+          .drawing-reel svg:nth-child(6){stroke:#0ea5e9;rotate:2deg;}
+          @media (prefers-reduced-motion: reduce){
+            .drawing-reel svg{animation:none;opacity:0;}
+            .drawing-reel svg:nth-child(1){opacity:1;}
+          }
+          /* The homepage's settings line answers questions this screen has
+             already moved past; left on screen it renders beneath the
+             spinner with Streamlit's default label clipping, since only the
+             homepage carries the rules that stop that clipping. Simplest
+             correct fix is to not show it here at all. */
+          .st-key-doodle-home-settings {display:none!important;}
         </style>
         """,
         unsafe_allow_html=True,
@@ -1652,45 +3234,127 @@ def _render_generating_screen() -> None:
     st.markdown(
         '<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True
     )
+    st.markdown(_craft_tools_html(), unsafe_allow_html=True)
     safe_idea = html.escape(str(st.session_state.get("generation_idea", "")))
+    st.markdown('<div class="drawing-label">Now drawing</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="drawing-idea">{safe_idea}</div>', unsafe_allow_html=True)
 
-    try:
-        with st.spinner("Creating clean colouring-book line art"):
-            _quick_generate()
-    except GeneratorError as exc:
-        provider_id = _active_provider_id()
-        _key, source = _provider_key(provider_id)
-        if exc.code == "content":
-            st.session_state.home_error = str(exc)
-            st.session_state.home_prompt = st.session_state.generation_idea
-            st.session_state.screen = "home"
-        else:
-            st.session_state.connection_error = _provider_connection_message(exc)
-            st.session_state.connect_return = "generate"
-            st.session_state.connect_replace = exc.code in {
-                "authentication",
-                "permission",
-            }
-            if exc.code == "authentication":
-                session_keys = dict(st.session_state.get("session_provider_keys", {}))
-                session_keys.pop(provider_id, None)
-                st.session_state.session_provider_keys = session_keys
-                if source == "this Mac":
-                    delete_provider_key(provider_id)
-            st.session_state.screen = "connect"
-        st.rerun()
-    except ValueError as exc:
-        # Undecodable image bytes, or artwork the layout cannot place. Without
-        # this the user sees a traceback and the screen stays on "generate", so
-        # every rerun fires another paid generation.
-        st.session_state.home_error = (
-            f"That picture could not be prepared for printing: {exc}"
+    is_demo = st.session_state.get("quick_mode") == "demo"
+
+    if not is_demo:
+        # Drawn one picture per script run rather than the whole batch in one
+        # blocking call, so the page comes back to life between pictures with
+        # a live count and a way to stop the rest — see _build_generation_plan
+        # and _draw_next_quick_picture.
+        jobs = st.session_state.get("generation_jobs") or []
+        done = len(st.session_state.get("generation_collected") or [])
+        total = len(jobs) if jobs else _quick_wanted_count()
+        st.markdown(
+            f'<div class="drawing-progress">Drawing {min(done + 1, total)} of {total}</div>',
+            unsafe_allow_html=True,
         )
-        st.session_state.home_prompt = st.session_state.generation_idea
-        st.session_state.screen = "home"
+        st.markdown(_waiting_chart_html(done), unsafe_allow_html=True)
+        # Tucked behind a question mark rather than printed. It answers a
+        # question a parent asks once and then knows the answer to for good,
+        # and until they ask it, it is four lines of grey between the child's
+        # own sentence and the button.
+        with st.popover(
+            "", type="tertiary", icon=":material/help:", width="content"
+        ):
+            st.markdown(
+                "**If you stop now**\n\nA picture already sent to be drawn "
+                "finishes and is charged regardless. Stopping only cancels the "
+                "ones after it, and takes you straight to whatever is already "
+                "drawn."
+            )
+        if st.button(
+            "Stop drawing",
+            key="stop_drawing",
+            width="stretch",
+            icon=":material/stop_circle:",
+        ):
+            st.session_state.generation_stop_requested = True
+        # A plain flag rather than reading the button's own return value a
+        # run later: a request already sent for the picture in flight keeps
+        # running to completion regardless, so the moment that matters is
+        # checked here, before the next one is ever started, not only on
+        # the one run that happens to see the click itself.
+        if st.session_state.get("generation_stop_requested"):
+            _stop_quick_generation()
+            st.rerun()
+            return
+
+    try:
+        idea = _current_generation_idea()
+        if is_demo:
+            # No elapsed clock: this reads a picture off the disk.
+            with st.spinner("Opening the sample picture…"):
+                _quick_generate_demo(idea)
+            st.session_state.screen = "result"
+        else:
+            if not st.session_state.get("generation_jobs"):
+                # Its own spinner because planning several alternatives makes a
+                # text-model call of its own, and it happens before the drawing
+                # spinner exists — so the first thing a parent waited through
+                # was the only part of the screen with nothing moving on it.
+                with st.spinner("Working out what to draw…", show_time=True):
+                    _build_generation_plan(idea)
+            jobs = st.session_state.generation_jobs
+            job_index = len(st.session_state.generation_collected)
+            # show_time is Streamlit's own elapsed counter, driven by the
+            # browser's clock rather than by Python, so it keeps ticking for
+            # the whole blocked call. The screen rebuilds between pictures, so
+            # it reads this picture rather than the batch.
+            with st.spinner("Drawing the lines…", show_time=True):
+                artwork = _draw_next_quick_picture(job_index)
+            st.session_state.generation_collected = [
+                *st.session_state.generation_collected,
+                artwork,
+            ]
+            if len(st.session_state.generation_collected) >= len(jobs):
+                _finish_quick_generation()
+    except GeneratorError as exc:
+        if not is_demo and _keep_partial_batch_progress(str(exc)):
+            st.rerun()
+            return
+        if not is_demo:
+            _clear_generation_plan()
+        _route_generation_failure(exc)
         st.rerun()
+        return
+    except ValueError as exc:
+        if not is_demo and _keep_partial_batch_progress(str(exc)):
+            st.rerun()
+            return
+        if not is_demo:
+            _clear_generation_plan()
+        _route_generation_value_error(exc)
+        st.rerun()
+        return
     st.rerun()
+
+
+def _how_long_that_took() -> str:
+    """Confirm the number the parent just watched climb, rather than let it
+    vanish the moment the picture appears. It is also the same figure that
+    joins the chart on the next drawing, which is what gives the wait a small
+    payoff."""
+
+    seconds = [float(value) for value in st.session_state.get("generation_seconds") or []]
+    if not seconds:
+        return ""
+    if len(seconds) == 1:
+        return f"That took {round(seconds[0])} seconds."
+
+    total = round(sum(seconds))
+    minutes, remainder = divmod(total, 60)
+    if minutes:
+        spell = f"{minutes} minute{'' if minutes == 1 else 's'}"
+        if remainder:
+            spell += f" and {remainder} second{'' if remainder == 1 else 's'}"
+    else:
+        spell = f"{total} seconds"
+    return f"Those {len(seconds)} took {spell} altogether."
 
 
 def _render_first_result() -> None:
@@ -1709,12 +3373,27 @@ def _render_first_result() -> None:
         unsafe_allow_html=True,
     )
     _render_top_bar(where="result")
+
+    if st.session_state.get("generation_notice"):
+        st.warning(st.session_state.generation_notice, icon=":material/info:")
+        st.session_state.generation_notice = ""
+
+    processed = st.session_state.get("quick_processed")
+    if not processed:
+        # Reaching here with nothing prepared is a routing mistake rather than
+        # a user error, so say so plainly instead of dying on a None.
+        st.error("That doodle is not ready yet. Draw it again.")
+        return
+
     st.markdown(
         '<div class="happy-title">Your Doodle is ready</div>', unsafe_allow_html=True
     )
     safe_title = html.escape(str(st.session_state.get("current_title", "")))
     st.markdown(f'<div class="happy-idea">{safe_title}</div>', unsafe_allow_html=True)
-    _render_doodle_with_colours(st.session_state.quick_processed, key_prefix="result")
+    _render_doodle_with_colours(processed, key_prefix="result")
+    took = _how_long_that_took()
+    if took:
+        st.caption(took)
     _render_alternatives_picker()
 
     again_col, love_col, print_col = st.columns([1, 1, 1.35])
@@ -1744,7 +3423,7 @@ def _render_first_result() -> None:
             "Save to your doodles", width="stretch", icon=":material/favorite:"
         ):
             save_library_item(
-                processed_image=st.session_state.quick_processed,
+                processed_image=processed,
                 raw_image=st.session_state.current_raw,
                 title=st.session_state.current_title or "Doodle",
                 metadata=st.session_state.current_metadata,
@@ -1770,6 +3449,7 @@ def _render_first_result() -> None:
     )
 
     _render_grown_up_sheet()
+    _render_badge_strip()
 
     # This box used to rewrite the original idea and draw a new picture from
     # scratch. Since alternatives started coming back genuinely different, that
@@ -1815,6 +3495,9 @@ if st.session_state.screen == "generate":
     st.stop()
 if st.session_state.screen == "result":
     _render_first_result()
+    st.stop()
+if st.session_state.screen == "characters":
+    _render_characters_screen()
     st.stop()
 if st.session_state.screen == "library":
     _render_library_screen()
@@ -1868,11 +3551,7 @@ with st.sidebar:
         st.session_state.screen = "connect"
         st.rerun()
 
-    saved_model = str(
-        settings.get(f"{studio_provider_id}_model", studio_provider.default_model)
-    )
-    if saved_model not in studio_provider.models:
-        saved_model = studio_provider.default_model
+    saved_model = _model_for(studio_provider_id, studio_provider, settings)
     model = st.selectbox(
         "Image model",
         list(studio_provider.models),
@@ -1982,72 +3661,81 @@ with create_tab:
                 st.session_state.connection_error = None
                 st.session_state.screen = "connect"
                 st.rerun()
+            elif _drawing_already_in_flight("busy_studio_generate"):
+                # A queued replay of a click already being handled. Every
+                # other paid control was guarded against this; this one sat
+                # in top-level script code, not a function, and was left —
+                # it spends money exactly as the others do.
+                pass
             else:
                 try:
-                    with st.spinner("Planning the alternatives…"):
-                        briefs = build_variation_briefs(
-                            idea,
-                            int(variants),
-                            provider_id=studio_provider_id,
-                            api_key=api_key,
+                    with _mark_in_flight("busy_studio_generate"):
+                        with st.spinner("Planning the alternatives…"):
+                            briefs = build_variation_briefs(
+                                idea,
+                                int(variants),
+                                provider_id=studio_provider_id,
+                                api_key=api_key,
+                            )
+                        variant_prompts = [
+                            build_colouring_prompt(
+                                idea,
+                                age_profile=age_profile,
+                                style_name=style_name,
+                                target=target,
+                                extra_instructions=extra,
+                                variation_brief=brief,
+                            )
+                            for brief in briefs
+                        ]
+                        size = (
+                            studio_provider.portrait_size
+                            if target == "A4 page"
+                            else studio_provider.square_size
                         )
-                    variant_prompts = [
-                        build_colouring_prompt(
-                            idea,
-                            age_profile=age_profile,
-                            style_name=style_name,
-                            target=target,
-                            extra_instructions=extra,
-                            variation_brief=brief,
+                        # Advance before deriving the seed. Recraft is the
+                        # only provider given a seed, and holding it fixed
+                        # returned the identical set of pictures every time
+                        # the same idea was submitted twice, with no control
+                        # to break the tie.
+                        st.session_state.generation_nonce = (
+                            int(st.session_state.get("generation_nonce", 0)) + 1
                         )
-                        for brief in briefs
-                    ]
-                    size = (
-                        studio_provider.portrait_size
-                        if target == "A4 page"
-                        else studio_provider.square_size
-                    )
-                    # Advance before deriving the seed. Recraft is the only
-                    # provider given a seed, and holding it fixed returned the
-                    # identical set of pictures every time the same idea was
-                    # submitted twice, with no control to break the tie.
-                    st.session_state.generation_nonce = (
-                        int(st.session_state.get("generation_nonce", 0)) + 1
-                    )
-                    nonce = int(st.session_state.generation_nonce)
-                    seed_source = f"{idea}|{style_name}|{target}|{nonce}"
-                    random_seed = int(
-                        hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16
-                    )
-                    with st.spinner(f"Drawing {int(variants)} doodle(s)..."):
-                        artworks = generate_with_provider(
-                            provider_id=studio_provider_id,
-                            api_key=api_key,
-                            prompts=variant_prompts,
-                            model=model,
-                            size=size,
-                            quality=quality,
-                            random_seed=random_seed,
+                        nonce = int(st.session_state.generation_nonce)
+                        seed_source = f"{idea}|{style_name}|{target}|{nonce}"
+                        random_seed = int(
+                            hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8],
+                            16,
                         )
-                    for artwork, brief in zip(artworks, briefs):
-                        artwork.metadata["brief"] = brief
-                    st.session_state.candidates = artworks
-                    first = artworks[0]
-                    _set_current_artwork(
-                        first.image_bytes,
-                        title=idea,
-                        metadata={
-                            "source": first.provider,
-                            "concept": idea,
-                            "prompt": first.prompt,
-                            "model": first.model,
-                            "generation": first.metadata,
-                        },
-                    )
-                    _start_version_chain(first)
-                    st.success(
-                        "Your doodles are ready. Choose one, then prepare it for print."
-                    )
+                        with st.spinner(f"Drawing {int(variants)} doodle(s)..."):
+                            artworks = generate_with_provider(
+                                provider_id=studio_provider_id,
+                                api_key=api_key,
+                                prompts=variant_prompts,
+                                model=model,
+                                size=size,
+                                quality=quality,
+                                random_seed=random_seed,
+                            )
+                        for artwork, brief in zip(artworks, briefs):
+                            artwork.metadata["brief"] = brief
+                        st.session_state.candidates = artworks
+                        first = artworks[0]
+                        _set_current_artwork(
+                            first.image_bytes,
+                            title=idea,
+                            metadata={
+                                "source": first.provider,
+                                "concept": idea,
+                                "prompt": first.prompt,
+                                "model": first.model,
+                                "generation": first.metadata,
+                            },
+                        )
+                        _start_version_chain(first)
+                        st.success(
+                            "Your doodles are ready. Choose one, then prepare it for print."
+                        )
                 except GeneratorError as exc:
                     if exc.code in {
                         "missing_key",
@@ -2115,18 +3803,30 @@ with create_tab:
 
     elif source_mode == "Upload artwork":
         uploaded = st.file_uploader(
-            "Upload PNG, JPG or WebP artwork",
+            "Upload a picture",
             type=["png", "jpg", "jpeg", "webp"],
             accept_multiple_files=False,
+            help="PNG, JPG or WebP.",
         )
         upload_title = st.text_input("Artwork title", value="My colouring picture")
         if uploaded and st.button("Use uploaded artwork", type="primary"):
-            _set_current_artwork(
-                uploaded.getvalue(),
-                title=upload_title,
-                metadata={"source": "Upload", "original_filename": uploaded.name},
-            )
-            st.rerun()
+            # A phone photo used as "artwork" carries the same GPS, camera
+            # make and capture time the characters door already strips from
+            # an identical file (SEC-03); the original filename can carry a
+            # child's name too, so it is dropped rather than recorded.
+            try:
+                prepared = prepare_photo(
+                    uploaded.getvalue(), max_edge=MAX_ARTWORK_EDGE_PX
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                _set_current_artwork(
+                    prepared,
+                    title=upload_title,
+                    metadata={"source": "Upload"},
+                )
+                st.rerun()
 
     else:
         demos = list_demo_artwork()
@@ -2654,7 +4354,23 @@ with guide_tab:
         The generated illustration itself is probabilistic. Reusing the same words may produce a different drawing. The PDF page size, circle diameters, margins and spacing are deterministic.
         """
     )
-    st.subheader("Privacy and files")
-    st.write(
-        "AI mode sends the written prompt to the selected image provider. Uploaded pictures and saved doodles remain in the local data folder unless you separately send them elsewhere."
+    st.markdown(
+        "**Privacy and files**\n\n"
+        "Doodle sends the written idea to the drawing service you have "
+        "connected. When you add a character, their name, the photograph, "
+        "and the two descriptions beside it — what makes them recognisable, "
+        "and how they really look — are all sent so it can draw a "
+        "caricature portrait; every later picture starring that character, "
+        "and every badge composed from one, sends the same name, "
+        "photograph and descriptions again, so the likeness always comes "
+        "from the photograph rather than from the drawn portrait. A "
+        "dropped connection can make the same request send again before it "
+        "succeeds, photograph included — ordinary here, and nothing beyond "
+        "that one request goes anywhere new. Both the photograph and the "
+        "portrait stay on this computer, in the local data folder, along "
+        "with your saved doodles.\n\n"
+        "Removing a character deletes their photograph from this computer, "
+        "which is the only copy Doodle has; it cannot recall anything a "
+        "drawing service has already been sent. What each service does with "
+        "what it receives is set out in its own terms, not here."
     )

@@ -31,6 +31,12 @@ class ProviderSpec:
     # gpt-image-2 ignores this because it always works at high fidelity, which
     # is the end of the scale Doodle asks for anyway.
     edit_closeness: float = 0.85
+    # How many reference pictures the provider will look at in one request.
+    # Zero means it cannot draw from a photograph at all, so the interface never
+    # offers the control rather than offering one that fails. Recraft's
+    # imageToImage takes a single multipart field named "image", and a dict
+    # cannot hold two keys of that name.
+    max_reference_images: int = 0
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -57,6 +63,8 @@ PROVIDERS: dict[str, ProviderSpec] = {
         ),
         billing_button_label="Open API billing",
         supports_edit=True,
+        # OpenAI documents sixteen input images for the GPT image models.
+        max_reference_images=16,
     ),
     "google": ProviderSpec(
         id="google",
@@ -85,6 +93,8 @@ PROVIDERS: dict[str, ProviderSpec] = {
         ),
         billing_button_label="Open usage and billing",
         supports_edit=True,
+        # Google documents four character references for its default image model.
+        max_reference_images=4,
     ),
     "recraft": ProviderSpec(
         id="recraft",

@@ -75,8 +75,17 @@ def normalise_line_art(image_bytes: bytes, options: ProcessingOptions) -> bytes:
     if options.crop_whitespace:
         binary = _crop_content(binary, options.padding_percent)
 
+    # The same rebuild-from-pixels photos.py uses for a reference photograph:
+    # convert/point/filter all copy Pillow's .info dict through by default,
+    # so the source picture's own ICC colour profile would otherwise ride
+    # into every processed PNG, and from there into every PDF built from it.
+    # Image.new starts with an empty info dict, so pasting into one is what
+    # actually drops it.
+    stripped = Image.new(binary.mode, binary.size)
+    stripped.paste(binary)
+
     output = BytesIO()
-    binary.save(output, format="PNG", optimize=True)
+    stripped.save(output, format="PNG", optimize=True)
     return output.getvalue()
 
 

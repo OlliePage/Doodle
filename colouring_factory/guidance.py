@@ -64,8 +64,12 @@ _ENTRIES: dict[str, Guidance] = {
     "rate_limit": Guidance(
         title="The provider is asking you to slow down",
         cause="Too many requests arrived in a short time.",
-        fix="Wait a minute and draw again. Asking for fewer alternatives at once also helps.",
-        control="Alternatives, on the generation form",
+        # Reachable from adding a character, redrawing a portrait, colouring,
+        # a badge redraw and every ordinary drawing screen — nowhere near
+        # only the generation form's Alternatives count, which is what this
+        # used to name and which does not exist on most of those screens.
+        fix="Wait a minute, then press the same button again.",
+        control="The button you just pressed",
     ),
     "content": Guidance(
         title="The provider declined that description",
@@ -74,8 +78,8 @@ _ENTRIES: dict[str, Guidance] = {
             "brand name."
         ),
         fix=(
-            "Describe the picture in your own words instead of naming a character from "
-            "television or film."
+            "The provider's own filter rejected that wording. Describing the "
+            "picture in your own words usually gets through."
         ),
         control="Picture idea, on the generation form",
     ),
@@ -124,6 +128,15 @@ _ENTRIES: dict[str, Guidance] = {
         cause="The chosen provider only draws pictures, so Doodle used its own variation rules.",
         fix="Switch to OpenAI or Google Gemini for more varied alternatives.",
         control=_SETTINGS,
+    ),
+    "appearance_failed": Guidance(
+        title="Their appearance could not be described",
+        cause="The provider did not return a usable description of the photograph.",
+        fix=(
+            "Type what they look like yourself — hair, eyes and skin are what "
+            "the drawing and colouring need most."
+        ),
+        control="How they really look, in your characters",
     ),
     "no_circles_fit": Guidance(
         title="No badges fit on the sheet",
@@ -187,6 +200,40 @@ _ENTRIES: dict[str, Guidance] = {
             "is unchanged."
         ),
         control="Make a change, beneath the picture",
+    ),
+    "photo_declined": Guidance(
+        title="The provider would not draw from that picture",
+        cause=(
+            "The drawing service ran its own check on the picture and declined "
+            "it. Doodle does not know which part it objected to."
+        ),
+        fix=(
+            "Try a different picture of the same character. A written "
+            "description of what makes them recognisable can carry the "
+            "likeness when a photograph will not."
+        ),
+        control="The picture you uploaded",
+    ),
+    "no_reference_support": Guidance(
+        title="This drawing service cannot draw from a picture",
+        cause="Recraft accepts one picture per request, so it cannot carry a cast.",
+        fix="Connect OpenAI or Google Gemini to draw your characters.",
+        control="Change image provider, on the result screen",
+    ),
+    "missing_picture": Guidance(
+        title="Nothing for Doodle to draw from",
+        cause=(
+            "This request carried neither a picture to change nor a "
+            "picture of a character to draw from."
+        ),
+        fix="This is a Doodle error rather than something you did. Try again, or start a new doodle.",
+        control=_SETTINGS,
+    ),
+    "too_many_references": Guidance(
+        title="That is more characters than this service will look at",
+        cause="Each drawing service has its own limit on reference pictures.",
+        fix="Untick some characters and draw again.",
+        control="Your characters, on the homepage",
     ),
     "unknown": Guidance(
         title="Something went wrong",

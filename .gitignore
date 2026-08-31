@@ -7,3 +7,4 @@ __pycache__/
 local_data/
 .envrc
 .claude/worktrees/
+uv.lock
