@@ -98,6 +98,13 @@ def _generate() -> AppTest:
     return at
 
 
+def _characters() -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "characters"
+    at.run()
+    return at
+
+
 def _every_screen() -> list[AppTest]:
     """All six screens. A guard that skips one lets a defect through it."""
 
@@ -111,6 +118,7 @@ def _every_screen() -> list[AppTest]:
         _upload(),
         _library(),
         _generate(),
+        _characters(),
     ]
 
 

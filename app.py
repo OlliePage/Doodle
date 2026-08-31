@@ -12,6 +12,13 @@ import streamlit as st
 from colouring_factory.badge_preview import render_badge_preview
 from colouring_factory.browser_print import print_trigger_html
 from colouring_factory.calibration import profile_from_measurements
+from colouring_factory.characters import (
+    CHARACTER_KINDS,
+    delete_character,
+    list_characters,
+    load_character_image,
+    save_character,
+)
 from colouring_factory.demo import list_demo_artwork
 from colouring_factory.credentials import (
     delete_provider_key,
@@ -47,6 +54,7 @@ from colouring_factory.pdf_export import (
     create_custom_page_pdf,
     create_full_page_pdf,
 )
+from colouring_factory.photos import prepare_photo
 from colouring_factory.preview import render_pdf_preview
 from colouring_factory.providers import (
     DEFAULT_PROVIDER,
@@ -56,6 +64,7 @@ from colouring_factory.providers import (
 )
 from colouring_factory.prompts import (
     STYLE_PRESETS,
+    build_caricature_prompt,
     build_colouring_prompt,
     build_colour_suggestion_prompt,
     build_refinement_prompt,
@@ -273,6 +282,14 @@ def _initialise_state() -> None:
         "library_notice": "",
         "library_return": "home",
         "pending_delete": "",
+        "characters_return": "home",
+        "character_draft": {},
+        # The picker's ticks live here rather than in per-name widget keys.
+        # Streamlit garbage-collects a widget key the moment its widget is not
+        # rendered, so ticking someone, visiting this screen and coming back
+        # would silently lose every tick.
+        "chosen_characters": [],
+        "pending_character_delete": "",
         "quick_processed": None,
         "quick_pdf": None,
         "quick_saved": False,
@@ -324,6 +341,17 @@ def _provider_key(provider_id: str | None = None) -> tuple[str, str]:
     return resolve_provider_key(provider, session_keys)
 
 
+def _model_for(provider_id: str, spec, settings: dict) -> str:
+    """Resolve the saved model choice, falling back when it is unset or stale.
+
+    Was three copies of the same two lines, each of which a fourth generation
+    site would otherwise have repeated a fourth time.
+    """
+
+    model = str(settings.get(f"{provider_id}_model", spec.default_model))
+    return model if model in spec.models else spec.default_model
+
+
 def _submit_home_prompt() -> None:
     prompt = str(st.session_state.get("home_prompt", "")).strip()
     if not prompt:
@@ -365,6 +393,10 @@ def _start_new_doodle() -> None:
     # refinement quietly edits a doodle that is no longer on screen.
     st.session_state.doodle_versions = ()
     st.session_state.current_version = 0
+    st.session_state.character_draft = {}
+    # chosen_characters is deliberately left alone: a parent drawing for the
+    # same children wants the same cast next time, the same reasoning the
+    # homepage settings already follow.
     st.rerun()
 
 
@@ -718,9 +750,7 @@ def _render_doodle_with_colours(image_bytes: bytes, *, key_prefix: str) -> None:
         return
 
     settings = load_settings()
-    model = str(settings.get(f"{provider_id}_model", spec.default_model))
-    if model not in spec.models:
-        model = spec.default_model
+    model = _model_for(provider_id, spec, settings)
 
     try:
         with st.spinner("Choosing colours…"):
@@ -1036,6 +1066,179 @@ def _render_library_screen() -> None:
             _start_new_doodle()
 
 
+# The segmented control speaks the way a parent would ("A toy"); the storage
+# layer speaks its own fixed vocabulary. Built from CHARACTER_KINDS, not
+# hardcoded, so the two cannot drift apart if a kind is ever added there.
+CHARACTER_KIND_LABELS = dict(
+    zip(("A person", "A toy", "Something else"), CHARACTER_KINDS)
+)
+
+
+def _draw_character_portrait(
+    photo: bytes, name: str, kind: str, marks: str
+) -> GeneratedArtwork:
+    """Draw one caricature from a reference photograph.
+
+    Uses the provider's square size, not its portrait size: a caricature is
+    nothing but a face, and a face is the most badge-shaped thing Doodle draws.
+    """
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+    settings = load_settings()
+    return refine_with_provider(
+        provider_id=provider_id,
+        api_key=api_key,
+        prompt=build_caricature_prompt(name, kind, marks),
+        reference_images=(photo,),
+        model=_model_for(provider_id, spec, settings),
+        size=spec.square_size,
+        quality=str(settings.get("openai_quality", DEFAULT_QUALITY)),
+    )
+
+
+def _render_characters_screen() -> None:
+    """Add a face to the cast, and see who is already in it.
+
+    Adding a character draws their caricature through the same mechanism as
+    every other picture Doodle makes, so the result becomes the current doodle
+    via _adopt_artwork and inherits the A4 page, printing, saving and the
+    coloured preview for free.
+    """
+
+    _render_top_bar(where="characters")
+
+    target = str(st.session_state.get("characters_return", "home"))
+    if st.button("Back", width="stretch", icon=":material/arrow_back:"):
+        st.session_state.screen = target if target != "characters" else "home"
+        st.rerun()
+
+    st.header("Your characters")
+
+    characters = list_characters()
+    if not characters:
+        st.info("No characters yet. Add someone below to draw them into a scene.")
+    else:
+        columns = st.columns(3)
+        for index, character in enumerate(characters):
+            with columns[index % 3]:
+                with st.container(border=True):
+                    # list_characters only confirms a portrait exists, not a
+                    # photograph, so a half-written folder is skipped here
+                    # rather than crashing the whole grid.
+                    try:
+                        portrait = load_character_image(character.id)
+                    except FileNotFoundError:
+                        continue
+                    st.image(portrait, width="stretch")
+                    st.markdown(f"**{character.name}**")
+
+                    if st.session_state.get("pending_character_delete") == character.id:
+                        # Deleting a character removes the only copy of their
+                        # picture, so the second click is the one that does it.
+                        st.warning("Delete this character? This cannot be undone.")
+                        confirm_col, cancel_col = st.columns(2)
+                        with confirm_col:
+                            if st.button(
+                                "Delete for good",
+                                key=f"confirm_delete_character_{character.id}",
+                                width="stretch",
+                                icon=":material/delete_forever:",
+                            ):
+                                delete_character(character.id)
+                                st.session_state.pending_character_delete = ""
+                                st.session_state.chosen_characters = [
+                                    chosen
+                                    for chosen in st.session_state.chosen_characters
+                                    if chosen != character.id
+                                ]
+                                st.rerun()
+                        with cancel_col:
+                            if st.button(
+                                "Keep them",
+                                key=f"cancel_delete_character_{character.id}",
+                                width="stretch",
+                            ):
+                                st.session_state.pending_character_delete = ""
+                                st.rerun()
+                    elif st.button(
+                        "Delete",
+                        key=f"delete_character_{character.id}",
+                        width="stretch",
+                        icon=":material/delete:",
+                    ):
+                        st.session_state.pending_character_delete = character.id
+                        st.rerun()
+
+    st.divider()
+    st.subheader("Add a character")
+
+    provider_id = _active_provider_id()
+    api_key, _source = _provider_key(provider_id)
+
+    uploaded = st.file_uploader(
+        "Add a picture",
+        type=["png", "jpg", "jpeg", "webp", "heic"],
+        accept_multiple_files=False,
+        help="A clear photo of their face works best.",
+    )
+    name = st.text_input("Name", key="character_name")
+    kind_label = st.segmented_control(
+        "What are they",
+        list(CHARACTER_KIND_LABELS),
+        default="A person",
+        key="character_kind",
+    )
+    marks = st.text_area(
+        "What makes them recognisable",
+        key="character_marks",
+        height=90,
+        placeholder="Curly hair, round glasses, a gap in her front teeth.",
+    )
+
+    if st.button(
+        "Draw them",
+        type="primary",
+        width="stretch",
+        icon=":material/auto_awesome:",
+        disabled=not api_key,
+    ):
+        if not uploaded:
+            st.error("Add a picture first.")
+            return
+        if not name.strip():
+            st.error("Give them a name.")
+            return
+
+        try:
+            photo = prepare_photo(uploaded.getvalue())
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+
+        kind = CHARACTER_KIND_LABELS.get(kind_label or "A person", "person")
+        try:
+            artwork = _draw_character_portrait(photo, name.strip(), kind, marks)
+        except GeneratorError as exc:
+            # Nothing is saved on a decline: a character with no portrait must
+            # never reach the store.
+            _show_guidance(exc.code, detail=str(exc))
+            return
+
+        save_character(
+            photo=photo,
+            portrait=artwork.image_bytes,
+            name=name.strip(),
+            kind=kind,
+            marks=marks,
+        )
+        _adopt_artwork(artwork, f"{name.strip()}, drawn by Doodle")
+        _prepare_quick_outputs()
+        st.session_state.screen = "result"
+        st.rerun()
+
+
 def _render_refine_controls(*, key_prefix: str) -> None:
     """The refine box and the version strip beneath a picture."""
 
@@ -1099,9 +1302,7 @@ def _render_refine_controls(*, key_prefix: str) -> None:
 
     base = chain[current]
     settings = load_settings()
-    model = str(settings.get(f"{provider_id}_model", spec.default_model))
-    if model not in spec.models:
-        model = spec.default_model
+    model = _model_for(provider_id, spec, settings)
 
     try:
         prompt = build_refinement_prompt(instruction)
@@ -1510,9 +1711,7 @@ def _quick_generate() -> None:
             levels.append(GROWN_UP_LEVEL)
             briefs.append(briefs[0])
             prompts.append(_prompt_for(GROWN_UP_LEVEL, briefs[0]))
-        model = str(settings.get(f"{provider_id}_model", spec.default_model))
-        if model not in spec.models:
-            model = spec.default_model
+        model = _model_for(provider_id, spec, settings)
         # Medium rather than low: low quality renders more fine detail as pale
         # grey that the black/white pass then breaks up.
         quality = str(settings.get("openai_quality", DEFAULT_QUALITY))
@@ -1838,6 +2037,9 @@ if st.session_state.screen == "generate":
     st.stop()
 if st.session_state.screen == "result":
     _render_first_result()
+    st.stop()
+if st.session_state.screen == "characters":
+    _render_characters_screen()
     st.stop()
 if st.session_state.screen == "library":
     _render_library_screen()
