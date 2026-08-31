@@ -153,10 +153,47 @@ VISUAL_RULES = (
 CHARACTER_LIKENESS_RULE = (
     "The attached pictures are the reference for how these characters really "
     "look. Draw each one as a friendly cartoon who is unmistakably recognisable "
-    "as that particular character rather than a generic one. Draw hair as one or "
-    "two large closed shapes that follow its real shape and length, never as "
-    "separate strands. Show markings, worn patches and freckles as outlined "
-    "shapes to colour, never as shading."
+    "as that particular character rather than a generic one. Follow each one's "
+    "real face shape and their real hair length, parting and wave. Draw the "
+    "hair as its outline plus a few large closed wave shapes inside it, never "
+    "as many fine separate strands or hairline texture. Show markings, worn "
+    "patches and freckles as outlined shapes to colour, never as shading."
+)
+
+# Flattening hair into "one or two large closed shapes" was written to protect
+# the despeckle pass from strands a pixel wide, and it cost more than it saved:
+# hair length and parting are most of what makes a child recognisable at a
+# glance, and erasing them was part of why every drawn child came back the
+# same. Measured on 2026-08-31 across six drawings of the same two girls, the
+# wording above survives the print-clean pass with no ink lost at all (every
+# variant gained ink, 121% to 140% of the original, because cleaning turns
+# grey lines solid black) and lands at 12.5% to 13.6% coverage against the 35%
+# mark where Doodle warns a page is too dark.
+
+GENERIC_FACE_REFUSAL = (
+    "A generic cartoon child with large round eyes and a button nose is the "
+    "wrong answer and will be rejected."
+)
+
+TOLD_APART_RULE = (
+    "If the people in the picture cannot be told apart from one another, you "
+    "have not followed this instruction."
+)
+
+# A face needs room on the page before any wording can put a likeness into it.
+# Asked for a walk in a forest, the model drew three full-length figures in a
+# landscape and gave each head about a ninth of the picture's height, which at
+# this size is a hundred-odd pixels: too few for the features that make one
+# child different from another. Drawing them close and cropped at the waist is
+# what fixed it, and it leaves the scene behind them intact.
+CAST_FOREGROUND_RULE = (
+    "Composition override for the named characters, which takes precedence "
+    "over the composition profile: place them in the near foreground, standing "
+    "close to the viewer, cropped at the waist or thigh rather than drawn head "
+    "to toe. Each named character's head must be at least one fifth of the "
+    "picture's height. The setting goes behind them and may be as simple as it "
+    "likes. A wide shot of small full-length figures in a large landscape is "
+    "the wrong answer."
 )
 
 # A face is small on a page and carries all of the recognition, so it gets its
@@ -449,12 +486,24 @@ def build_character_scene_prompt(
         introductions.append(line)
 
     likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
-    if any(kind == "person" for _, kind, _, _ in characters):
-        likeness_block += "\n\n" + _spliced(FACE_DETAIL_EXEMPTION)
     if any(kind == "toy" for _, kind, _, _ in characters):
         likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
     if any(kind == "character" for _, kind, _, _ in characters):
         likeness_block += "\n\n" + _spliced(NAMED_CHARACTER_RULE)
+
+    # The face exemption goes after the profile lines rather than before them.
+    # Proved on 2026-08-31 by drawing the same scene both ways with the same
+    # two photographs: stated first, it was overruled by the four simplifying
+    # profile lines that followed it and both girls came back as the same
+    # stock cartoon child; stated last, they came back as themselves.
+    people = sum(1 for _, kind, _, _ in characters if kind == "person")
+    closing = ""
+    if people:
+        exemption = f"{FACE_DETAIL_EXEMPTION} {GENERIC_FACE_REFUSAL}"
+        if people > 1:
+            exemption += f" {TOLD_APART_RULE}"
+        closing += "\n" + _spliced(exemption) + "\n"
+    closing += "\n" + _spliced(CAST_FOREGROUND_RULE) + "\n"
 
     prompt = f"""
     Create an original black-and-white colouring-book illustration for {level.reader}.
@@ -474,6 +523,7 @@ def build_character_scene_prompt(
     Line profile: {level.line_rule}
     Detail profile: {level.texture_rule}
     Composition profile: {target_rule}
+{closing}
     """
 
     if extra_instructions.strip():

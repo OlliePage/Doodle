@@ -26,6 +26,7 @@ from colouring_factory.characters import (
 )
 from colouring_factory.generators import GeneratorError
 from colouring_factory.models import GeneratedArtwork
+from colouring_factory.prompts import CAST_FOREGROUND_RULE, FACE_DETAIL_EXEMPTION
 from colouring_factory.storage import load_settings, save_settings
 
 # The default a photo's description resolves to unless a test overrides it.
@@ -1378,7 +1379,12 @@ def test_a_chosen_character_is_sent_as_a_reference(monkeypatch) -> None:
     assert not at.exception
     assert len(captured["reference_images"]) == 1
     assert "Ida" in captured["prompt"]
-    assert "never as separate strands" in captured["prompt"]
+    assert "never as many fine separate strands" in captured["prompt"]
+    # The likeness instructions have to reach the drawing call in the order
+    # that makes them work, not merely be present somewhere in the prompt.
+    prompt = captured["prompt"]
+    assert prompt.index("Reader profile:") < prompt.index(FACE_DETAIL_EXEMPTION)
+    assert CAST_FOREGROUND_RULE in prompt
 
 
 def test_a_scene_is_drawn_from_the_photograph_not_the_caricature(monkeypatch) -> None:
