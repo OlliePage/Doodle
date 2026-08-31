@@ -1,6 +1,10 @@
 import pytest
 
-from colouring_factory.prompts import build_colouring_prompt, build_refinement_prompt
+from colouring_factory.prompts import (
+    build_colour_suggestion_prompt,
+    build_colouring_prompt,
+    build_refinement_prompt,
+)
 
 
 def test_a_refinement_keeps_the_colouring_book_rules() -> None:
@@ -73,6 +77,65 @@ def test_no_composed_line_is_left_ragged() -> None:
     for prompt in (
         build_colouring_prompt("a bear", target="Round badge"),
         build_refinement_prompt("give the bear a party hat"),
+        build_colour_suggestion_prompt(
+            [("Ida", "Brown eyes, dark hair, light-brown skin.")]
+        ),
     ):
         for line in prompt.splitlines():
             assert not line[:1].isspace(), f"ragged line: {line!r}"
+
+
+def test_a_picture_with_no_characters_colours_exactly_as_before() -> None:
+    """The regression this feature must not cause: a plain idea with nobody
+    in it — the sky, the grass, the sand — must colour exactly the way it
+    always has."""
+
+    assert build_colour_suggestion_prompt() == build_colour_suggestion_prompt([])
+    prompt = build_colour_suggestion_prompt()
+    assert "sky and water blue" in prompt
+    assert "grass and leaves" in prompt
+    # Nothing character-specific has leaked in when there is no cast.
+    assert "real colouring" not in prompt.lower()
+
+
+def test_a_characters_recorded_appearance_is_used_to_colour_them() -> None:
+    prompt = build_colour_suggestion_prompt(
+        [("Ida", "Brown eyes, wavy dark-brown hair, light-brown skin.")]
+    )
+    assert "Ida" in prompt
+    assert "Brown eyes, wavy dark-brown hair, light-brown skin." in prompt
+
+
+def test_getting_a_real_persons_colouring_wrong_is_named_as_a_real_mistake() -> None:
+    """The forceful register the rest of this file's hard-won rules use —
+    BADGE_CORNERS_RULE said "Draw NOTHING", the caricature prompt said a
+    flattering portrait was "the wrong answer" — because a polite version
+    of each was tried first and ignored."""
+
+    prompt = build_colour_suggestion_prompt(
+        [("Ida", "Brown eyes, dark hair, light-brown skin.")]
+    )
+    assert "not a small mistake" in prompt.lower() or "not a minor" in prompt.lower()
+    assert "generic" in prompt.lower() or "stereotypical" in prompt.lower()
+
+
+def test_more_than_one_character_are_each_named_with_their_own_colouring() -> None:
+    prompt = build_colour_suggestion_prompt(
+        [
+            ("Ida", "Brown eyes, dark hair, light-brown skin."),
+            ("Bear", "A red ribbon, worn patches on both ears."),
+        ]
+    )
+    assert "Ida" in prompt and "Brown eyes, dark hair, light-brown skin." in prompt
+    assert "Bear" in prompt and "A red ribbon, worn patches on both ears." in prompt
+
+
+def test_a_character_with_no_recorded_appearance_still_gets_a_safeguard() -> None:
+    """A character saved before this feature existed, or never filled in,
+    carries no description at all — the model must still be told not to
+    reach for a default rather than simply saying nothing about them."""
+
+    prompt = build_colour_suggestion_prompt([("Ida", "")])
+    lowered = prompt.lower()
+    assert "ida" in lowered
+    assert "blonde" in lowered or "fair skin" in lowered or "default" in lowered

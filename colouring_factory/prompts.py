@@ -209,6 +209,37 @@ BADGE_CORNERS_RULE = (
     "the four edges of the square, centred, filling most of that circle."
 )
 
+# A photograph is where a person's actual colouring lives, and it is gone by
+# the time a black-and-white drawing exists: a model asked to colour a line
+# drawing of a child with no information reaches for a default, which is how
+# a mixed-race child with brown hair and brown eyes came back blonde and
+# pink-skinned. The polite version of the other rules in this file
+# ("the colours the real thing would be") already existed and was not
+# enough, so this one is as blunt as BADGE_CORNERS_RULE and the caricature
+# direction above had to become before either was obeyed.
+CHARACTER_COLOUR_RULE = (
+    "Colouring rules for the real people and toys in this picture, which "
+    "override every general colour rule above and are not a guess:\n"
+    "- Each one is a real child, adult or toy, not a stock character. "
+    "Colour them using exactly the description given for them below, for "
+    "every part of them it describes, and nowhere else in the picture.\n"
+    "- Getting a real person's hair, eyes or skin the wrong colour is not a "
+    "small mistake: a picture of a child coloured with someone else's "
+    "colouring is not a picture of that child.\n"
+    "- Never substitute a generic or stereotypical colouring for any of "
+    "them, and never lighten hair or skin towards a default."
+)
+
+# Nothing is recorded for a character saved before this feature existed, or
+# whose parent has not yet corrected an automatic guess. There is nothing
+# specific to tell the model about them, but the failure this whole rule
+# exists to stop — defaulting to fair skin and blonde hair — is exactly the
+# gap this line is here to close for those characters too.
+UNDESCRIBED_CHARACTER_RULE = (
+    "- No colouring is recorded yet for: {names}. Give them warm, natural "
+    "colouring, and do not default to fair skin or blonde hair."
+)
+
 ORDINALS = (
     "first",
     "second",
@@ -318,12 +349,21 @@ def build_refinement_prompt(
     return dedent(prompt).strip()
 
 
-def build_colour_suggestion_prompt() -> str:
+def build_colour_suggestion_prompt(
+    characters: Sequence[tuple[str, str]] = (),
+) -> str:
     """Ask for a coloured version of the same drawing, as a guide to copy.
 
     The printable page stays black and white. This is a picture of what the
     finished thing could look like, for a child deciding what colour water,
     grass or a dinosaur's back should be.
+
+    `characters` is (name, appearance) for whoever the picture was actually
+    drawn with, read from the artwork's own recorded cast rather than
+    whichever characters happen to be ticked when this is pressed. A
+    picture drawn with nobody in it — an ordinary idea, or a sample — is
+    passed nothing here, and colours exactly as it always has: sky blue,
+    grass green, with no character rule appended at all.
     """
 
     prompt = """
@@ -342,12 +382,32 @@ def build_colour_suggestion_prompt() -> str:
     No shading, gradients, texture, outlines in colour, watermark or text.
     """
 
+    described = [
+        (name.strip(), appearance.strip())
+        for name, appearance in characters
+        if name.strip() and appearance.strip()
+    ]
+    undescribed = [
+        name.strip()
+        for name, appearance in characters
+        if name.strip() and not appearance.strip()
+    ]
+
+    if described or undescribed:
+        lines = [f"- {name}: {appearance}" for name, appearance in described]
+        if undescribed:
+            lines.append(
+                UNDESCRIBED_CHARACTER_RULE.format(names=", ".join(undescribed))
+            )
+        block = CHARACTER_COLOUR_RULE + "\n" + "\n".join(lines)
+        prompt += f"\n{_spliced(block)}\n"
+
     return dedent(prompt).strip()
 
 
 def build_character_scene_prompt(
     concept: str,
-    characters: Sequence[tuple[str, str, str]],
+    characters: Sequence[tuple[str, str, str, str]],
     *,
     age_profile: str = "2-3 years",
     style_name: str = "Toddler bold",
@@ -357,9 +417,13 @@ def build_character_scene_prompt(
 ) -> str:
     """A scene starring saved characters, drawn from their reference pictures.
 
-    `characters` is (name, kind, marks) in the same order the reference pictures
-    are attached, because that order is the only thing telling the model which
-    face is which.
+    `characters` is (name, kind, marks, appearance) in the same order the
+    reference pictures are attached, because that order is the only thing
+    telling the model which face is which. `appearance` is what a model
+    saw in the photograph the one time it was asked — hair, eyes, skin and
+    the like — read out here so a black-and-white drawing still carries the
+    right hair length and texture even though it has no colour to lose. A
+    character saved before that field existed carries an empty string.
     """
 
     concept = concept.strip()
@@ -374,20 +438,22 @@ def build_character_scene_prompt(
     target_rule = TARGET_RULES.get(target, TARGET_RULES["Flexible"])
 
     introductions = []
-    for index, (name, kind, marks) in enumerate(characters):
+    for index, (name, kind, marks, appearance) in enumerate(characters):
         ordinal = ORDINALS[index] if index < len(ORDINALS) else f"number {index + 1}"
         article = _KIND_ARTICLES.get(kind, "character")
         line = f"The {ordinal} picture is {name}, a {article}."
         if marks.strip():
             line += f" {marks.strip()}"
+        if appearance.strip():
+            line += f" {appearance.strip()}"
         introductions.append(line)
 
     likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
-    if any(kind == "person" for _, kind, _ in characters):
+    if any(kind == "person" for _, kind, _, _ in characters):
         likeness_block += "\n\n" + _spliced(FACE_DETAIL_EXEMPTION)
-    if any(kind == "toy" for _, kind, _ in characters):
+    if any(kind == "toy" for _, kind, _, _ in characters):
         likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
-    if any(kind == "character" for _, kind, _ in characters):
+    if any(kind == "character" for _, kind, _, _ in characters):
         likeness_block += "\n\n" + _spliced(NAMED_CHARACTER_RULE)
 
     prompt = f"""
@@ -417,17 +483,27 @@ def build_character_scene_prompt(
 
 
 def build_caricature_prompt(
-    name: str, kind: str, marks: str, *, age_profile: str = "6-9 years"
+    name: str,
+    kind: str,
+    marks: str,
+    appearance: str = "",
+    *,
+    age_profile: str = "6-9 years",
 ) -> str:
     """A head-and-shoulders caricature, composed for a round badge.
 
     The default level is 6-9 rather than the toddler default because a
     caricature is nothing but a face, so the detail belongs everywhere.
+    `appearance` is what a model saw in the reference photograph — hair,
+    eyes, skin and the like — carried into the same introduction sentence
+    as `marks` so the caricature keeps the right hair length and texture
+    even though it is drawn in black and white.
     """
 
     level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS["6-9 years"])
     subject = _KIND_ARTICLES.get(kind, "character")
     marks_line = f" {marks.strip()}" if marks.strip() else ""
+    appearance_line = f" {appearance.strip()}" if appearance.strip() else ""
 
     likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
     if kind == "toy":
@@ -439,7 +515,7 @@ def build_caricature_prompt(
     Create an original black-and-white colouring-book caricature.
 
     Subject: a good-natured caricature of {name}, the {subject} in the attached
-    picture, head and shoulders only, facing forward.{marks_line}
+    picture, head and shoulders only, facing forward.{marks_line}{appearance_line}
 
 {likeness_block}
 

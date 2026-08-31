@@ -14,8 +14,8 @@ def test_each_character_is_named_and_matched_to_its_picture() -> None:
     prompt = build_character_scene_prompt(
         "building a sandcastle",
         [
-            ("Ida", "person", "Curly hair, round glasses."),
-            ("Bear", "toy", "A bald patch on one ear."),
+            ("Ida", "person", "Curly hair, round glasses.", ""),
+            ("Bear", "toy", "A bald patch on one ear.", ""),
         ],
     )
 
@@ -39,8 +39,8 @@ def test_the_ordinal_naming_each_character_matches_their_actual_order() -> None:
     prompt = build_character_scene_prompt(
         "building a sandcastle",
         [
-            ("Ida", "person", "Curly hair, round glasses."),
-            ("Bear", "toy", "A bald patch on one ear."),
+            ("Ida", "person", "Curly hair, round glasses.", ""),
+            ("Bear", "toy", "A bald patch on one ear.", ""),
         ],
     )
 
@@ -57,10 +57,10 @@ def test_a_person_gets_the_face_exemption_and_a_toy_does_not() -> None:
     """
 
     with_person = build_character_scene_prompt(
-        "walking in a forest", [("Ida", "person", "Curly hair.")]
+        "walking in a forest", [("Ida", "person", "Curly hair.", "")]
     )
     toy_only = build_character_scene_prompt(
-        "having a picnic", [("Bear", "toy", "A bald patch on one ear.")]
+        "having a picnic", [("Bear", "toy", "A bald patch on one ear.", "")]
     )
 
     assert FACE_DETAIL_EXEMPTION in with_person
@@ -73,14 +73,14 @@ def test_hair_is_drawn_as_closed_shapes_not_strands() -> None:
     for."""
 
     prompt = build_character_scene_prompt(
-        "walking in a forest", [("Ida", "person", "Curly hair.")]
+        "walking in a forest", [("Ida", "person", "Curly hair.", "")]
     )
     assert "never as separate strands" in prompt
 
 
 def test_the_colouring_book_contract_survives() -> None:
     prompt = build_character_scene_prompt(
-        "walking in a forest", [("Ida", "person", "Curly hair.")]
+        "walking in a forest", [("Ida", "person", "Curly hair.", "")]
     )
     assert "Pure white background." in prompt
     assert "Black line work only" in prompt
@@ -101,9 +101,9 @@ def test_a_toy_and_a_named_character_get_different_prompts() -> None:
     prompts, and characters.py's own comment claimed a toy got its own
     rules describing code that was never written."""
 
-    toy = build_character_scene_prompt("a picnic", [("Bear", "toy", "A bald ear.")])
+    toy = build_character_scene_prompt("a picnic", [("Bear", "toy", "A bald ear.", "")])
     character = build_character_scene_prompt(
-        "a picnic", [("Bear", "character", "A bald ear.")]
+        "a picnic", [("Bear", "character", "A bald ear.", "")]
     )
 
     assert toy != character
@@ -142,12 +142,60 @@ def test_no_composed_line_is_left_ragged() -> None:
     scene = build_character_scene_prompt(
         "building a sandcastle",
         [
-            ("Ida", "person", "Curly hair, round glasses."),
-            ("Bear", "toy", "A bald patch on one ear."),
+            ("Ida", "person", "Curly hair, round glasses.", "Brown eyes, dark hair."),
+            ("Bear", "toy", "A bald patch on one ear.", "A red ribbon."),
         ],
     )
-    caricature = build_caricature_prompt("Ida", "person", "Curly hair, round glasses.")
+    caricature = build_caricature_prompt(
+        "Ida", "person", "Curly hair, round glasses.", "Brown eyes, dark hair."
+    )
 
     for prompt in (scene, caricature):
         for line in prompt.splitlines():
             assert not line[:1].isspace(), f"ragged line: {line!r}"
+
+
+def test_a_scene_carries_each_characters_recorded_appearance() -> None:
+    """The bug this whole feature exists for: a black-and-white drawing has
+    no colour of its own to lose, but it still has to carry hair length and
+    texture, so the same words that will later fix the colouring also fix
+    the line art."""
+
+    prompt = build_character_scene_prompt(
+        "building a sandcastle",
+        [
+            (
+                "Ida",
+                "person",
+                "Round glasses.",
+                "Brown eyes, wavy dark-brown hair to her shoulders, light-brown skin.",
+            )
+        ],
+    )
+    assert "wavy dark-brown hair to her shoulders" in prompt
+
+
+def test_a_caricature_carries_the_recorded_appearance_too() -> None:
+    prompt = build_caricature_prompt(
+        "Ida",
+        "person",
+        "Round glasses.",
+        "Brown eyes, wavy dark-brown hair to her shoulders, light-brown skin.",
+    )
+    assert "wavy dark-brown hair to her shoulders" in prompt
+
+
+def test_a_blank_appearance_adds_nothing_to_either_prompt() -> None:
+    """A character added before this field existed, or one whose parent has
+    not filled it in, must draw exactly as it always did — no stray blank
+    sentence, no double space, no crash."""
+
+    with_blank = build_character_scene_prompt(
+        "a picnic", [("Bear", "toy", "A bald ear.", "")]
+    )
+    assert "  " not in with_blank
+
+    caricature_blank = build_caricature_prompt("Bear", "toy", "A bald ear.", "")
+    caricature_default = build_caricature_prompt("Bear", "toy", "A bald ear.")
+    assert caricature_blank == caricature_default
+    assert "  " not in caricature_blank
