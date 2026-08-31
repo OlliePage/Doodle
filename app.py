@@ -949,16 +949,16 @@ def _render_home_options() -> None:
             cast_ids = {character.id for character in cast}
             count = len(chosen_ids & cast_ids)
             limit = active_spec.max_reference_images
-            label = (
-                "nobody"
-                if not count
-                else f"{count} character{'' if count == 1 else 's'}"
-            )
-            # The trigger label above stays a count, never a list of names: the
+            # A face rather than a word, because this item answers "who" while
+            # its three neighbours answer "how", and the icon says so at a
+            # glance without spending any of the line's width. The count sits
+            # beside it when there is one; alone, the face reads as nobody yet.
+            label = "" if not count else str(count)
+            # The trigger label stays a count, never a list of names: the
             # settings line it sits on cannot shrink or ellipsise. The portrait
             # is what tells two same-named characters apart (a girl and her
             # teddy both called Ida), so it lives inside the panel instead.
-            with st.popover(label, type="tertiary"):
+            with st.popover(label, type="tertiary", icon=":material/face:"):
                 if cast:
                     st.caption(
                         "Doodle draws these characters into the picture. "

@@ -66,6 +66,21 @@ def _characters_screen() -> AppTest:
     return at
 
 
+# The picker's trigger is a face icon rather than a word, so it is found by
+# that icon and its label carries only the count. Matching on the label alone
+# would find the wrong control the moment another popover renders empty.
+PICKER_ICON = ":material/face:"
+
+
+def _picker(at, required: bool = True):
+    for popover in at.get("popover"):
+        if popover.proto.popover.icon == PICKER_ICON:
+            return popover
+    if required:
+        raise AssertionError("the characters picker is not on the page")
+    return None
+
+
 def _save_two_characters() -> list[str]:
     """Two characters already in the cast, saved directly through storage.
 
@@ -500,17 +515,17 @@ def test_the_picker_label_is_a_count_never_a_list_of_names() -> None:
     at = AppTest.from_file(APP, default_timeout=120)
     at.run()
 
-    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
-    assert "nobody" in popover_labels
+    picker = _picker(at)
+    assert picker.proto.popover.label == ""
 
     at.checkbox(key=f"character_pick_{ida_id}").set_value(True).run()
-    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
-    assert "1 character" in popover_labels
-    assert "Ida" not in " ".join(popover_labels)
+    assert _picker(at).proto.popover.label == "1"
+    labels = [popover.proto.popover.label for popover in at.get("popover")]
+    assert "Ida" not in " ".join(labels)
 
     at.checkbox(key=f"character_pick_{bo_id}").set_value(True).run()
     popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
-    assert "2 characters" in popover_labels
+    assert _picker(at).proto.popover.label == "2"
 
 
 def test_two_characters_sharing_a_name_can_both_be_ticked_independently() -> None:
@@ -621,12 +636,7 @@ def test_the_picker_carries_no_more_weight_than_its_siblings_on_the_line() -> No
     at = AppTest.from_file(APP, default_timeout=120)
     at.run()
 
-    picker = next(
-        popover
-        for popover in at.get("popover")
-        if popover.proto.popover.label == "nobody"
-    )
-    assert picker.proto.popover.type == "tertiary"
+    assert _picker(at).proto.popover.type == "tertiary"
 
 
 def test_the_picker_is_offered_even_with_no_characters_saved() -> None:
@@ -638,8 +648,7 @@ def test_the_picker_is_offered_even_with_no_characters_saved() -> None:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
 
-    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
-    assert "nobody" in popover_labels
+    assert _picker(at) is not None
 
 
 def test_the_characters_screen_is_reachable_from_a_totally_empty_homepage() -> None:
@@ -694,8 +703,7 @@ def test_a_provider_with_no_reference_support_is_not_offered_the_picker() -> Non
     at.run()
 
     assert not at.exception
-    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
-    assert "nobody" not in popover_labels
+    assert _picker(at, required=False) is None
     captions = " ".join(str(caption.value) for caption in at.caption)
     assert "recraft cannot draw from a picture" in captions.lower()
 
@@ -1042,7 +1050,7 @@ def test_the_picker_disables_further_ticks_once_the_provider_limit_is_reached(
     # is still possible.
     assert at.checkbox(key=f"character_pick_{ids[0]}").disabled is False
     popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
-    assert "4 characters" in popover_labels
+    assert _picker(at).proto.popover.label == "4"
 
 
 def test_the_picker_shows_a_distinct_portrait_for_each_character() -> None:
