@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -301,3 +302,53 @@ def test_load_character_portrait_returns_the_bytes_for_a_real_image() -> None:
         photo=PHOTO, portrait=real_portrait, name="Ida", kind="person", marks=""
     )
     assert load_character_portrait(character_id) == real_portrait
+
+
+def test_a_disk_error_partway_through_saving_leaves_no_folder_at_all(
+    monkeypatch,
+) -> None:
+    """DATA-04/FB-17: a crash between the three writes used to leave a
+    folder holding the child's photo under no character.json — invisible to
+    list_characters, unreachable by the delete button, forever. Staging the
+    writes under a separate name and moving them into place with one atomic
+    rename means an interrupted write is never visible under the real id."""
+
+    real_write_text = Path.write_text
+
+    def flaky_write_text(self, *args, **kwargs):
+        if self.name == "character.json":
+            raise OSError("simulated crash before the last write")
+        return real_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", flaky_write_text)
+
+    with pytest.raises(OSError):
+        save_character(
+            photo=PHOTO, portrait=PORTRAIT, name="Ida", kind="person", marks=""
+        )
+
+    assert list_characters() == []
+    # Not merely unlisted: nothing survives under characters_root() at all,
+    # staging name included — the photo the exception interrupted saving is
+    # not sitting somewhere no button can reach.
+    assert list(characters_root().iterdir()) == []
+
+
+def test_a_killed_process_leaves_a_swept_orphan_not_a_permanent_one() -> None:
+    """The except-and-clean-up path above only runs for a Python exception.
+    A genuine `kill -9` mid-save skips it entirely and leaves the staging
+    folder exactly as save_character left it. list_characters is the one
+    function every screen reads characters through, so sweeping a leftover
+    staging folder there — rather than only inside save_character — is what
+    turns "gone the next time anyone looks" into an actual guarantee."""
+
+    save_character(photo=PHOTO, portrait=PORTRAIT, name="Kept", kind="person", marks="")
+
+    orphan = characters_root() / ".incoming-orphaned-by-a-kill-9"
+    orphan.mkdir()
+    (orphan / "photo.png").write_bytes(PHOTO)
+
+    names = [c.name for c in list_characters()]
+
+    assert names == ["Kept"]
+    assert not orphan.exists()

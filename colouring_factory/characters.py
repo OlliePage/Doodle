@@ -41,6 +41,29 @@ def characters_root() -> Path:
     return path
 
 
+# save_character writes photo.png, portrait.png and character.json in that
+# order under a folder named with this prefix, then moves the whole folder
+# into place under the character's own id with one atomic rename. A crash
+# between any two of those writes therefore never leaves a folder holding
+# the child's photo under the id list_characters and the delete button both
+# resolve by — it leaves one under this prefix instead, which _sweep_stray
+# below clears out the next time anyone reads the store.
+_STAGING_PREFIX = ".incoming-"
+
+
+def _sweep_stray_saves(root: Path) -> None:
+    """Clear a staging folder an earlier save never finished moving into
+    place — the process-killed half of the atomic-save guarantee that the
+    `except` in save_character cannot cover, since a kill leaves no
+    exception to catch. A script run in this app is single-threaded, so a
+    folder still here when this runs is a crash, never a save genuinely in
+    flight."""
+
+    for entry in root.iterdir():
+        if entry.is_dir() and entry.name.startswith(_STAGING_PREFIX):
+            shutil.rmtree(entry, ignore_errors=True)
+
+
 def save_character(
     *,
     photo: bytes,
@@ -64,25 +87,30 @@ def save_character(
         + "-"
         + uuid.uuid4().hex[:8]
     )
-    folder = characters_root() / character_id
-    folder.mkdir(parents=True, exist_ok=False)
-
-    (folder / "photo.png").write_bytes(photo)
-    (folder / "portrait.png").write_bytes(portrait)
-    (folder / "character.json").write_text(
-        json.dumps(
-            {
-                "id": character_id,
-                "name": name,
-                "kind": kind,
-                "marks": marks.strip(),
-                "appearance": appearance.strip(),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    root = characters_root()
+    staging = root / f"{_STAGING_PREFIX}{character_id}"
+    staging.mkdir(parents=True, exist_ok=False)
+    try:
+        (staging / "photo.png").write_bytes(photo)
+        (staging / "portrait.png").write_bytes(portrait)
+        (staging / "character.json").write_text(
+            json.dumps(
+                {
+                    "id": character_id,
+                    "name": name,
+                    "kind": kind,
+                    "marks": marks.strip(),
+                    "appearance": appearance.strip(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        staging.replace(root / character_id)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     return character_id
 
 
@@ -158,8 +186,10 @@ def _read(folder: Path) -> Character | None:
 
 
 def list_characters() -> list[Character]:
+    root = characters_root()
+    _sweep_stray_saves(root)
     found: list[Character] = []
-    for folder in characters_root().iterdir():
+    for folder in root.iterdir():
         if not folder.is_dir():
             continue
         character = _read(folder)
