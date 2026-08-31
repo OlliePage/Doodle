@@ -3265,72 +3265,81 @@ with create_tab:
                 st.session_state.connection_error = None
                 st.session_state.screen = "connect"
                 st.rerun()
+            elif _drawing_already_in_flight("busy_studio_generate"):
+                # A queued replay of a click already being handled. Every
+                # other paid control was guarded against this; this one sat
+                # in top-level script code, not a function, and was left —
+                # it spends money exactly as the others do.
+                pass
             else:
                 try:
-                    with st.spinner("Planning the alternatives…"):
-                        briefs = build_variation_briefs(
-                            idea,
-                            int(variants),
-                            provider_id=studio_provider_id,
-                            api_key=api_key,
+                    with _mark_in_flight("busy_studio_generate"):
+                        with st.spinner("Planning the alternatives…"):
+                            briefs = build_variation_briefs(
+                                idea,
+                                int(variants),
+                                provider_id=studio_provider_id,
+                                api_key=api_key,
+                            )
+                        variant_prompts = [
+                            build_colouring_prompt(
+                                idea,
+                                age_profile=age_profile,
+                                style_name=style_name,
+                                target=target,
+                                extra_instructions=extra,
+                                variation_brief=brief,
+                            )
+                            for brief in briefs
+                        ]
+                        size = (
+                            studio_provider.portrait_size
+                            if target == "A4 page"
+                            else studio_provider.square_size
                         )
-                    variant_prompts = [
-                        build_colouring_prompt(
-                            idea,
-                            age_profile=age_profile,
-                            style_name=style_name,
-                            target=target,
-                            extra_instructions=extra,
-                            variation_brief=brief,
+                        # Advance before deriving the seed. Recraft is the
+                        # only provider given a seed, and holding it fixed
+                        # returned the identical set of pictures every time
+                        # the same idea was submitted twice, with no control
+                        # to break the tie.
+                        st.session_state.generation_nonce = (
+                            int(st.session_state.get("generation_nonce", 0)) + 1
                         )
-                        for brief in briefs
-                    ]
-                    size = (
-                        studio_provider.portrait_size
-                        if target == "A4 page"
-                        else studio_provider.square_size
-                    )
-                    # Advance before deriving the seed. Recraft is the only
-                    # provider given a seed, and holding it fixed returned the
-                    # identical set of pictures every time the same idea was
-                    # submitted twice, with no control to break the tie.
-                    st.session_state.generation_nonce = (
-                        int(st.session_state.get("generation_nonce", 0)) + 1
-                    )
-                    nonce = int(st.session_state.generation_nonce)
-                    seed_source = f"{idea}|{style_name}|{target}|{nonce}"
-                    random_seed = int(
-                        hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8], 16
-                    )
-                    with st.spinner(f"Drawing {int(variants)} doodle(s)..."):
-                        artworks = generate_with_provider(
-                            provider_id=studio_provider_id,
-                            api_key=api_key,
-                            prompts=variant_prompts,
-                            model=model,
-                            size=size,
-                            quality=quality,
-                            random_seed=random_seed,
+                        nonce = int(st.session_state.generation_nonce)
+                        seed_source = f"{idea}|{style_name}|{target}|{nonce}"
+                        random_seed = int(
+                            hashlib.sha256(seed_source.encode("utf-8")).hexdigest()[:8],
+                            16,
                         )
-                    for artwork, brief in zip(artworks, briefs):
-                        artwork.metadata["brief"] = brief
-                    st.session_state.candidates = artworks
-                    first = artworks[0]
-                    _set_current_artwork(
-                        first.image_bytes,
-                        title=idea,
-                        metadata={
-                            "source": first.provider,
-                            "concept": idea,
-                            "prompt": first.prompt,
-                            "model": first.model,
-                            "generation": first.metadata,
-                        },
-                    )
-                    _start_version_chain(first)
-                    st.success(
-                        "Your doodles are ready. Choose one, then prepare it for print."
-                    )
+                        with st.spinner(f"Drawing {int(variants)} doodle(s)..."):
+                            artworks = generate_with_provider(
+                                provider_id=studio_provider_id,
+                                api_key=api_key,
+                                prompts=variant_prompts,
+                                model=model,
+                                size=size,
+                                quality=quality,
+                                random_seed=random_seed,
+                            )
+                        for artwork, brief in zip(artworks, briefs):
+                            artwork.metadata["brief"] = brief
+                        st.session_state.candidates = artworks
+                        first = artworks[0]
+                        _set_current_artwork(
+                            first.image_bytes,
+                            title=idea,
+                            metadata={
+                                "source": first.provider,
+                                "concept": idea,
+                                "prompt": first.prompt,
+                                "model": first.model,
+                                "generation": first.metadata,
+                            },
+                        )
+                        _start_version_chain(first)
+                        st.success(
+                            "Your doodles are ready. Choose one, then prepare it for print."
+                        )
                 except GeneratorError as exc:
                     if exc.code in {
                         "missing_key",
