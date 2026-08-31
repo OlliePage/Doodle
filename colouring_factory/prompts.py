@@ -173,6 +173,27 @@ FACE_DETAIL_EXEMPTION = (
     "wide gaps."
 )
 
+# "Person" and "toy" each need their own instruction because they fail in
+# opposite directions: a face gets smoothed into a generic child (the
+# exemption above), while a toy gets tidied into a fresh one from a shop
+# shelf, losing the exact wear that makes it that toy. "Character" is a third
+# thing again — an existing design, not a real object — so it needs telling
+# to keep that design rather than reinterpreting the idea of it.
+_KIND_ARTICLES = {"person": "person", "toy": "toy", "character": "character"}
+
+TOY_LIKENESS_RULE = (
+    "This one is a toy, not a living thing. Keep it looking like this exact "
+    "toy, not a fresh one from a shop shelf: keep its worn patches, its "
+    "visible stitching and any odd or mismatched button, ear or eye exactly "
+    "as it really is, rather than tidying them away."
+)
+
+NAMED_CHARACTER_RULE = (
+    "This one is an existing character, not a new invention. Keep their own "
+    "particular design — proportions, line weight and styling — rather than "
+    "a generic reinterpretation of the idea of them."
+)
+
 # The polite version of this rule was ignored: told to leave the corners empty,
 # the model filled them with a garden and added a decorative border. Refusing
 # each thing by name is what worked.
@@ -355,7 +376,7 @@ def build_character_scene_prompt(
     introductions = []
     for index, (name, kind, marks) in enumerate(characters):
         ordinal = ORDINALS[index] if index < len(ORDINALS) else f"number {index + 1}"
-        article = "person" if kind == "person" else "character"
+        article = _KIND_ARTICLES.get(kind, "character")
         line = f"The {ordinal} picture is {name}, a {article}."
         if marks.strip():
             line += f" {marks.strip()}"
@@ -364,6 +385,10 @@ def build_character_scene_prompt(
     likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
     if any(kind == "person" for _, kind, _ in characters):
         likeness_block += "\n\n" + _spliced(FACE_DETAIL_EXEMPTION)
+    if any(kind == "toy" for _, kind, _ in characters):
+        likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
+    if any(kind == "character" for _, kind, _ in characters):
+        likeness_block += "\n\n" + _spliced(NAMED_CHARACTER_RULE)
 
     prompt = f"""
     Create an original black-and-white colouring-book illustration for {level.reader}.
@@ -401,8 +426,14 @@ def build_caricature_prompt(
     """
 
     level = DETAIL_LEVELS.get(age_profile, DETAIL_LEVELS["6-9 years"])
-    subject = "person" if kind == "person" else "character"
+    subject = _KIND_ARTICLES.get(kind, "character")
     marks_line = f" {marks.strip()}" if marks.strip() else ""
+
+    likeness_block = _spliced(CHARACTER_LIKENESS_RULE)
+    if kind == "toy":
+        likeness_block += "\n\n" + _spliced(TOY_LIKENESS_RULE)
+    elif kind == "character":
+        likeness_block += "\n\n" + _spliced(NAMED_CHARACTER_RULE)
 
     prompt = f"""
     Create an original black-and-white colouring-book caricature.
@@ -410,7 +441,7 @@ def build_caricature_prompt(
     Subject: a good-natured caricature of {name}, the {subject} in the attached
     picture, head and shoulders only, facing forward.{marks_line}
 
-{_spliced(CHARACTER_LIKENESS_RULE)}
+{likeness_block}
 
     Caricature direction: this is a seaside caricature, so exaggerate boldly and
     comically. Draw the head much larger than the body. Push the two or three

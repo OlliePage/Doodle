@@ -3,6 +3,8 @@ import pytest
 from colouring_factory.prompts import (
     BADGE_CORNERS_RULE,
     FACE_DETAIL_EXEMPTION,
+    NAMED_CHARACTER_RULE,
+    TOY_LIKENESS_RULE,
     build_caricature_prompt,
     build_character_scene_prompt,
 )
@@ -92,6 +94,38 @@ def test_a_caricature_refuses_the_corners_and_asks_for_exaggeration() -> None:
     # A polite, flattering portrait was the first attempt's failure, so the
     # prompt names it as the wrong answer.
     assert "wrong answer" in prompt
+
+
+def test_a_toy_and_a_named_character_get_different_prompts() -> None:
+    """FB-13: "A toy" and "Something else" used to produce byte-identical
+    prompts, and characters.py's own comment claimed a toy got its own
+    rules describing code that was never written."""
+
+    toy = build_character_scene_prompt("a picnic", [("Bear", "toy", "A bald ear.")])
+    character = build_character_scene_prompt(
+        "a picnic", [("Bear", "character", "A bald ear.")]
+    )
+
+    assert toy != character
+    assert TOY_LIKENESS_RULE in toy
+    assert TOY_LIKENESS_RULE not in character
+    assert NAMED_CHARACTER_RULE in character
+    assert NAMED_CHARACTER_RULE not in toy
+    # The article naming what Bear is must not collapse toy and character
+    # into the same word either.
+    assert "a toy." in toy
+    assert "a character." in character
+
+
+def test_a_toy_and_a_named_character_caricature_also_differ() -> None:
+    toy = build_caricature_prompt("Bear", "toy", "A bald ear.")
+    character = build_caricature_prompt("Bear", "character", "A bald ear.")
+
+    assert toy != character
+    assert TOY_LIKENESS_RULE in toy
+    assert NAMED_CHARACTER_RULE in character
+    assert TOY_LIKENESS_RULE not in character
+    assert NAMED_CHARACTER_RULE not in toy
 
 
 def test_a_scene_with_no_characters_is_refused() -> None:

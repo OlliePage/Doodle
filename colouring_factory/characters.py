@@ -14,7 +14,10 @@ from PIL import Image, UnidentifiedImageError
 from .storage import data_root
 
 # A person gets the rules about faces and hair; a toy gets told to keep its worn
-# patches and its odd button. A character is anything else recognisable.
+# patches and its odd button; a character (an existing design, such as a
+# cartoon) gets told to keep its own particular design rather than a generic
+# version of the idea of it. See TOY_LIKENESS_RULE and NAMED_CHARACTER_RULE
+# in prompts.py.
 CHARACTER_KINDS = ("person", "toy", "character")
 
 
