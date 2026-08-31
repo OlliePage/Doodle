@@ -111,7 +111,11 @@ def test_the_homepage_shows_one_prompt_bar_and_a_button() -> None:
     assert len(at.text_input) == 1
     body = " ".join(block.value for block in at.markdown)
     assert "doodle-logo--hero" in body
-    assert [button.label for button in at.button] == ["Draw it"]
+    # "Draw it" is the one button sitting directly on the page; "Add someone"
+    # lives inside the characters popover, one of the settings line's
+    # floating panels, which AppTest still renders (and so still counts)
+    # even though nothing has to be clicked open to see it.
+    assert [button.label for button in at.button] == ["Draw it", "Add someone"]
 
 
 def _all_rendered(at: AppTest) -> str:

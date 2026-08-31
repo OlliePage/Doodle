@@ -2,9 +2,8 @@
 
 Drawing a character's portrait and drawing a scene are one mechanism with two
 doors, so these fixtures (PHOTO_BYTES, the isolation fixture, the screen
-builder, _save_two_characters) are shared with tests/test_app_scenes.py and
-whatever else joins the cast — written here even where this file's own tests
-do not use all of them.
+builder, _save_two_characters) are written here even where this file's own
+tests do not use all of them, ready for whatever else joins the cast.
 """
 
 from __future__ import annotations
@@ -231,10 +230,15 @@ def test_a_character_with_no_name_is_not_drawn(monkeypatch) -> None:
     assert list_characters() == []
 
 
-def test_the_back_button_returns_to_where_the_screen_was_opened_from() -> None:
+def test_the_back_button_returns_to_the_homepage() -> None:
+    """The homepage's "Add someone" button is the only route to this screen,
+    so Back has exactly one place to return to. An earlier version tracked
+    a characters_return key that was only ever set to "home", making the
+    branch that read it unreachable and covered only by a test that set
+    state no production path ever set."""
+
     at = AppTest.from_file(APP, default_timeout=120)
     at.session_state["screen"] = "characters"
-    at.session_state["characters_return"] = "result"
     at.run()
 
     for button in at.button:
@@ -245,7 +249,7 @@ def test_the_back_button_returns_to_where_the_screen_was_opened_from() -> None:
         raise AssertionError("Back button not found")
 
     assert not at.exception
-    assert at.session_state["screen"] == "result"
+    assert at.session_state["screen"] == "home"
 
 
 def test_deleting_a_character_needs_a_second_click() -> None:
@@ -274,14 +278,13 @@ def test_deleting_a_character_needs_a_second_click() -> None:
     assert [c.name for c in list_characters()] == ["Bo"]
 
 
-def test_starting_a_new_doodle_keeps_the_chosen_cast_but_clears_the_draft() -> None:
+def test_starting_a_new_doodle_keeps_the_chosen_cast() -> None:
     """A parent drawing for the same children wants the same cast next time,
     the same reasoning the homepage settings already follow."""
 
     at = AppTest.from_file(APP, default_timeout=120)
     at.session_state["screen"] = "characters"
     at.session_state["chosen_characters"] = ["someone"]
-    at.session_state["character_draft"] = {"name": "Half-typed"}
     at.run()
 
     for button in at.button:
@@ -293,50 +296,148 @@ def test_starting_a_new_doodle_keeps_the_chosen_cast_but_clears_the_draft() -> N
 
     assert at.session_state["screen"] == "home"
     assert at.session_state["chosen_characters"] == ["someone"]
-    assert at.session_state["character_draft"] == {}
 
 
 def test_a_ticked_character_survives_going_to_the_add_screen_and_back() -> None:
-    """Per-name widget keys are destroyed the moment they are not rendered.
+    """Per-id widget keys are destroyed the moment they are not rendered.
 
     Proved on 2026-08-30: tick a character, navigate away, come back, and the
     key reads False. setdefault does not help, because the key is deleted
     after the run in which the widget is absent.
     """
 
-    _save_two_characters()
+    ida_id, _bo_id = _save_two_characters()
     at = AppTest.from_file(APP, default_timeout=120)
     at.run()
 
-    at.checkbox(key="character_pick_Ida").set_value(True).run()
+    at.checkbox(key=f"character_pick_{ida_id}").set_value(True).run()
     at.session_state["screen"] = "characters"
     at.run()
     at.session_state["screen"] = "home"
     at.run()
 
-    assert at.session_state["chosen_characters"] == ["Ida"]
-    assert at.checkbox(key="character_pick_Ida").value is True
+    assert at.session_state["chosen_characters"] == [ida_id]
+    assert at.checkbox(key=f"character_pick_{ida_id}").value is True
 
 
 def test_the_picker_label_is_a_count_never_a_list_of_names() -> None:
     """A joined list of names is unbounded and would push the settings line
     sideways on a phone, whose CSS gives it no way to wrap or shrink."""
 
-    _save_two_characters()
+    ida_id, bo_id = _save_two_characters()
     at = AppTest.from_file(APP, default_timeout=120)
     at.run()
 
     popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
     assert "nobody" in popover_labels
 
-    at.checkbox(key="character_pick_Ida").set_value(True).run()
+    at.checkbox(key=f"character_pick_{ida_id}").set_value(True).run()
     popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
     assert "1 character" in popover_labels
     assert "Ida" not in " ".join(popover_labels)
 
-    at.checkbox(key="character_pick_Bo").set_value(True).run()
+    at.checkbox(key=f"character_pick_{bo_id}").set_value(True).run()
     popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
     assert "2 characters" in popover_labels
+
+
+def test_two_characters_sharing_a_name_can_both_be_ticked_independently() -> None:
+    """app.py:922 used to key each tick box by the character's *name*, so a
+    girl called Ida and her teddy also called Ida collided in a duplicate
+    Streamlit widget key. That raised inside the settings line, so the
+    homepage rendered nothing below it, with no recovery short of deleting a
+    folder from the data directory by hand. Keying by id fixes it."""
+
+    ida_person_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+    ida_teddy_id = save_character(
+        photo=PHOTO_BYTES, portrait=ARTWORK, name="Ida", kind="toy", marks=""
+    )
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    assert not at.exception
+
+    at.checkbox(key=f"character_pick_{ida_person_id}").set_value(True).run()
+    assert not at.exception
+    assert at.session_state["chosen_characters"] == [ida_person_id]
+    assert at.checkbox(key=f"character_pick_{ida_teddy_id}").value is False
+
+    at.checkbox(key=f"character_pick_{ida_teddy_id}").set_value(True).run()
+    assert not at.exception
+    assert set(at.session_state["chosen_characters"]) == {
+        ida_person_id,
+        ida_teddy_id,
+    }
+
+
+def test_two_characters_sharing_a_name_are_both_named_when_drawing(
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    def fake_refine(**kwargs):
+        captured.update(kwargs)
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    ida_person_id = save_character(
+        photo=PHOTO_BYTES,
+        portrait=ARTWORK,
+        name="Ida",
+        kind="person",
+        marks="Curly hair.",
+    )
+    ida_teddy_id = save_character(
+        photo=PHOTO_BYTES,
+        portrait=ARTWORK,
+        name="Ida",
+        kind="toy",
+        marks="A missing button eye.",
+    )
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["chosen_characters"] = [ida_person_id, ida_teddy_id]
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "having a tea party"
+    at.run()
+
+    assert not at.exception
+    assert len(captured["reference_images"]) == 2
+    assert captured["prompt"].count("Ida") == 2
+
+
+def test_deleting_a_character_clears_their_tick() -> None:
+    """app.py:1201-1204 filtered chosen_characters against character ids
+    while the selection stored names, so the filter was a no-op: delete
+    someone, save a different character with the same name later, and they
+    came back silently pre-ticked. Storing ids throughout is what makes this
+    filter actually work."""
+
+    ida_id, bo_id = _save_two_characters()
+
+    at = _characters_screen()
+    at.session_state["chosen_characters"] = [ida_id, bo_id]
+    at.run()
+
+    for button in at.button:
+        if button.key == f"delete_character_{ida_id}":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("Delete button for Ida not found")
+    for button in at.button:
+        if button.key == f"confirm_delete_character_{ida_id}":
+            button.click().run()
+            break
+    else:
+        raise AssertionError("Confirm delete button for Ida not found")
+
+    assert not at.exception
+    assert at.session_state["chosen_characters"] == [bo_id]
 
 
 def test_the_picker_carries_no_more_weight_than_its_siblings_on_the_line() -> None:
@@ -356,14 +457,41 @@ def test_the_picker_carries_no_more_weight_than_its_siblings_on_the_line() -> No
     assert picker.proto.popover.type == "tertiary"
 
 
-def test_the_picker_is_hidden_until_a_character_exists() -> None:
-    """The same rule the homepage already applies to Saved doodles (n)."""
+def test_the_picker_is_offered_even_with_no_characters_saved() -> None:
+    """Unlike Saved doodles (n) in the corner, this control must not wait
+    until it has something to show: hiding it behind `if cast:` (app.py:906)
+    left no route anywhere on a clean install that reached the characters
+    screen, so a parent could never add their first character."""
 
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
 
     popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
-    assert "nobody" not in popover_labels
+    assert "nobody" in popover_labels
+
+
+def test_the_characters_screen_is_reachable_from_a_totally_empty_homepage() -> None:
+    """CRITICAL: a parent who has never used this feature must be able to
+    find it. The whole popover, including "Add someone", used to be gated
+    behind `if cast:`, so with nothing saved yet there was no control
+    anywhere on the homepage that reached this screen at all."""
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.run()
+    assert list_characters() == []
+
+    for button in at.button:
+        if button.label == "Add someone":
+            button.click().run()
+            break
+    else:
+        raise AssertionError(
+            "no route to the characters screen; saw buttons "
+            f"{[b.label for b in at.button]}"
+        )
+
+    assert not at.exception
+    assert at.session_state["screen"] == "characters"
 
 
 def test_the_add_someone_button_opens_the_characters_screen() -> None:
@@ -380,7 +508,49 @@ def test_the_add_someone_button_opens_the_characters_screen() -> None:
 
     assert not at.exception
     assert at.session_state["screen"] == "characters"
-    assert at.session_state["characters_return"] == "home"
+
+
+def test_a_provider_with_no_reference_support_is_not_offered_the_picker() -> None:
+    """The design says the control does not appear when a service declares
+    it takes no reference pictures: Recraft's imageToImage endpoint cannot
+    carry a cast at all, so ticking characters for it could never work."""
+
+    _save_two_characters()
+    save_settings({**load_settings(), "image_provider": "recraft"})
+
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.run()
+
+    assert not at.exception
+    popover_labels = [popover.proto.popover.label for popover in at.get("popover")]
+    assert "nobody" not in popover_labels
+    captions = " ".join(str(caption.value) for caption in at.caption)
+    assert "recraft cannot draw from a picture" in captions.lower()
+
+
+def test_a_provider_with_no_reference_support_is_not_offered_the_draw_button() -> None:
+    """A Recraft user must not be shown "Draw them" and then told, on the
+    characters screen, to go and change provider on the result screen."""
+
+    save_settings({**load_settings(), "image_provider": "recraft"})
+
+    at = _characters_screen()
+
+    assert not at.exception
+    assert not any(button.label == "Draw them" for button in at.button)
+    captions = " ".join(str(caption.value) for caption in at.caption)
+    assert "recraft cannot draw from a picture" in captions.lower()
+
+
+def test_the_draw_button_names_its_cost() -> None:
+    at = _characters_screen()
+
+    for button in at.button:
+        if button.label == "Draw them":
+            assert "costs one generation" in str(button.help).lower()
+            break
+    else:
+        raise AssertionError("Draw them button not found")
 
 
 def test_a_chosen_character_is_sent_as_a_reference(monkeypatch) -> None:
@@ -400,10 +570,10 @@ def test_a_chosen_character_is_sent_as_a_reference(monkeypatch) -> None:
     # .run(), because AppTest re-executes the app's imports on every run.
     # Patching the source module survives every rerun.
     monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
-    _save_two_characters()
+    ida_id, _bo_id = _save_two_characters()
 
     at = AppTest.from_file(APP, default_timeout=120)
-    at.session_state["chosen_characters"] = ["Ida"]
+    at.session_state["chosen_characters"] = [ida_id]
     at.session_state["screen"] = "generate"
     at.session_state["generation_idea"] = "walking in a forest"
     at.run()
@@ -414,10 +584,10 @@ def test_a_chosen_character_is_sent_as_a_reference(monkeypatch) -> None:
     assert "never as separate strands" in captured["prompt"]
 
 
-def test_a_deleted_characters_name_is_dropped_rather_than_crashing_the_draw(
+def test_a_deleted_characters_id_is_dropped_rather_than_crashing_the_draw(
     monkeypatch,
 ) -> None:
-    """A name ticked before a character was deleted must not reach
+    """An id ticked before a character was deleted must not reach
     load_character_image, which would raise for a folder that is now gone."""
 
     captured = {}
@@ -429,11 +599,11 @@ def test_a_deleted_characters_name_is_dropped_rather_than_crashing_the_draw(
         )
 
     monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
-    ida_id, _bo_id = _save_two_characters()
+    ida_id, bo_id = _save_two_characters()
     delete_character(ida_id)
 
     at = AppTest.from_file(APP, default_timeout=120)
-    at.session_state["chosen_characters"] = ["Ida", "Bo"]
+    at.session_state["chosen_characters"] = [ida_id, bo_id]
     at.session_state["screen"] = "generate"
     at.session_state["generation_idea"] = "walking in a forest"
     at.run()
@@ -470,7 +640,7 @@ def test_pairing_with_a_chosen_cast_draws_both_sheets_with_the_characters_in_bot
         )
 
     monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
-    _save_two_characters()
+    ida_id, _bo_id = _save_two_characters()
     save_settings(
         {
             **load_settings(),
@@ -480,7 +650,7 @@ def test_pairing_with_a_chosen_cast_draws_both_sheets_with_the_characters_in_bot
     )
 
     at = AppTest.from_file(APP, default_timeout=120)
-    at.session_state["chosen_characters"] = ["Ida"]
+    at.session_state["chosen_characters"] = [ida_id]
     at.session_state["screen"] = "generate"
     at.session_state["generation_idea"] = "building a sandcastle"
     at.run()
