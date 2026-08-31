@@ -1860,15 +1860,17 @@ def _quick_generate() -> None:
         chosen = _cast_for_drawing()
         if chosen:
             # A character drawing goes through refine_with_provider, the call
-            # that carries pictures, rather than generate_with_provider. The
-            # references are the saved portraits, not the photographs: the
-            # likeness survives that second hop, and it is what keeps the same
-            # drawn character appearing in every picture instead of a fresh
-            # reading of their photo each time. refine_with_provider takes one
-            # prompt at a time, so pairing's second, grown-up-detail reading of
-            # the same scene is one more call in this list, not a second path.
+            # that carries pictures, rather than generate_with_provider.
+            # The reference sent is the stored photograph, not the drawn
+            # portrait: the portrait is a deliberate caricature, and sending
+            # it as the likeness reference would draw every scene from that
+            # exaggeration rather than from the child or toy it was drawn
+            # from. refine_with_provider takes one prompt at a time, so
+            # pairing's second, grown-up-detail reading of the same scene is
+            # one more call in this list, not a second path.
             references = tuple(
-                load_character_image(character_id) for character_id, *_ in chosen
+                load_character_image(character_id, portrait=False)
+                for character_id, *_ in chosen
             )
             artworks = [
                 refine_with_provider(
@@ -2133,11 +2135,11 @@ def _render_badge_strip() -> None:
             with st.spinner("Composing it for a badge…"):
                 if chosen:
                     # A scene starring saved characters is redrawn the same
-                    # way _quick_generate draws one: from their reference
-                    # portraits, not a fresh reading of the idea alone,
-                    # because that is what keeps them themselves.
+                    # way _quick_generate draws one: from their stored
+                    # photographs, not from the drawn (deliberately
+                    # exaggerated) portrait — see the matching comment there.
                     references = tuple(
-                        load_character_image(character_id)
+                        load_character_image(character_id, portrait=False)
                         for character_id, *_ in chosen
                     )
                     artwork = refine_with_provider(
@@ -3220,12 +3222,13 @@ with guide_tab:
     st.markdown(
         "**Privacy and files**\n\n"
         "Doodle sends the written idea to the drawing service you have "
-        "connected. When you add a character, their photograph is sent once, "
-        "to the same service, so it can draw their portrait; after that, "
-        "pictures starring that character send the drawn portrait rather "
-        "than the photograph. Both the photograph and the portrait stay on "
-        "this computer, in the local data folder, along with your saved "
-        "doodles.\n\n"
+        "connected. When you add a character, their photograph is sent so "
+        "it can draw a caricature portrait; every later picture starring "
+        "that character, and every badge composed from one, sends the same "
+        "photograph again, so the likeness always comes from the "
+        "photograph rather than from the drawn portrait. Both the "
+        "photograph and the portrait stay on this computer, in the local "
+        "data folder, along with your saved doodles.\n\n"
         "Removing a character deletes their photograph from this computer, "
         "which is the only copy Doodle has; it cannot recall anything a "
         "drawing service has already been sent. What each service does with "

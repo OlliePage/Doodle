@@ -217,6 +217,39 @@ def test_a_chosen_cast_keeps_their_likeness_on_the_badge(monkeypatch) -> None:
     assert "cut into a circle" in captured["prompt"]
 
 
+def test_the_badge_redraw_sends_the_photograph_not_the_caricature(monkeypatch) -> None:
+    """FB-03: the badge redraw must send the same likeness reference the
+    scene path does — the stored photograph, not the deliberately
+    exaggerated portrait — or a badge composed from a scene starring a
+    character draws that character's caricature back at the provider
+    instead of the child or toy the caricature was drawn from."""
+
+    captured = {}
+
+    def fake_refine(**kwargs):
+        captured.update(kwargs)
+        return GeneratedArtwork(
+            image_bytes=NEW_ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    ida_id = save_character(
+        photo=b"photo", portrait=ARTWORK, name="Ida", kind="person", marks=""
+    )
+
+    at = _result_screen()
+    at.session_state["current_metadata"] = {
+        **at.session_state["current_metadata"],
+        "generation": {"characters": [ida_id]},
+    }
+    at.run()
+    at = _button(at, "Draw it for a badge").click().run()
+
+    assert not at.exception
+    assert captured["reference_images"] == (b"photo",)
+    assert ARTWORK not in captured["reference_images"]
+
+
 def test_pressing_the_badge_redraw_twice_keeps_the_cast_on_the_second_press(
     monkeypatch,
 ) -> None:

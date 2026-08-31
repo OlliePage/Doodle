@@ -585,6 +585,38 @@ def test_a_chosen_character_is_sent_as_a_reference(monkeypatch) -> None:
     assert "never as separate strands" in captured["prompt"]
 
 
+def test_a_scene_is_drawn_from_the_photograph_not_the_caricature(monkeypatch) -> None:
+    """FB-03: the stored portrait is a deliberate caricature — its own
+    prompt says a "polite, accurate, flattering portrait is the wrong
+    answer" — so sending it as the likeness reference for a scene draws
+    every picture from that exaggeration rather than from the child or toy
+    it was drawn from. The reference sent must be the photograph bytes,
+    never the portrait bytes, and the two are deliberately different here so
+    that sending the wrong one is something a test can catch rather than
+    something that happens to still look right."""
+
+    captured = {}
+
+    def fake_refine(**kwargs):
+        captured.update(kwargs)
+        return GeneratedArtwork(
+            image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="gpt-image-2"
+        )
+
+    monkeypatch.setattr(generators, "refine_with_provider", fake_refine)
+    ida_id, _bo_id = _save_two_characters()
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["chosen_characters"] = [ida_id]
+    at.session_state["screen"] = "generate"
+    at.session_state["generation_idea"] = "walking in a forest"
+    at.run()
+
+    assert not at.exception
+    assert captured["reference_images"] == (PHOTO_BYTES,)
+    assert ARTWORK not in captured["reference_images"]
+
+
 def test_a_deleted_characters_id_is_dropped_rather_than_crashing_the_draw(
     monkeypatch,
 ) -> None:
