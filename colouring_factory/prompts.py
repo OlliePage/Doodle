@@ -611,6 +611,8 @@ def build_refinement_prompt(
 
 def build_colour_suggestion_prompt(
     characters: Sequence[tuple[str, str]] = (),
+    *,
+    detailed: bool = False,
 ) -> str:
     """Ask for a coloured version of the same drawing, as a guide to copy.
 
@@ -624,9 +626,37 @@ def build_colour_suggestion_prompt(
     picture drawn with nobody in it — an ordinary idea, or a sample — is
     passed nothing here, and colours exactly as it always has: sky blue,
     grass green, with no character rule appended at all.
+
+    `detailed` is for the grown-up half of a pair. A child's page usually gives
+    one shape one colour, and flat bright fill is the right guide for it. A
+    grown-up page has divided the same objects into many small regions, so
+    filling every one of them the same flat green wastes what the drawing is
+    for; the guide there shows the range of shades those regions could take.
     """
 
-    prompt = """
+    if detailed:
+        prompt = """
+    Colour in this black-and-white line drawing.
+
+    Keep every black outline exactly where it is, at the same weight. Do not
+    redraw, move, add or remove anything: the shapes, characters and
+    composition must match the original line for line.
+
+    This page is divided into many small regions on purpose, so use that. Give
+    each object a family of related shades rather than one flat colour, and
+    vary them between the small regions inside it: several greens across the
+    leaves of one tree, several blues across the panels of one balloon, warmer
+    and cooler tones of the same colour where a surface turns. Use the colours
+    the real thing would be, so the picture can still be copied. Keep the
+    background white wherever the original left it white.
+
+    Every region stays a single flat colour of its own: no gradients within a
+    region, no shading, no texture, no outlines in colour, no watermark or
+    text. The variety comes from region to region, never from blending inside
+    one.
+    """
+    else:
+        prompt = """
     Colour in this black-and-white line drawing.
 
     Keep every black outline exactly where it is, at the same weight. Do not
