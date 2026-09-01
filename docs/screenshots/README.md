@@ -9,7 +9,7 @@ replace one with a fresher capture.
 |---|---|
 | `homepage.png` | The Doodle homepage (the hero image at the top of the README) |
 | `campfire-line-art.png` | Camping with the Peppa Pig family, as the page prints |
-| `campfire-coloured.png` | The same campfire scene coloured in |
+| `campfire-coloured.jpg` | The same campfire scene coloured in |
 | `characters.png` | The Your characters screen with its caricature portraits |
 | `family-picnic.png` | All three saved characters at a picnic |
 | `tent-line-art.png` | Putting the tent up, from the same camping request |

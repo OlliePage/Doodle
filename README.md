@@ -34,7 +34,7 @@ the Peppa Pig family.
 
 <div align="center">
 <img src="docs/screenshots/campfire-line-art.png" width="46%" alt="A black-and-white colouring page: two young sisters and the Peppa Pig family around a campfire">&nbsp;
-<img src="docs/screenshots/campfire-coloured.png" width="46%" alt="The same campfire scene, fully coloured in">
+<img src="docs/screenshots/campfire-coloured.jpg" width="46%" alt="The same campfire scene, fully coloured in">
 <br><em>The page as it prints, and the same picture coloured in. The girls are
 saved Doodle characters, drawn in their real likeness from one photo each.</em>
 </div>
@@ -109,11 +109,11 @@ in the artwork or PDFs.
 ### Rather have someone talk you through it?
 
 Paste the text below into an AI assistant you already use — ChatGPT, Claude,
-Gemini, whichever — fill in the two brackets, and it will walk you through
+Gemini, whichever — fill in the three brackets, and it will walk you through
 the whole setup at your pace, including creating the free key:
 
 ```text
-I've just downloaded Doodle, a small app that turns a typed idea into a
+I want to set up Doodle, a small app that turns a typed idea into a
 printable colouring page for children: https://github.com/OlliePage/Doodle
 
 I'm on [Mac / Windows], and I'd call my computer confidence [low / medium / high].
@@ -123,6 +123,7 @@ moving to the next:
 1. Install Python 3.11 or newer if my computer doesn't already have it.
 2. Download Doodle from that page (green Code button, Download ZIP), unzip
    it, and open it with run.command on Mac or run_windows.bat on Windows.
+   On a Mac the first open needs Control-click, then Open, then Open again.
 3. Create a free Google Gemini API key at https://aistudio.google.com/apikey.
 4. Paste the key into Doodle's connection screen and have Doodle remember it.
 5. Print my first page at actual size (100%, no fit-to-page), for this idea:
