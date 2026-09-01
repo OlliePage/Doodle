@@ -85,17 +85,18 @@ page, choose **Download ZIP**, and unzip it anywhere you like.
 
 The first launch spends a few minutes installing what it needs, then Doodle
 opens in your web browser. Every launch after that takes seconds. Nothing is
-installed system-wide; everything lives inside the folder you unzipped.
+installed system-wide; everything the launcher sets up stays inside the
+folder you unzipped.
 
-**4. Try a demo straight away.** The built-in drawings need no key, so you can
-type an idea, pick a demo, and print your first page before setting anything
-else up.
+**4. Type your first idea.** The first time, Doodle opens a connection screen
+for choosing how pictures get drawn. The built-in demo drawings need no key
+at all, so you can print your first page straight away.
 
-**5. Connect a drawing service (one-off, about two minutes).** The first time
-you ask for an AI drawing, Doodle shows a connection screen with a link to
-exactly the right page for creating a key. **Google Gemini has a free
-allowance, so start there.** Paste the key in once and Doodle can remember it
-— it is stored only on your computer, never in the artwork or PDFs.
+**5. Connect an AI drawing service when you are ready (about two minutes).**
+The same connection screen links to exactly the right page for creating a
+key. **Google Gemini has a free allowance, so start there.** Paste the key in
+once and Doodle can remember it — it is stored only on your computer, never
+in the artwork or PDFs.
 
 ### Printing
 
@@ -112,8 +113,9 @@ corrects it — see the [full reference](docs/REFERENCE.md#printing-at-scale).
 ## Screenshots
 
 <!-- To fill a slot: drop an image with the matching name into docs/screenshots/
-     and delete the comment markers around its line. The list of expected
-     shots is in docs/screenshots/README.md. -->
+     and delete the opening and closing comment markers wrapped around its
+     block (each block is an image line plus its caption line). The list of
+     expected shots is in docs/screenshots/README.md. -->
 
 <img src="samples/drop-a-picture-dragging.png" width="600" alt="Doodle offering to take a photo being dragged onto the page">
 <br><em>Drop a photo anywhere on the page and Doodle offers to draw it.</em>
@@ -138,8 +140,9 @@ corrects it — see the [full reference](docs/REFERENCE.md#printing-at-scale).
 Doodle runs entirely on your computer. Saved doodles, characters and settings
 live in a `.doodle` folder in your home directory, and the only thing that
 ever leaves your machine is the idea (or photo) you send to the drawing
-service you connected. There are no accounts, no tracking and nothing to
-subscribe to.
+service you connected. Doodle itself has no accounts, no tracking and no
+subscription — the only account involved is the one you hold with your
+chosen drawing service.
 
 ## For the technically curious
 

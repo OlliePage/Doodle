@@ -45,7 +45,8 @@ illustration. Print geometry remains deterministic.
 ## Starting from a terminal
 
 The double-click launchers in the main README cover most uses. From a
-terminal on macOS:
+terminal on macOS, get into the Doodle folder first — type `cd `, drag the
+folder into the Terminal window, press Return — then run:
 
 ```bash
 make doodle
@@ -213,7 +214,8 @@ Doodle can store separate horizontal and vertical corrections.
 
 ## Local data
 
-By default, saved doodles and calibration settings live at:
+By default, saved doodles, saved characters and calibration settings live
+at:
 
 ```text
 ~/.doodle
