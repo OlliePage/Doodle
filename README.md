@@ -1,263 +1,154 @@
-# Doodle
+<div align="center">
 
-Doodle is a local web app for turning a plain-English idea into a toddler-friendly colouring picture and exporting it at exact physical dimensions.
+# 🖍️ Doodle
 
-Its opening screen is deliberately spare: the Doodle wordmark and one prompt bar. Type an idea such as:
+**Type an idea. Print a colouring page. Hand over the crayons.**
 
-> A smiling baby dinosaur washing a toy fire engine
+Doodle turns a sentence like *"a smiling baby dinosaur washing a toy fire engine"*
+into a clean black-and-white colouring page, sized exactly for A4 paper.
 
-Press Enter to open the studio with that idea already loaded.
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)
+![Runs on your computer](https://img.shields.io/badge/runs-on%20your%20computer-orange)
 
-![Doodle homepage](HOMEPAGE_PREVIEW.png)
+<img src="HOMEPAGE_PREVIEW.png" width="720" alt="The Doodle homepage: a wordmark and one box to type your idea into">
 
-The application keeps two jobs separate:
+</div>
 
-- The image model invents the drawing.
-- The layout engine controls the PDF page, circles, margins, spacing and captions in millimetres.
+---
 
-## What is included
+## What it does
 
-- Minimal Doodle homepage
-- OpenAI image generation through the Images API
-- Three original offline demo drawings
-- PNG, JPG and WebP upload
-- Strict black-and-white conversion
-- Adjustable threshold, speck removal, whitespace crop and line thickening
-- A4 portrait or landscape colouring pages
-- A4 sheets of repeated circular designs
-- Separate finished, paper-cut and safe-area badge diameters
-- Custom-size PDF pages
-- Optional captions added as proper PDF text
-- PDF preview and download
-- Local saved-doodle library
-- A picture dragged anywhere onto the page, which drops into the prompt bar and is drawn from
-- Saved characters — people, toys or anything else recognisable — kept on this computer from a reference photograph
-- Any picture drawn with your saved characters in it, in their likeness
-- A caricature portrait drawn for each saved character as soon as they are added
-- A free 58 mm badge preview beneath every finished doodle, with a redraw composed for the circle
-- HEIC/HEIF photo upload for a character's reference photo, via `pillow-heif`, since an iPhone saves photos in a format Pillow cannot open on its own
-- Printer calibration with optional horizontal and vertical compensation
-- Automated tests for geometry and PDF page boxes
+Doodle exists for one recurring moment: a small child asks for a picture of
+something oddly specific, and you would rather print a good one than draw a bad
+one.
 
-## Fastest start on macOS
+You type the idea in exactly as the child said it. Doodle asks an AI drawing
+service to illustrate it in thick, friendly outlines, cleans the result into
+pure black-and-white line art, and hands you a PDF that prints at true size.
+From idea to paper takes about a minute.
 
-1. Install Python 3.11 or later if it is not already available.
-2. Unzip this folder.
-3. Open Terminal, type `cd `, drag the unzipped folder into Terminal, and press Return.
-4. Run:
+<div align="center">
+<img src="assets/demo_dinosaur.png" width="30%" alt="Demo colouring page: a friendly dinosaur">&nbsp;
+<img src="assets/demo_bear_astronaut.png" width="30%" alt="Demo colouring page: a bear in a space suit">&nbsp;
+<img src="assets/demo_robot_balloons.png" width="30%" alt="Demo colouring page: a robot holding balloons">
+<br><em>The three built-in demo drawings — these work with no setup at all.</em>
+</div>
 
-```bash
-make doodle
-```
+## The fun bits
 
-That is the whole startup sequence in one command. It pulls new code when the
-checkout is clean and on `main` and leaves it alone otherwise, creates the
-private `.venv` and installs anything missing, says which drawing services have
-a key, stops an app left running on port 8501 after asking, and opens Doodle.
+- **Draw anything.** Whatever they ask for, however strange. The drawing style
+  stays chunky and toddler-friendly; only the idea changes.
 
-Stopping an old app matters more than it sounds. Streamlit re-reads `app.py` on
-every click but keeps the files it imported at startup, so an app left running
-through an update calls new code from old modules and fails on functions that
-are sitting right there in the file.
+- **Draw *their* teddy.** Drag a photo anywhere onto the page — the way you
+  drop a picture into Google Search — and type the adventure. A photo of a
+  worn old teddy plus *"riding a rocket to the moon"* gets you that teddy,
+  bald ear and all, on its way to the moon.
 
-Two more targets: `make check` runs every check and reports without launching,
-and `make stop` stops an app running in a terminal you have since closed.
+  <img src="samples/drop-a-picture-in-the-bar.png" width="600" alt="A dropped photo sitting as a thumbnail inside the prompt bar">
 
-`./run.command` still works and can be double-clicked; macOS may require
-**Control-click → Open** on the first launch.
+- **Save the family characters.** Teach Doodle a favourite toy, a pet or a
+  person from one photo, and from then on you can tick them into any picture.
+  Each saved character even gets its own caricature portrait.
 
-## Windows
+- **Change your mind.** Under every picture is a *Make a change* box:
+  *"give the dinosaur a party hat"*, *"move the fire engine away from the
+  edge"*. Every version is kept, so experimenting costs nothing but the
+  redraw.
 
-Double-click:
+- **Badge sheets.** As well as full-page pictures, Doodle lays out A4 sheets
+  of repeated circles for 58&nbsp;mm badge presses, with proper cut lines and
+  safe areas.
 
-```text
-run_windows.bat
-```
+- **No AI, no problem.** The three demo drawings above are built in, and you
+  can upload any picture of your own to be cleaned up and laid out for
+  printing. Neither needs a key or an internet connection.
 
-## Manual start
+## Getting started
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-streamlit run app.py
-```
+You need two things: Python, and this folder.
 
-## Using the homepage
+**1. Install Python (one-off).** It is a free download from
+[python.org](https://www.python.org/downloads/) — pick version 3.11 or newer
+and click through the standard installer. On Windows, tick **Add python.exe to
+PATH** on the first screen.
 
-The homepage contains no settings, menus or explanation. It presents only:
+**2. Download Doodle.** Click the green **Code** button at the top of this
+page, choose **Download ZIP**, and unzip it anywhere you like.
 
-- the Doodle wordmark;
-- one prompt bar.
+**3. Open it.**
 
-Enter a picture idea and press Return. Doodle then opens the working studio with the idea carried into the generation form.
+- **Mac:** double-click `run.command`. The first time, macOS will be wary of
+  a file from the internet — Control-click it, choose **Open**, then **Open**
+  again. You only do that once.
+- **Windows:** double-click `run_windows.bat`.
 
-Use **New doodle** in the studio to return to the clean homepage.
+The first launch spends a few minutes installing what it needs, then Doodle
+opens in your web browser. Every launch after that takes seconds. Nothing is
+installed system-wide; everything the launcher sets up stays inside the
+folder you unzipped.
 
-### Dropping a picture on it
+**4. Type your first idea.** The first time, Doodle opens a connection screen
+for choosing how pictures get drawn. The built-in demo drawings need no key
+at all, so you can print your first page straight away.
 
-Drag a photograph anywhere over the page and Doodle offers to take it, the way
-Google Search does. Let go and the picture appears as a small thumbnail inside
-the prompt bar, with a cross beside it to take it back out.
+**5. Connect an AI drawing service when you are ready (about two minutes).**
+The same connection screen links to exactly the right page for creating a
+key. **Google Gemini has a free allowance, so start there.** Paste the key in
+once and Doodle can remember it — it is stored only on your computer, never
+in the artwork or PDFs.
 
-![Doodle offering to take a dragged picture](samples/drop-a-picture-dragging.png)
+### Printing
 
-What happens next is decided by the settings already under the bar — how many
-pictures, who they are for, which style, who else is in them. The picture is
-the thing to draw; anything you type is the scene it goes into. Drop a
-photograph of a teddy and type *riding a rocket to the moon*, and you get that
-teddy, bald ear and all, in a rocket.
+Two rules cover almost everything:
 
-![The dropped picture sitting in the prompt bar](samples/drop-a-picture-in-the-bar.png)
+1. Download the PDF and print that, rather than printing the browser preview.
+2. In the print dialogue choose **Actual size** (or **100%**) and switch off
+   anything called *Fit*, *Shrink* or *Scale to printable area*.
 
-Drop one and type nothing, and Doodle draws the picture itself as a colouring
-page. It asks the drawing service to describe what is in the photograph first,
-so the waiting screen has something to show you and several alternatives are
-several readings of the same thing rather than four copies.
+That keeps the pages and badge circles at their true measurements. If your
+printer is slightly out, Doodle has a calibration page that measures and
+corrects it — see the [full reference](docs/REFERENCE.md#printing-at-scale).
 
-A dropped picture takes one of the drawing service's reference places, so the
-number of saved characters you can tick alongside it drops by one while it is
-attached. Pressing **New doodle** forgets it.
+## Screenshots
 
-Desktop and mobile visual previews are included in the `samples/` folder.
+<!-- To fill a slot: drop an image with the matching name into docs/screenshots/
+     and delete the opening and closing comment markers wrapped around its
+     block (each block is an image line plus its caption line). The list of
+     expected shots is in docs/screenshots/README.md. -->
 
-## AI generation
+<img src="samples/drop-a-picture-dragging.png" width="600" alt="Doodle offering to take a photo being dragged onto the page">
+<br><em>Drop a photo anywhere on the page and Doodle offers to draw it.</em>
 
-Doodle can draw with any of three providers. The first time you enter an idea it opens a connection screen with a link to the right page for creating a key, so you never have to hunt for it.
+<!-- <img src="docs/screenshots/studio.png" width="600" alt="The studio with a finished doodle ready to print">
+<br><em>The studio: your idea on the left, the finished page on the right.</em> -->
 
-| Provider | Environment variable | Where to get a key |
-|---|---|---|
-| Google Gemini | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
-| OpenAI | `OPENAI_API_KEY` | https://platform.openai.com/settings/organization/api-keys |
-| Recraft | `RECRAFT_API_TOKEN` | https://app.recraft.ai/profile/api |
+<!-- <img src="docs/screenshots/make-a-change.png" width="600" alt="The Make a change box with a strip of earlier versions">
+<br><em>Ask for changes in plain English; every version is kept.</em> -->
 
-Google Gemini has a free allowance, so it is the cheapest way to start. OpenAI and Recraft both require billing before they will generate anything.
+<!-- <img src="docs/screenshots/characters.png" width="600" alt="The saved characters gallery with caricature portraits">
+<br><em>Saved characters, each with its caricature portrait.</em> -->
 
-A key can come from three places, checked in this order: one typed into the current session, then the environment variable above, then a key you asked Doodle to remember. Remembered keys are written to `~/.doodle/credentials.json` with owner-only file permissions. They are never written into artwork, PDFs or the saved-doodle library. Demo and upload modes need no key at all.
+<!-- <img src="docs/screenshots/badge-sheet.png" width="600" alt="An A4 sheet of twelve 58 mm badge circles">
+<br><em>Twelve 58 mm badges to an A4 sheet, cut lines included.</em> -->
 
-You can also set a key before launch:
+<!-- <img src="docs/screenshots/printed-and-coloured.jpg" width="600" alt="A printed Doodle page, coloured in">
+<br><em>The point of it all.</em> -->
 
-```bash
-export GEMINI_API_KEY="your-key-here"
-./run.command
-```
+## Where your stuff lives
 
-AI artwork is probabilistic: the same words can produce a different illustration. Print geometry remains deterministic.
+Doodle runs entirely on your computer. Saved doodles, characters and settings
+live in a `.doodle` folder in your home directory, and the only thing that
+ever leaves your machine is the idea (or photo) you send to the drawing
+service you connected. Doodle itself has no accounts, no tracking and no
+subscription — the only account involved is the one you hold with your
+chosen drawing service.
 
-### Alternatives
+## For the technically curious
 
-When you ask for more than one alternative, Doodle first asks the provider's text model to plan that many different scenes, varying the moment in the story, the camera framing, the setting and the mood. Recraft has no text model, so it falls back to Doodle's own variation rules. Either way the drawing style, age profile and composition rules stay identical between alternatives, so what differs is the interpretation rather than the drawing conventions. The studio shows the plan under **How the alternatives differ**.
-
-### Changing a picture
-
-Beneath any generated picture is a **Make a change** box. Describe what you want different — "give the dinosaur a party hat", "move the fire engine away from the edge" — and Doodle changes that picture rather than drawing a new one from your original words.
-
-Every version is kept in a strip beneath the picture, captioned with what you asked for. Going back to an earlier version does not delete the ones after it, so exploring an idea and changing your mind costs nothing but the drawing itself.
-
-Two things to expect. The whole picture is redrawn each time, so parts you did not ask about may shift a little; this is how all three providers work without a brush mask, and is not a fault. And each change costs one image generation, so the version count is shown beside the box.
-
-Refining works on generated pictures. Uploaded and demo artwork can be laid out and printed but not changed, because Doodle does not know which model drew them.
-
-## Badge dimensions
-
-A nominal 58 mm badge can involve three distinct measurements:
-
-- **Finished face:** the visible front of the completed badge.
-- **Paper cut diameter:** the disc cut from the printed sheet. Some presses require extra paper to wrap around the shell.
-- **Safe artwork diameter:** the central area in which faces, eyes and text should remain.
-
-Do not assume the paper cut is 58 mm. Use the template supplied with the badge press.
-
-With a 58 mm cut, 10 mm A4 margins and 5 mm gaps, the default grid holds twelve circles: three columns by four rows.
-
-The circle sheet shows a live preview of one badge with all three diameters drawn: a solid line where the paper is cut, a dashed line for the visible face, and a dotted line for the safe area. It appears as soon as you change a setting, before any PDF is built.
-
-By default the whole picture is fitted inside the safe circle, so nothing is cut off. This makes the artwork about 71 per cent of the safe diameter, because a square that fits inside a circle is narrower than the circle itself. Choose **Fill the circle** if you would rather the picture were larger and accept losing its corners.
-
-## Printing at scale
-
-1. Download the PDF rather than printing the browser preview.
-2. Choose **Actual size** or **100%** in the print dialogue.
-3. Disable **Fit**, **Shrink oversized pages** and **Scale to printable area**.
-4. Print one calibration page and measure it before making a batch.
-
-For example, a 100 mm line that prints as 98.6 mm needs this correction:
-
-```text
-100 / 98.6 = 1.0142, or 101.42%
-```
-
-Doodle can store separate horizontal and vertical corrections.
-
-## Local data
-
-By default, saved doodles and calibration settings live at:
-
-```text
-~/.doodle
-```
-
-Override the location with:
-
-```bash
-export DOODLE_DATA_DIR="/your/chosen/folder"
-```
-
-For compatibility, an existing `~/.colouring_factory` library is retained when no `~/.doodle` folder exists.
-
-## Run the tests
-
-```bash
-make test
-```
-
-Or by hand:
-
-```bash
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-pytest
-```
-
-The tests cover, among other things:
-
-- A4 PDF MediaBox dimensions
-- exact custom PDF dimensions
-- 58 mm circle-grid capacity
-- printer-compensation mathematics
-- binary black-and-white output
-- all three main application layout branches
-
-## Repository structure
-
-```text
-app.py                         Doodle interface
-colouring_factory/
-  badge_preview.py            One badge rendered with its three boundaries
-  calibration.py              Printer compensation
-  credentials.py              Provider keys stored on this computer
-  demo.py                     Built-in artwork catalogue
-  generators.py               AI image providers
-  guidance.py                 What each failure means and how to fix it
-  history.py                  The chain of versions behind a refined picture
-  image_processing.py         Black-and-white clean-up
-  layouts.py                  Millimetre geometry and grids
-  models.py                   Typed configuration objects
-  pdf_export.py               PDF creation
-  preview.py                  PDF-to-PNG preview
-  prompts.py                  Colouring-art prompt factory
-  providers.py                The image providers Doodle can use
-  storage.py                  Saved doodles and settings
-  variations.py               Turning one idea into distinct scenes
-assets/                       Original demo line art
-samples/                      Ready-made outputs
-scripts/                      Sample-generation utility
-tests/                        Geometry, export and smoke tests
-```
-
-## MVP boundaries
-
-- Generated artwork is raster PNG rather than editable vector SVG.
-- A free-form image model may alter a recurring character between generations.
-- Anatomical and complexity scoring is not automated; you choose the acceptable picture visually.
-- Calibration corrects generated content dimensions but cannot remove a printer's hard non-printable margins.
+The [full reference](docs/REFERENCE.md) covers the architecture, badge
+geometry, printer calibration maths, provider details, local data layout and
+how to run the test suite. Doodle is a Python and
+[Streamlit](https://streamlit.io) app, MIT-licensed, with automated tests for
+the geometry and PDF output — the AI invents the drawing, but the millimetres
+are deterministic.
