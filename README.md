@@ -11,7 +11,7 @@ into a clean black-and-white colouring page, sized exactly for A4 paper.
 ![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)
 ![Runs on your computer](https://img.shields.io/badge/runs-on%20your%20computer-orange)
 
-<img src="HOMEPAGE_PREVIEW.png" width="720" alt="The Doodle homepage: a wordmark and one box to type your idea into">
+<img src="docs/screenshots/homepage.png" width="720" alt="The Doodle homepage: a colourful wordmark, one box asking What shall we draw, and a Draw it button">
 
 </div>
 
@@ -28,11 +28,15 @@ service to illustrate it in thick, friendly outlines, cleans the result into
 pure black-and-white line art, and hands you a PDF that prints at true size.
 From idea to paper takes about a minute.
 
+And because Doodle can learn who your children are from a photo, the pages
+can star them. Here is what that looks like: two small sisters, camping with
+the Peppa Pig family.
+
 <div align="center">
-<img src="assets/demo_dinosaur.png" width="30%" alt="Demo colouring page: a friendly dinosaur">&nbsp;
-<img src="assets/demo_bear_astronaut.png" width="30%" alt="Demo colouring page: a bear in a space suit">&nbsp;
-<img src="assets/demo_robot_balloons.png" width="30%" alt="Demo colouring page: a robot holding balloons">
-<br><em>The three built-in demo drawings — these work with no setup at all.</em>
+<img src="docs/screenshots/campfire-line-art.png" width="46%" alt="A black-and-white colouring page: two young sisters and the Peppa Pig family around a campfire">&nbsp;
+<img src="docs/screenshots/campfire-coloured.png" width="46%" alt="The same campfire scene, fully coloured in">
+<br><em>The page as it prints, and the same picture coloured in. The girls are
+saved Doodle characters, drawn in their real likeness from one photo each.</em>
 </div>
 
 ## The fun bits
@@ -51,6 +55,8 @@ From idea to paper takes about a minute.
   person from one photo, and from then on you can tick them into any picture.
   Each saved character even gets its own caricature portrait.
 
+  <img src="docs/screenshots/characters.png" width="600" alt="The Your characters screen: three caricature portraits with Open as a doodle, Delete and Edit buttons, above the Add a character form">
+
 - **Change your mind.** Under every picture is a *Make a change* box:
   *"give the dinosaur a party hat"*, *"move the fire engine away from the
   edge"*. Every version is kept, so experimenting costs nothing but the
@@ -60,9 +66,11 @@ From idea to paper takes about a minute.
   of repeated circles for 58&nbsp;mm badge presses, with proper cut lines and
   safe areas.
 
-- **No AI, no problem.** The three demo drawings above are built in, and you
-  can upload any picture of your own to be cleaned up and laid out for
-  printing. Neither needs a key or an internet connection.
+- **No AI, no problem.** Three demo drawings are built in, and you can
+  upload any picture of your own to be cleaned up and laid out for printing.
+  Neither needs a key or an internet connection.
+
+  <img src="assets/demo_dinosaur.png" width="30%" alt="Demo colouring page: a friendly dinosaur"> <img src="assets/demo_bear_astronaut.png" width="30%" alt="Demo colouring page: a bear in a space suit"> <img src="assets/demo_robot_balloons.png" width="30%" alt="Demo colouring page: a robot holding balloons">
 
 ## Getting started
 
@@ -98,6 +106,29 @@ key. **Google Gemini has a free allowance, so start there.** Paste the key in
 once and Doodle can remember it — it is stored only on your computer, never
 in the artwork or PDFs.
 
+### Rather have someone talk you through it?
+
+Paste the text below into an AI assistant you already use — ChatGPT, Claude,
+Gemini, whichever — fill in the two brackets, and it will walk you through
+the whole setup at your pace, including creating the free key:
+
+```text
+I've just downloaded Doodle, a small app that turns a typed idea into a
+printable colouring page for children: https://github.com/OlliePage/Doodle
+
+I'm on [Mac / Windows], and I'd call my computer confidence [low / medium / high].
+
+Walk me through it one step at a time, checking each step worked before
+moving to the next:
+1. Install Python 3.11 or newer if my computer doesn't already have it.
+2. Download Doodle from that page (green Code button, Download ZIP), unzip
+   it, and open it with run.command on Mac or run_windows.bat on Windows.
+3. Create a free Google Gemini API key at https://aistudio.google.com/apikey.
+4. Paste the key into Doodle's connection screen and have Doodle remember it.
+5. Print my first page at actual size (100%, no fit-to-page), for this idea:
+   [what your child wants a picture of].
+```
+
 ### Printing
 
 Two rules cover almost everything:
@@ -117,6 +148,12 @@ corrects it — see the [full reference](docs/REFERENCE.md#printing-at-scale).
      block (each block is an image line plus its caption line). The list of
      expected shots is in docs/screenshots/README.md. -->
 
+<img src="docs/screenshots/family-picnic.png" width="600" alt="A colouring page of a dad and two daughters at a picnic, with teddy-bear hot-air balloons overhead">
+<br><em>All three saved characters at a picnic, under teddy-bear hot-air balloons.</em>
+
+<img src="docs/screenshots/tent-line-art.png" width="600" alt="A colouring page of two young sisters putting up a tent while the Peppa Pig family helps">
+<br><em>Putting the tent up — another page from the same camping request.</em>
+
 <img src="samples/drop-a-picture-dragging.png" width="600" alt="Doodle offering to take a photo being dragged onto the page">
 <br><em>Drop a photo anywhere on the page and Doodle offers to draw it.</em>
 
@@ -125,9 +162,6 @@ corrects it — see the [full reference](docs/REFERENCE.md#printing-at-scale).
 
 <!-- <img src="docs/screenshots/make-a-change.png" width="600" alt="The Make a change box with a strip of earlier versions">
 <br><em>Ask for changes in plain English; every version is kept.</em> -->
-
-<!-- <img src="docs/screenshots/characters.png" width="600" alt="The saved characters gallery with caricature portraits">
-<br><em>Saved characters, each with its caricature portrait.</em> -->
 
 <!-- <img src="docs/screenshots/badge-sheet.png" width="600" alt="An A4 sheet of twelve 58 mm badge circles">
 <br><em>Twelve 58 mm badges to an A4 sheet, cut lines included.</em> -->
