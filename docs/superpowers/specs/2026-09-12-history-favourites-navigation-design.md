@@ -109,10 +109,16 @@ Model (pure logic, `colouring_factory/navigation.py`): a **trail** of stops, eac
   names the stop already shown, so nothing further happens.
 - *Detours are not stops:* the drawing screen and the connection screen never get
   an address. No Back or Forward can land on the drawing screen and pay for a
-  picture again. The bar's Back on a detour returns to the stop it was reached
-  from; on the drawing screen it first stops the drawing the way Stop does, so
-  what has already been drawn is kept (and recorded). A browser Back during a
-  drawing does the same and then goes where the browser says.
+  picture again. Back on the drawing screen, the bar's or the browser's, is
+  exactly Stop: with pictures already drawn it lands on the result screen with
+  them (they were paid for), and with none it returns to the stop the drawing
+  was asked from. The bar's Back on the connection screen returns to the stop
+  it was reached from. (Revised after review on 2026-09-12: Back first walked
+  away from pictures already drawn, keeping only the first in History.)
+- *A stop that can no longer be shown* (its doodle deleted since) is rewritten
+  in place to the homepage, keeping its token, so the stops around it survive.
+- *Deleting the doodle on screen* also forgets it from memory, so nothing can
+  record it again.
 - *A fresh page load* (refresh, bookmark) with `screen=result&doodle=<id>` reopens
   that doodle from history; any other known screen opens that screen; anything
   unknown opens the homepage.

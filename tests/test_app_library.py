@@ -23,6 +23,7 @@ from colouring_factory.storage import (
     data_root,
     is_favourite_id,
     list_library_items,
+    load_doodle,
     record_doodle,
     save_library_item,
 )
@@ -31,6 +32,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP = str(PROJECT_ROOT / "app.py")
 ARTWORK = (PROJECT_ROOT / "assets" / "demo_dinosaur.png").read_bytes()
 OTHER = (PROJECT_ROOT / "assets" / "demo_robot_balloons.png").read_bytes()
+PAIR = (PROJECT_ROOT / "assets" / "style_a_scene.png").read_bytes()
 
 
 @pytest.fixture(autouse=True)
@@ -317,27 +319,57 @@ def test_the_homepage_shows_neither_route_until_something_exists() -> None:
     assert _has_button(at, "favourites")
 
 
-def test_deleting_the_doodle_on_screen_leaves_the_heart_working() -> None:
-    """The app keeps the id of the doodle on screen. Deleting that entry from
-    History while the picture is still up used to leave the id pointing at a
-    folder that no longer existed, so pressing the heart back on the result
-    screen crashed writing to it. The picture is still being looked at, so it
-    is recorded afresh instead."""
+def test_deleting_the_doodle_on_screen_stays_deleted() -> None:
+    """Deleting the doodle that is on screen used to leave it in memory, where
+    the result screen recorded it again the next time it was shown: Back after
+    Delete for good brought the picture straight back into History. And the
+    stop that could no longer be shown was replaced by a new one, which threw
+    away the way forward."""
 
     at = _result_screen()
-    deleted_id = at.session_state["current_doodle_id"]
-    assert deleted_id
+    assert at.session_state["current_doodle_id"]
 
     at = _button(at, "history").click().run()
     at = _button(at, "delete").click().run()
     at = _button(at, "delete for good").click().run()
     assert list_library_items() == []
+    assert at.session_state["current_raw"] is None
 
-    at.session_state["screen"] = "result"
-    at = at.run()
-    at = _button(at, "add to favourites").click().run()
+    at = next(b for b in at.button if b.label == "Back").click().run()
     assert not at.exception
+    assert at.session_state["screen"] == "home"
+    assert list_library_items() == []
 
-    kept_id = at.session_state["current_doodle_id"]
-    assert kept_id and kept_id != deleted_id
-    assert is_favourite_id(kept_id)
+    forward = next(b for b in at.button if b.label == "Forward")
+    assert not forward.disabled
+    at = forward.click().run()
+    assert at.session_state["screen"] == "history"
+
+
+def test_tapping_an_alternative_keeps_the_grown_up_sheet_with_it() -> None:
+    """The grown-up sheet stays on screen beside whichever alternative is
+    tapped, so that alternative's History entry has to keep it too; reopening
+    it used to bring back the children's sheet alone."""
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "result"
+    at.session_state["current_raw"] = ARTWORK
+    at.session_state["current_title"] = "Blue dinosaur"
+    at.session_state["current_metadata"] = {
+        "source": "test",
+        "concept": "Blue dinosaur",
+    }
+    at.session_state["quick_processed"] = ARTWORK
+    at.session_state["quick_pdf"] = b"%PDF-1.4 fake"
+    at.session_state["candidates"] = [
+        GeneratedArtwork(image_bytes=ARTWORK, prompt="p", provider="OpenAI", model="m"),
+        GeneratedArtwork(image_bytes=OTHER, prompt="p", provider="OpenAI", model="m"),
+    ]
+    at.session_state["pair_raw"] = PAIR
+    at.run()
+
+    at = _button(at, "use this one").click().run()
+    assert not at.exception
+    loaded = load_doodle(at.session_state["current_doodle_id"])
+    assert loaded["raw"] == OTHER
+    assert loaded["pair_raw"] == PAIR

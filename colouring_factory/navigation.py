@@ -75,6 +75,16 @@ class Trail:
             self, stops=stops, position=len(stops) - 1, issued=self.issued + 1
         )
 
+    def replace_here(self, screen: str, doodle: str = "") -> "Trail":
+        # A stop that can no longer be shown, its doodle deleted since, is
+        # rewritten in place and keeps its token. The browser's history still
+        # holds that step, and adding a new stop instead would drop every stop
+        # ahead of it, so the browser would step back onto a token the trail
+        # had forgotten and the whole trail would start again.
+        stops = list(self.stops)
+        stops[self.position] = Stop(self.here.token, screen, doodle)
+        return replace(self, stops=tuple(stops))
+
     def arrive(self, params: Mapping[str, str]) -> "Trail":
         token = params.get("step", "")
         index = next(

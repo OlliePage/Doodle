@@ -218,6 +218,39 @@ def test_back_while_drawing_keeps_what_is_drawn_and_draws_nothing_more(
 
     at = _arrow(at, "Back").click().run()
     assert not at.exception
-    assert at.session_state["screen"] == "home"
     assert len(calls) == 2, "Back must never start another paid drawing"
-    assert len(list_library_items()) == 1, "the picture already drawn is kept"
+    # With a picture already drawn and paid for, Back is Stop: it lands on
+    # that picture rather than walking away from it.
+    assert at.session_state["screen"] == "result"
+    assert at.session_state["current_raw"] == ARTWORK
+    assert len(list_library_items()) == 1
+
+
+def test_back_while_drawing_with_nothing_drawn_returns_to_the_idea(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    calls: list[dict] = []
+
+    def fake_generate(**kwargs):
+        calls.append(kwargs)
+        # Ends this run on the drawing screen before the first picture is
+        # back: the moment a parent would press Back.
+        import streamlit as st
+
+        st.stop()
+
+    monkeypatch.setattr(generators, "generate_with_provider", fake_generate)
+
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.run()
+    at.text_input(key="home_prompt").set_value("a dinosaur washing a fire engine")
+    at = _button(at, "draw it").click().run()
+    assert at.session_state["screen"] == "generate"
+
+    at = _arrow(at, "Back").click().run()
+    assert not at.exception
+    assert len(calls) == 1, "Back must never start another paid drawing"
+    assert at.session_state["screen"] == "home"
+    assert at.session_state["home_prompt"] == "a dinosaur washing a fire engine"
+    assert list_library_items() == []

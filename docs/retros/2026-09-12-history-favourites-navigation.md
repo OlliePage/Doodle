@@ -29,8 +29,13 @@ that the browser's own buttons agree with.
 ## What went wrong
 
 - A delete of the doodle on screen left the app holding the id of an entry
-  that had gone; the heart then crashed writing to it. Caught in review, fixed
-  by re-recording a picture whose entry has disappeared.
+  that had gone; the heart then crashed writing to it. The first fix recorded
+  the picture again, which the code review then showed brought deleted
+  pictures straight back into History. The real fix forgets the doodle from
+  memory when it is deleted.
+- The code review also found Back during a drawing walking away from pictures
+  already paid for, a Back onto a deleted doodle wiping the whole trail, and
+  new entries losing the grown-up sheet. All four were fixed before merging.
 - A test-and-commit command piped pytest into `tail`, so the commit was gated
   on `tail`'s exit status; and `addopts = "-q"` plus another `-q` hides the
   summary line. Nothing broken was committed, but the verdict was unchecked

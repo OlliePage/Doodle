@@ -53,7 +53,7 @@ from colouring_factory.generators import (
     refine_with_provider,
 )
 from colouring_factory import history
-from colouring_factory.navigation import DETOURS, Stop, Trail, place_from_address
+from colouring_factory.navigation import DETOURS, Trail, place_from_address
 from colouring_factory.guidance import guidance_for
 from colouring_factory.timings import (
     AXIS_SECONDS,
@@ -729,12 +729,14 @@ def _submit_home_prompt() -> None:
     st.session_state.screen = "generate" if api_key else "connect"
 
 
-def _start_new_doodle() -> None:
-    st.session_state.screen = "home"
-    st.session_state.home_prompt = ""
-    st.session_state.home_error = ""
-    st.session_state.home_error_code = ""
-    st.session_state.generation_idea = ""
+def _clear_current_doodle() -> None:
+    """Forget the doodle on screen, and everything built from it.
+
+    Shared by New doodle and by deleting the doodle on screen from History: a
+    deleted doodle left in memory came straight back, recorded again, the next
+    time the result screen was shown.
+    """
+
     st.session_state.candidates = []
     st.session_state.current_raw = None
     st.session_state.current_metadata = {}
@@ -748,6 +750,19 @@ def _start_new_doodle() -> None:
     st.session_state.pair_raw = None
     st.session_state.pair_processed = None
     st.session_state.pair_pdf = None
+    # A chain left behind points the change box at the previous picture, so a
+    # refinement quietly edits a doodle that is no longer on screen.
+    st.session_state.doodle_versions = ()
+    st.session_state.current_version = 0
+
+
+def _start_new_doodle() -> None:
+    st.session_state.screen = "home"
+    st.session_state.home_prompt = ""
+    st.session_state.home_error = ""
+    st.session_state.home_error_code = ""
+    st.session_state.generation_idea = ""
+    _clear_current_doodle()
     # badge_previews is deliberately left alone, the same rule colour_previews
     # already follows: both are content-addressed caches, so an entry for a
     # picture no longer on screen is just unused, never wrong.
@@ -757,10 +772,6 @@ def _start_new_doodle() -> None:
     st.session_state.quick_mode = "ai"
     st.session_state.generation_nonce = 0
     _clear_generation_plan()
-    # A chain left behind points the change box at the previous picture, so a
-    # refinement quietly edits a doodle that is no longer on screen.
-    st.session_state.doodle_versions = ()
-    st.session_state.current_version = 0
     # Cleared, unlike chosen_characters below. A cast is an answer to "who do I
     # draw for", which stays true; a dropped picture is one picture, and
     # leaving it attached would put it into the next unrelated drawing and
@@ -1214,11 +1225,10 @@ def _current_doodle_id() -> str:
 
     A test or a restored session can plant current_raw in session state
     directly, without ever going through _set_current_artwork, leaving no id
-    behind; and the entry behind a good id can be deleted or cleared from
-    History while its picture is still on screen, which once made the heart
-    crash writing to a folder that had gone. Recording it here, the moment
-    something needs it, keeps both gaps in one place rather than in every
-    caller.
+    behind; and the folder behind a good id can be removed outside the app,
+    which once made the heart crash writing to a folder that had gone.
+    Recording it here, the moment something needs it, keeps both gaps in one
+    place rather than in every caller.
     """
 
     if st.session_state.current_raw is None:
@@ -1488,6 +1498,9 @@ def _render_alternatives_picker() -> None:
                     characters=candidate.metadata.get("characters", []),
                 )
                 _prepare_quick_outputs()
+                # The grown-up sheet stays on screen beside whichever reading
+                # is tapped, so it goes into that reading's History entry too.
+                _prepare_pair_outputs()
                 st.rerun()
 
     with st.expander("How these differ"):
@@ -1970,6 +1983,10 @@ def _render_doodle_grid(*, favourites_only: bool, key_prefix: str) -> None:
                             icon=":material/delete_forever:",
                         ):
                             delete_library_item(item["id"])
+                            if item["id"] == st.session_state.get(
+                                "current_doodle_id"
+                            ):
+                                _clear_current_doodle()
                             st.session_state[pending_key] = ""
                             st.rerun()
                     with cancel_col:
@@ -2057,6 +2074,10 @@ def _render_history_screen() -> None:
                 icon=":material/delete_sweep:",
             ):
                 clear_history_keep_favourites()
+                if not has_doodle(
+                    str(st.session_state.get("current_doodle_id", ""))
+                ):
+                    _clear_current_doodle()
                 st.session_state.pending_clear_history = False
                 st.rerun()
         with cancel_col:
@@ -2604,6 +2625,7 @@ def _render_refine_controls(*, key_prefix: str) -> None:
                         # rebuilding quick_processed/quick_pdf here too, the
                         # result screen kept showing the version just left.
                         _prepare_quick_outputs()
+                        _prepare_pair_outputs()
                         st.rerun()
 
     with st.form(f"{key_prefix}_refine", clear_on_submit=True):
@@ -2683,6 +2705,9 @@ def _render_refine_controls(*, key_prefix: str) -> None:
     # picture from before the change, so pressing "Change it" appeared to do
     # nothing at all.
     _prepare_quick_outputs()
+    # A change redraws the children's sheet only; the grown-up sheet beside
+    # it is unchanged and belongs in the new version's History entry too.
+    _prepare_pair_outputs()
     st.rerun()
 
 
@@ -4407,21 +4432,28 @@ def _address(search: str) -> dict[str, str]:
     return {key: values[0] for key, values in parse_qs(search.lstrip("?")).items()}
 
 
-def _show_stop(stop: Stop) -> None:
-    """Put the app where one stop on the trail says it was."""
+def _show_stop(trail: Trail) -> Trail:
+    """Put the app where the trail's current stop says it was.
 
+    Returns the trail, with that stop rewritten when it cannot be shown.
+    """
+
+    stop = trail.here
     if stop.screen == "result" and stop.doodle != st.session_state.get(
         "current_doodle_id"
     ):
         # Going back to a doodle that is no longer the one in memory, most
         # often after New doodle emptied the screen: it comes back from
-        # History. Deleted since, there is nothing to show, so the homepage
-        # rather than a result screen with nothing on it.
+        # History. Deleted since, there is nothing to show, so the homepage,
+        # written into that stop rather than added as a new one (see
+        # Trail.replace_here): a new stop dropped the way forward, and the
+        # browser then stepped back onto a step the trail had forgotten.
         if not stop.doodle or not _open_doodle(stop.doodle):
             st.session_state.screen = "home"
-            return
+            return trail.replace_here("home")
     st.session_state.screen = stop.screen
     st.session_state.connection_error = None
+    return trail
 
 
 def _queue_browser_step(direction: str) -> None:
@@ -4431,23 +4463,32 @@ def _queue_browser_step(direction: str) -> None:
     )
 
 
+def _stop_drawing_for_back() -> bool:
+    """Leaving the drawing screen by any Back is exactly Stop.
+
+    True when pictures were already drawn: Stop lands on them, because they
+    were paid for. Back used to walk away from them instead, back to where the
+    drawing was asked from, keeping only the first in History.
+    """
+
+    drawn = bool(st.session_state.get("generation_collected"))
+    _stop_quick_generation()
+    return drawn
+
+
 def _step_back() -> None:
     trail = st.session_state.nav_trail
+    if st.session_state.screen == "generate" and _stop_drawing_for_back():
+        return
     if st.session_state.screen in DETOURS:
         # The drawing and connection screens are not stops of their own, so
         # Back returns to the stop they were reached from. The browser's
-        # address never left it, so the browser is not asked to move. Leaving
-        # a drawing this way is a Stop: what is drawn is kept, nothing more is
-        # started.
-        if st.session_state.screen == "generate":
-            _stop_quick_generation()
-        _show_stop(trail.here)
+        # address never left it, so the browser is not asked to move.
+        st.session_state.nav_trail = _show_stop(trail)
         return
     if not trail.can_go_back:
         return
-    trail = trail.back()
-    st.session_state.nav_trail = trail
-    _show_stop(trail.here)
+    st.session_state.nav_trail = _show_stop(trail.back())
     _queue_browser_step("back")
 
 
@@ -4455,9 +4496,7 @@ def _step_forward() -> None:
     trail = st.session_state.nav_trail
     if st.session_state.screen in DETOURS or not trail.can_go_forward:
         return
-    trail = trail.forward()
-    st.session_state.nav_trail = trail
-    _show_stop(trail.here)
+    st.session_state.nav_trail = _show_stop(trail.forward())
     _queue_browser_step("forward")
 
 
@@ -4501,7 +4540,9 @@ def _sync_navigation() -> None:
         # the app somewhere keeps that.
         if st.session_state.screen == "home" and "screen" in address:
             screen, doodle = place_from_address(address)
-            _show_stop(Stop("", screen, doodle))
+            _show_stop(
+                Trail.start(screen, doodle, session=st.session_state.nav_session)
+            )
         screen, doodle = _place_now()
         if screen in DETOURS:
             screen, doodle = "home", ""
@@ -4516,12 +4557,13 @@ def _sync_navigation() -> None:
         key="doodle_browser_history", on_moved_change=lambda: None
     ).moved
     if moved is not None:
-        # The browser's own Back or Forward. Leaving a drawing counts as Stop,
-        # the same as the arrow's Back.
-        if st.session_state.screen == "generate":
-            _stop_quick_generation()
+        # The browser's own Back or Forward. The trail follows the browser
+        # either way; leaving a drawing is Stop, the same as the arrow's Back,
+        # and pictures already drawn stay on screen and become a new stop
+        # below, after wherever the browser now is.
         trail = trail.arrive(_address(moved))
-        _show_stop(trail.here)
+        if not (st.session_state.screen == "generate" and _stop_drawing_for_back()):
+            trail = _show_stop(trail)
 
     screen, doodle = _place_now()
     if screen not in DETOURS and (screen, doodle) != (

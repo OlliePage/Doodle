@@ -38,6 +38,19 @@ def test_tokens_are_never_reused_even_after_back_and_forward_and_go() -> None:
     assert dropped_token not in tokens
 
 
+def test_replacing_a_stop_keeps_its_token_and_the_way_forward() -> None:
+    trail = Trail.start("home", session="s").go("result", "a").go("history")
+    trail = trail.back()
+    token = trail.here.token
+
+    replaced = trail.replace_here("home")
+
+    assert replaced.here.token == token
+    assert (replaced.here.screen, replaced.here.doodle) == ("home", "")
+    assert [stop.screen for stop in replaced.stops] == ["home", "home", "history"]
+    assert replaced.can_go_forward
+
+
 def test_arrive_with_a_known_token_moves_without_adding_a_stop() -> None:
     trail = Trail.start("home", session="s")
     trail = trail.go("history")
