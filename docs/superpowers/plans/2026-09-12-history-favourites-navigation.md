@@ -44,7 +44,7 @@ Files: `colouring_factory/storage.py`, `tests/test_storage.py`, new `tests/conft
 Files: new `colouring_factory/navigation.py`, `colouring_factory/browser_history.py`,
 `tests/test_navigation.py`.
 
-- [ ] `navigation.py`, no Streamlit import:
+- [x] `navigation.py`, no Streamlit import:
       - `DETOURS = frozenset({"generate", "connect"})`; `RESTORABLE = frozenset(
         {"home", "result", "history", "favourites", "characters", "studio"})`.
       - frozen dataclasses `Stop(token, screen, doodle="")` and
@@ -57,15 +57,17 @@ Files: new `colouring_factory/navigation.py`, `colouring_factory/browser_history
         that token), `.address()` → `{"screen", "step", "doodle"?}`.
       - `place_from_address(params) -> tuple[str, str]`: unknown screen → home;
         `result` without a doodle → home.
-- [ ] `browser_history.py`: `LISTENER_JS` (multi-line; binds one `popstate`
+- [x] `browser_history.py`: `LISTENER_JS` (multi-line; binds one `popstate`
       listener on `window`, guarded by a window flag, calling the latest
       `setTriggerValue("moved", window.location.search)`) and
       `step_script(direction, nonce) -> str` returning
       `<script>` that calls `window.history.back()`/`forward()` once per nonce
       (`window.__doodleNavNonce`), mirroring `browser_print.print_trigger_html`.
+      The nonce is a string carrying the session, `<session>.<n>`, because the
+      tab outlives a session and a bare count restarting at 1 would be ignored.
       Reference implementation proven in Chrome: the throwaway app at
       `/private/tmp/claude-501/-Users-olliepage-Developer-Doodle/c2b0fe80-3472-4e19-abe3-28790859ca3d/scratchpad/nav_spike/app.py`.
-- [ ] Tests: going somewhere new after stepping back drops the forward stops;
+- [x] Tests: going somewhere new after stepping back drops the forward stops;
       tokens are never reused, even after going back and forward; `arrive` with a
       known token moves without adding a stop; `arrive` with an unknown token
       starts afresh from the address; `place_from_address` rejects unknown screens
