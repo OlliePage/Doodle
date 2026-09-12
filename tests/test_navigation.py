@@ -84,6 +84,11 @@ def test_place_from_address_rejects_unknown_screens_and_doodle_less_results() ->
         "result",
         "abc",
     )
+    # An id edited in the address bar never gets as far as naming a folder.
+    assert place_from_address({"screen": "result", "doodle": "../settings"}) == (
+        "home",
+        "",
+    )
     # Only "result" carries a doodle; it is dropped for every other screen.
     assert place_from_address({"screen": "history", "doodle": "abc"}) == ("history", "")
 

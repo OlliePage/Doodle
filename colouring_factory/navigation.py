@@ -8,6 +8,7 @@ for the model this encodes.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
@@ -103,6 +104,8 @@ def place_from_address(params: Mapping[str, str]) -> tuple[str, str]:
     if screen != "result":
         return screen, ""
     doodle = params.get("doodle", "")
-    if not doodle:
+    # Typed or edited in the address bar, so it is checked before it can name
+    # a folder on disk; an empty one fails the same check.
+    if not re.fullmatch(r"[\w-]+", doodle):
         return "home", ""
     return "result", doodle

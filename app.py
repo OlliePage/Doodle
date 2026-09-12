@@ -5,10 +5,12 @@ import hashlib
 import json
 import re
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 from io import BytesIO
+from urllib.parse import parse_qs
 
 import streamlit as st
 from PIL import Image, ImageOps
@@ -19,6 +21,7 @@ from colouring_factory.browser_drop import (
     DROP_EXTENSIONS,
     drop_overlay_html,
 )
+from colouring_factory.browser_history import LISTENER_JS, step_script
 from colouring_factory.browser_print import print_trigger_html
 from colouring_factory.calibration import profile_from_measurements
 from colouring_factory.characters import (
@@ -50,6 +53,7 @@ from colouring_factory.generators import (
     refine_with_provider,
 )
 from colouring_factory import history
+from colouring_factory.navigation import DETOURS, Stop, Trail, place_from_address
 from colouring_factory.guidance import guidance_for
 from colouring_factory.timings import (
     AXIS_SECONDS,
@@ -435,6 +439,15 @@ def _initialise_state() -> None:
         # network call. True once asked, whether or not the asking worked.
         "dropped_picture_described": False,
         "drop_well_nonce": 0,
+        # Back and Forward: the trail of places visited this session (see
+        # colouring_factory/navigation.py), the one-shot script the bar's
+        # arrows queue for the browser, and a stamp for this session so the
+        # tab, which outlives a session, never mistakes an earlier session's
+        # steps for this one's.
+        "nav_trail": None,
+        "nav_script": None,
+        "nav_count": 0,
+        "nav_session": uuid.uuid4().hex[:6],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -927,6 +940,18 @@ def _render_homepage() -> None:
             right: 1.3rem;
             z-index: 20;
           }
+          /* Back and Forward take the opposite corner, out of the search
+             bar's way for the same reason, and fade when there is nowhere to
+             go rather than disappearing, so the pair never jumps about. */
+          .st-key-doodle-nav-home {
+            position: fixed;
+            top: .7rem;
+            left: 1.3rem;
+            z-index: 20;
+          }
+          .st-key-doodle-nav-home button:disabled {
+            opacity: .4;
+          }
           /* The settings read as one line of small grey text under the button.
              Each value opens its choices in a floating panel, so nothing on
              this page is a form and nothing reflows when it is opened. */
@@ -955,6 +980,7 @@ def _render_homepage() -> None:
             margin: 0;
           }
           .st-key-doodle-home-corner button,
+          .st-key-doodle-nav-home button,
           .st-key-doodle-home-settings button {
             color: #5f6368 !important;
             font-size: .92rem;
@@ -964,6 +990,7 @@ def _render_homepage() -> None:
             min-height: 0;
           }
           .st-key-doodle-home-corner button:hover,
+          .st-key-doodle-nav-home button:hover,
           .st-key-doodle-home-settings button:hover {
             background: #f4f5f7 !important;
             color: #202124 !important;
@@ -984,6 +1011,7 @@ def _render_homepage() -> None:
         """,
         unsafe_allow_html=True,
     )
+    _render_nav_arrows(where="home")
     # Offered only once there is something to open, so a first-time homepage
     # is a logo, a bar and a button and nothing else.
     saved_count = _saved_doodle_count()
@@ -1279,13 +1307,15 @@ def _render_brand_home(where: str, *, centred: bool = False) -> None:
 
 
 def _render_top_bar(*, where: str) -> None:
-    """The logo and the routes that must never be more than one click away.
+    """Back and Forward, the logo, and the routes that must never be more
+    than one click away.
 
     Starting a fresh doodle used to mean scrolling past the change box to a
     button at the very bottom, and reaching a saved doodle meant finding
     Doodle Studio first.
     """
 
+    _render_nav_arrows(where=where)
     brand, history_col, favourites_col, fresh = st.columns([2.4, 1.4, 1.7, 1.3])
     with brand:
         _render_brand_home(where)
@@ -1972,10 +2002,10 @@ def _render_doodle_grid(*, favourites_only: bool, key_prefix: str) -> None:
                     )
                 with favourite_col:
                     item_is_favourite = is_favourite(item)
+                    # Shorter than the result screen's wording: a third of a
+                    # tile cut "Remove from favourites" down to "Remove fr…".
                     if st.button(
-                        "Remove from favourites"
-                        if item_is_favourite
-                        else "Add to favourites",
+                        "Unfavourite" if item_is_favourite else "Favourite",
                         key=f"{key_prefix}_favourite_{item['id']}",
                         width="stretch",
                         icon=":material/heart_minus:"
@@ -2120,12 +2150,6 @@ def _render_characters_screen() -> None:
     """
 
     _render_top_bar(where="characters")
-
-    # The homepage's "Add a character" button is the only route here, so Back
-    # always has exactly one place to return to.
-    if st.button("Back", width="stretch", icon=":material/arrow_back:"):
-        st.session_state.screen = "home"
-        st.rerun()
 
     st.header("Your characters")
 
@@ -2749,20 +2773,10 @@ def _render_connection_setup() -> None:
         unsafe_allow_html=True,
     )
 
-    top_left, top_middle, top_right = st.columns([1, 3, 1])
-    with top_left:
-        if st.button("Back", width="stretch", icon=":material/arrow_back:"):
-            st.session_state.screen = (
-                "home"
-                if st.session_state.connect_return == "generate"
-                else st.session_state.connect_return
-            )
-            st.session_state.connection_error = None
-            st.rerun()
-    with top_middle:
-        _render_brand_home("connect", centred=True)
-    with top_right:
-        st.empty()
+    # The arrows' Back replaces this screen's own, which had to be told where
+    # it had been reached from; the trail already knows.
+    _render_nav_arrows(where="connect")
+    _render_brand_home("connect", centred=True)
 
     st.markdown(
         '<div class="connection-title">Connect an image generator</div>',
@@ -4099,6 +4113,7 @@ def _render_generating_screen() -> None:
         """,
         unsafe_allow_html=True,
     )
+    _render_nav_arrows(where="generate")
     st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
     st.markdown(
         '<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True
@@ -4374,14 +4389,167 @@ def _render_first_result() -> None:
                 st.rerun()
 
 
+# Back and Forward. How this fits together, and why it is not built on
+# Streamlit's own pages (each move there writes two browser-history entries, so
+# the browser's Back needed pressing twice), is in
+# docs/superpowers/specs/2026-09-12-history-favourites-navigation-design.md.
+# Registered on every run, which Streamlit accepts silently because the
+# definition never changes.
+_BROWSER_HISTORY = st.components.v2.component("doodle_browser_history", js=LISTENER_JS)
+
+
+def _place_now() -> tuple[str, str]:
+    screen = str(st.session_state.screen)
+    return screen, (_current_doodle_id() if screen == "result" else "")
+
+
+def _address(search: str) -> dict[str, str]:
+    return {key: values[0] for key, values in parse_qs(search.lstrip("?")).items()}
+
+
+def _show_stop(stop: Stop) -> None:
+    """Put the app where one stop on the trail says it was."""
+
+    if stop.screen == "result" and stop.doodle != st.session_state.get(
+        "current_doodle_id"
+    ):
+        # Going back to a doodle that is no longer the one in memory, most
+        # often after New doodle emptied the screen: it comes back from
+        # History. Deleted since, there is nothing to show, so the homepage
+        # rather than a result screen with nothing on it.
+        if not stop.doodle or not _open_doodle(stop.doodle):
+            st.session_state.screen = "home"
+            return
+    st.session_state.screen = stop.screen
+    st.session_state.connection_error = None
+
+
+def _queue_browser_step(direction: str) -> None:
+    st.session_state.nav_count = int(st.session_state.nav_count) + 1
+    st.session_state.nav_script = step_script(
+        direction, f"{st.session_state.nav_session}.{st.session_state.nav_count}"
+    )
+
+
+def _step_back() -> None:
+    trail = st.session_state.nav_trail
+    if st.session_state.screen in DETOURS:
+        # The drawing and connection screens are not stops of their own, so
+        # Back returns to the stop they were reached from. The browser's
+        # address never left it, so the browser is not asked to move. Leaving
+        # a drawing this way is a Stop: what is drawn is kept, nothing more is
+        # started.
+        if st.session_state.screen == "generate":
+            _stop_quick_generation()
+        _show_stop(trail.here)
+        return
+    if not trail.can_go_back:
+        return
+    trail = trail.back()
+    st.session_state.nav_trail = trail
+    _show_stop(trail.here)
+    _queue_browser_step("back")
+
+
+def _step_forward() -> None:
+    trail = st.session_state.nav_trail
+    if st.session_state.screen in DETOURS or not trail.can_go_forward:
+        return
+    trail = trail.forward()
+    st.session_state.nav_trail = trail
+    _show_stop(trail.here)
+    _queue_browser_step("forward")
+
+
+def _render_nav_arrows(*, where: str) -> None:
+    """Back and Forward, the same pair at the top of every screen.
+
+    Back buttons used to be dotted about, one per screen and each with its
+    own idea of where it led, while the browser's own Back did nothing. These
+    and the browser's buttons now walk the same trail.
+    """
+
+    trail = st.session_state.get("nav_trail")
+    on_detour = st.session_state.screen in DETOURS
+    with st.container(horizontal=True, key=f"doodle-nav-{where}"):
+        st.button(
+            "Back",
+            key=f"nav_back_{where}",
+            icon=":material/arrow_back:",
+            type="tertiary",
+            disabled=not (on_detour or (trail is not None and trail.can_go_back)),
+            on_click=_step_back,
+        )
+        st.button(
+            "Forward",
+            key=f"nav_forward_{where}",
+            icon=":material/arrow_forward:",
+            type="tertiary",
+            disabled=on_detour or trail is None or not trail.can_go_forward,
+            on_click=_step_forward,
+        )
+
+
+def _sync_navigation() -> None:
+    """Keep the trail, the screen and the browser's address in step, once a run."""
+
+    trail = st.session_state.nav_trail
+    if trail is None:
+        address = st.query_params.to_dict()
+        # A fresh page load, from a refresh or a bookmark, arrives with only
+        # the address to go on. A test or a restored session that already put
+        # the app somewhere keeps that.
+        if st.session_state.screen == "home" and "screen" in address:
+            screen, doodle = place_from_address(address)
+            _show_stop(Stop("", screen, doodle))
+        screen, doodle = _place_now()
+        if screen in DETOURS:
+            screen, doodle = "home", ""
+        trail = Trail.start(
+            screen,
+            doodle,
+            session=st.session_state.nav_session,
+            token=address.get("step", ""),
+        )
+
+    moved = _BROWSER_HISTORY(
+        key="doodle_browser_history", on_moved_change=lambda: None
+    ).moved
+    if moved is not None:
+        # The browser's own Back or Forward. Leaving a drawing counts as Stop,
+        # the same as the arrow's Back.
+        if st.session_state.screen == "generate":
+            _stop_quick_generation()
+        trail = trail.arrive(_address(moved))
+        _show_stop(trail.here)
+
+    screen, doodle = _place_now()
+    if screen not in DETOURS and (screen, doodle) != (
+        trail.here.screen,
+        trail.here.doodle,
+    ):
+        trail = trail.go(screen, doodle)
+        st.query_params.from_dict(trail.address())
+    st.session_state.nav_trail = trail
+
+    if st.session_state.nav_script:
+        st.html(st.session_state.nav_script, unsafe_allow_javascript=True)
+        st.session_state.nav_script = None
+
+
 # A direct prompt should always enter the happy path. Injected artwork in tests or
-# a restored session goes straight to the advanced studio.
+# a restored session goes straight to the advanced studio. Only on a session's
+# first run: after that a doodle in memory is simply the one being worked on,
+# and Back to the homepage has to show the homepage rather than bounce to Studio.
 if (
-    st.session_state.current_raw is not None
+    st.session_state.nav_trail is None
+    and st.session_state.current_raw is not None
     and st.session_state.screen == "home"
     and not st.session_state.home_prompt
 ):
     st.session_state.screen = "studio"
+
+_sync_navigation()
 
 if st.session_state.screen == "home":
     _render_homepage()

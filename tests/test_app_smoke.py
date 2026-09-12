@@ -34,10 +34,29 @@ class _SessionState(dict):
         self[name] = value
 
 
+class _QueryParams(dict):
+    def to_dict(self):
+        return dict(self)
+
+    def from_dict(self, params):
+        self.clear()
+        self.update(params)
+
+
+def _component(*_args, **_kwargs):
+    # The browser-history listener: nothing moves in a browser that is not
+    # there, so every mount reports no move.
+    return lambda **_kwargs: types.SimpleNamespace(moved=None)
+
+
 class _FakeStreamlit(types.ModuleType):
     def __init__(self, radio_overrides=None):
         super().__init__("streamlit")
         self.session_state = _SessionState()
+        self.query_params = _QueryParams()
+        self.components = types.SimpleNamespace(
+            v2=types.SimpleNamespace(component=_component)
+        )
         self.sidebar = _Context()
         self.radio_overrides = radio_overrides or {}
         self.markdown_calls = []

@@ -76,7 +76,8 @@ def _home() -> AppTest:
 def _connect() -> AppTest:
     at = _home()
     at.text_input[0].set_value("A bear flying a kite")
-    at.button[0].click().run()
+    # By label, not position: Back and Forward now come first on every screen.
+    next(b for b in at.button if "draw it" in b.label.lower()).click().run()
     assert at.session_state["screen"] == "connect"
     return at
 
@@ -301,7 +302,8 @@ def test_no_button_carries_a_step_number() -> None:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
     at.text_input[0].set_value("A bear flying a kite")
-    at.button[0].click().run()
+    # By label, not position: Back and Forward now come first on every screen.
+    next(b for b in at.button if "draw it" in b.label.lower()).click().run()
 
     assert at.session_state["screen"] == "connect"
     for button in at.button:

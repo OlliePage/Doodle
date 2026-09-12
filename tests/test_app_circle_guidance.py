@@ -127,6 +127,12 @@ def _all_rendered(at: AppTest) -> str:
     return " ".join(blocks)
 
 
+def _draw_it(at: AppTest):
+    # By label, not position: Back and Forward now come first on every
+    # screen, and the homepage's Back is greyed out on a fresh start.
+    return next(b for b in at.button if b.label == "Draw it")
+
+
 def test_the_build_badge_survives_every_screen() -> None:
     # This branch added three screens that each end in st.stop(), any of which
     # could have left the badge unreached.
@@ -135,7 +141,7 @@ def test_the_build_badge_survives_every_screen() -> None:
     assert "doodle-build" in _all_rendered(home)
 
     home.text_input[0].set_value("A bear flying a kite").run()
-    home.button[0].click().run()
+    _draw_it(home).click().run()
     assert home.session_state["screen"] == "connect"
     assert "doodle-build" in _all_rendered(home)
 
@@ -146,7 +152,7 @@ def test_an_idea_with_no_key_routes_to_the_connection_screen() -> None:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
     at.text_input[0].set_value("A bear flying a kite").run()
-    at.button[0].click().run()
+    _draw_it(at).click().run()
 
     assert not at.exception
     assert at.session_state["screen"] == "connect"
@@ -210,7 +216,7 @@ def test_gemini_users_are_not_given_recrafts_instructions() -> None:
     at = AppTest.from_file(APP, default_timeout=60)
     at.run()
     at.text_input[0].set_value("A bear flying a kite")
-    at.button[0].click().run()
+    _draw_it(at).click().run()
     assert at.session_state["screen"] == "connect"
 
     at.radio[0].set_value("Google Gemini").run()
