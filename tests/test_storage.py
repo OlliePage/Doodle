@@ -7,7 +7,9 @@ from colouring_factory.storage import (
     clear_history_keep_favourites,
     data_root,
     delete_library_item,
+    has_doodle,
     is_favourite,
+    is_favourite_id,
     list_library_items,
     load_doodle,
     load_library_image,
@@ -117,6 +119,35 @@ def test_set_favourite_round_trips() -> None:
 
     set_favourite(item_id, False)
     assert is_favourite(list_library_items()[0]) is False
+
+
+def test_is_favourite_id_reads_the_flag_without_loading_pictures() -> None:
+    item_id = record_doodle(
+        raw_image=b"raw",
+        processed_image=b"processed",
+        title="A doodle",
+        metadata={},
+    )
+    assert is_favourite_id(item_id) is False
+
+    set_favourite(item_id, True)
+    assert is_favourite_id(item_id) is True
+
+    assert is_favourite_id("does-not-exist") is False
+
+
+def test_has_doodle_notices_an_entry_deleted_from_under_it() -> None:
+    item_id = record_doodle(
+        raw_image=b"raw",
+        processed_image=b"processed",
+        title="A doodle",
+        metadata={},
+    )
+    assert has_doodle(item_id) is True
+
+    delete_library_item(item_id)
+    assert has_doodle(item_id) is False
+    assert has_doodle("") is False
 
 
 def test_clear_history_keep_favourites_deletes_only_non_favourites() -> None:

@@ -75,38 +75,38 @@ Files: new `colouring_factory/navigation.py`, `colouring_factory/browser_history
 
 ## Task 3 — record every doodle, and favourites replace the library
 
-Files: `app.py`, `tests/test_app_library.py` → `tests/test_app_history.py`,
+Files: `app.py`, `tests/test_app_library.py` (rewritten in place),
 `tests/test_ui_conventions.py`.
 
-- [ ] State: add `current_doodle_id: ""`, `history_shown: 24`,
+- [x] State: add `current_doodle_id: ""`, `history_shown: 24`,
       `pending_clear_history: False`; remove `quick_saved`, `library_notice`,
       `library_return` and every read of them.
-- [ ] Extract `_quick_clean(raw) -> bytes` from `_prepare_quick_outputs` (same
+- [x] Extract `_quick_clean(raw) -> bytes` from `_prepare_quick_outputs` (same
       cached call, same defaults) and use it in both places.
-- [ ] `_set_current_artwork(raw, *, title, metadata, doodle_id=None)`: when no id
+- [x] `_set_current_artwork(raw, *, title, metadata, doodle_id=None)`: when no id
       is given, `record_doodle(...)` with `_quick_clean(raw)`; always set
       `current_doodle_id`.
-- [ ] `_current_doodle_id()`: records the current picture if a test or restored
+- [x] `_current_doodle_id()`: records the current picture if a test or restored
       session put `current_raw` in place without an id; used by every favourite
       control.
-- [ ] `_prepare_pair_outputs`: `attach_pair` to the current entry.
-- [ ] `_open_doodle(item_id) -> bool`: loads from the store, sets the current
+- [x] `_prepare_pair_outputs`: `attach_pair` to the current entry.
+- [x] `_open_doodle(item_id) -> bool`: loads from the store, sets the current
       artwork with the known id, sets `generation_idea` to the concept or title
       (so "Draw this idea again" works — see FB-01 in the characters tests),
       starts a fresh version chain from it, clears candidates, restores the pair
       and prepares both sheets. False when the entry is gone.
-- [ ] Result screen: the heart toggles favourite ("Add to favourites" /
+- [x] Result screen: the heart toggles favourite ("Add to favourites" /
       "Remove from favourites"); the old saved banner goes.
-- [ ] Top bar: History, Favourites (n) (disabled with a help line when there are
+- [x] Top bar: History, Favourites (n) (disabled with a help line when there are
       none). Homepage corner: History and Favourites (n) once any entry exists.
-- [ ] Screens `history` and `favourites` replace `library`: shared grid (Open,
+- [x] Screens `history` and `favourites` replace `library`: shared grid (Open,
       Favourite/Unfavourite, Delete with confirmation that names a favourite);
       History shows `history_shown` tiles with "Show more", and "Clear history,
       keep favourites" with a confirmation.
-- [ ] Studio: tab "Favourites" with the favourites grid; "Add to favourites"
+- [x] Studio: tab "Favourites" with the favourites grid; "Add to favourites"
       writes the name and Studio-cleaned picture via `update_doodle` then
       `set_favourite`.
-- [ ] Tests (`AppTest`, clicking every route): a drawn picture appears in History
+- [x] Tests (`AppTest`, clicking every route): a drawn picture appears in History
       without pressing anything; tapping an alternative adds it, tapping back
       does not duplicate; the heart adds and removes a favourite; the older
       hand-saved entries show under Favourites; opening from History lands on the

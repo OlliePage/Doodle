@@ -110,11 +110,13 @@ def test_old_default_threshold_erased_pale_strokes() -> None:
 def test_the_first_run_path_takes_the_tuned_defaults() -> None:
     # The first-run path repeated the processing numbers as literals, so it kept
     # the old threshold when the tuned one was raised — on the very first picture
-    # a new user sees. It must read them from ProcessingOptions instead.
+    # a new user sees. It must read them from ProcessingOptions instead. The
+    # cleaning call itself lives in _quick_clean, shared with recording, since
+    # history and favourites started needing the identical clean pass too.
     app_source = (Path(__file__).resolve().parents[1] / "app.py").read_text(
         encoding="utf-8"
     )
-    quick = app_source[app_source.index("def _prepare_quick_outputs") :]
+    quick = app_source[app_source.index("def _quick_clean") :]
     quick = quick[: quick.index("\ndef ")]
 
     assert "ProcessingOptions(" in quick

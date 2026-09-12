@@ -81,10 +81,16 @@ def _connect() -> AppTest:
     return at
 
 
-def _library() -> AppTest:
+def _history() -> AppTest:
     at = AppTest.from_file(APP, default_timeout=120)
-    at.session_state["screen"] = "library"
-    at.session_state["library_return"] = "home"
+    at.session_state["screen"] = "history"
+    at.run()
+    return at
+
+
+def _favourites() -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=120)
+    at.session_state["screen"] = "favourites"
     at.run()
     return at
 
@@ -116,7 +122,8 @@ def _every_screen() -> list[AppTest]:
         _layout("A4 circle sheet"),
         _layout("Custom-size page"),
         _upload(),
-        _library(),
+        _history(),
+        _favourites(),
         _generate(),
         _characters(),
     ]
@@ -261,7 +268,7 @@ def test_the_margin_around_artwork_has_one_name() -> None:
 
 def test_saving_is_called_the_same_thing_everywhere() -> None:
     studio_buttons = [b.label for b in _studio().button]
-    assert "Save to your doodles" in studio_buttons
+    assert "Add to favourites" in studio_buttons
 
     result = AppTest.from_file(APP, default_timeout=120)
     result.session_state["screen"] = "result"
@@ -271,7 +278,7 @@ def test_saving_is_called_the_same_thing_everywhere() -> None:
     result.session_state["quick_processed"] = ARTWORK
     result.session_state["quick_pdf"] = b"%PDF-1.4 fake"
     result.run()
-    assert "Save to your doodles" in [b.label for b in result.button]
+    assert "Add to favourites" in [b.label for b in result.button]
 
 
 def test_starting_over_is_called_the_same_thing_everywhere() -> None:

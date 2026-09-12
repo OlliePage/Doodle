@@ -126,6 +126,29 @@ def is_favourite(item: dict[str, Any]) -> bool:
     return item.get("favourite", True)
 
 
+def is_favourite_id(item_id: str) -> bool:
+    """Whether one entry is a favourite, without loading its pictures.
+
+    A favourite control that only has the id (the result screen's heart)
+    would otherwise have to go through load_doodle and decode raw.png and
+    processed.png just to read one flag.
+    """
+
+    folder = _item_folder(item_id)
+    metadata_file = folder / "metadata.json"
+    if not metadata_file.exists():
+        return False
+    return is_favourite(_read_metadata(folder))
+
+
+def has_doodle(item_id: str) -> bool:
+    # The app holds on to the id of the doodle on screen, and that entry can be
+    # deleted or cleared from History while the picture is still showing.
+    if not item_id:
+        return False
+    return (_item_folder(item_id) / "metadata.json").exists()
+
+
 def set_favourite(item_id: str, favourite: bool) -> None:
     folder = _item_folder(item_id)
     payload = _read_metadata(folder)
