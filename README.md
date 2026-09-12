@@ -171,7 +171,7 @@ corrects it — see the [full reference](docs/REFERENCE.md#printing-at-scale).
 
 ## Where your stuff lives
 
-Doodle runs entirely on your computer. Saved doodles, characters and settings
+Doodle runs entirely on your computer. Your doodle history, characters and settings
 live in a `.doodle` folder in your home directory, and the only thing that
 ever leaves your machine is the idea (or photo) you send to the drawing
 service you connected. Doodle itself has no accounts, no tracking and no

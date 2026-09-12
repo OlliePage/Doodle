@@ -122,29 +122,29 @@ new `tests/test_app_navigation.py`. Escalated to the strategist tier: routing
 touches every screen and has invariants (detours, the money guard, the test
 runner's page reset) that a mechanical reading would miss.
 
-- [ ] Register the listener each run: `st.components.v2.component(
+- [x] Register the listener each run: `st.components.v2.component(
       "doodle_browser_history", js=LISTENER_JS)`.
-- [ ] State: `nav_trail: None`, `nav_script: None`, `nav_nonce: 0`,
+- [x] State: `nav_trail: None`, `nav_script: None`, `nav_nonce: 0`,
       `nav_session`: a short random hex per session.
-- [ ] `_sync_navigation()` just before the router: first run → adopt a restorable
+- [x] `_sync_navigation()` just before the router: first run → adopt a restorable
       address when the screen is still the default home (reopening a doodle via
       `_open_doodle`), then start the trail; listener reported a move → if on the
       drawing screen, keep what is drawn (as Stop does) and clear the plan, then
       `_show_stop(trail.arrive(params).here)`; finally, when the screen is not a
       detour and its place differs from the trail's stop, `go` and set
       `st.query_params`. Emit any pending `nav_script` once.
-- [ ] `_step_back()` / `_step_forward()` as `on_click` callbacks: on a detour,
+- [x] `_step_back()` / `_step_forward()` as `on_click` callbacks: on a detour,
       Back stops a drawing if there is one and shows the current stop without
       touching the browser; otherwise move the trail, show the stop, queue the
       one-shot script.
-- [ ] `_render_nav_arrows(where)`: "Back" and "Forward" buttons with
+- [x] `_render_nav_arrows(where)`: "Back" and "Forward" buttons with
       `:material/arrow_back:` / `:material/arrow_forward:`, disabled when there
       is nowhere to go. In the top bar, the homepage corner, the drawing screen
       and the connection screen.
-- [ ] Remove the characters screen's and connection screen's own Back buttons.
-- [ ] Smoke-test fake: a `query_params` dict with `from_dict`, and
+- [x] Remove the characters screen's and connection screen's own Back buttons.
+- [x] Smoke-test fake: a `query_params` dict with `from_dict`, and
       `components.v2.component` returning a mount whose result has `moved=None`.
-- [ ] Tests: the arrows start disabled; home → characters → Back → home (replaces
+- [x] Tests: the arrows start disabled; home → characters → Back → home (replaces
       the old characters Back test); result → History → Back shows the same
       doodle, Forward returns to History; after "New doodle", Back reopens the
       previous doodle from history; a fresh session with
@@ -154,11 +154,13 @@ runner's page reset) that a mechanical reading would miss.
 
 ## Task 5 — docs, verification, ship
 
-- [ ] `docs/ui-conventions.md` Routes and top-bar paragraphs rewritten for
+- [x] `docs/ui-conventions.md` Routes and top-bar paragraphs rewritten for
       history, favourites and the arrows; `docs/REFERENCE.md` and README line on
       what is kept locally.
-- [ ] Full suite green; run the real app on a spare port and in Chrome check:
+- [x] Full suite green; run the real app on a spare port and in Chrome check:
       demo drawing recorded, heart, History/Favourites, bar arrows, browser
-      Back/Forward, refresh on a result reopening it, Back during a drawing.
-- [ ] Retro at `docs/retros/2026-09-12-history-favourites-navigation.md`.
+      Back/Forward, refresh on a result reopening it. Back during a drawing
+      was left to its automated test: trying it by hand would have spent
+      money on a real drawing service.
+- [x] Retro at `docs/retros/2026-09-12-history-favourites-navigation.md`.
 - [ ] `gh pr ready`, review, merge.
