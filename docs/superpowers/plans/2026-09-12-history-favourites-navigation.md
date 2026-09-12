@@ -12,28 +12,28 @@ rewrite `app.py` and run in order after them.
 
 Files: `colouring_factory/storage.py`, `tests/test_storage.py`, new `tests/conftest.py`.
 
-- [ ] `tests/conftest.py`: an autouse fixture setting `DOODLE_DATA_DIR` to a
+- [x] `tests/conftest.py`: an autouse fixture setting `DOODLE_DATA_DIR` to a
       per-test `tmp_path` folder, so no test can write into the real `~/.doodle`.
-- [ ] `record_doodle(*, raw_image, processed_image, title, metadata) -> str`:
+- [x] `record_doodle(*, raw_image, processed_image, title, metadata) -> str`:
       returns the id of an existing entry whose `raw_sha256` matches the raw
       bytes; otherwise writes a new entry exactly as `save_library_item` does,
       plus `favourite: false` and `raw_sha256`. Serialise metadata with
       `default=str` so an odd value never loses a picture.
-- [ ] `is_favourite(item) -> bool`: `item.get("favourite", True)` — an entry
+- [x] `is_favourite(item) -> bool`: `item.get("favourite", True)` — an entry
       without the key was saved by hand before history existed.
-- [ ] `set_favourite(item_id, favourite)`, `update_doodle(item_id, *, title=None,
+- [x] `set_favourite(item_id, favourite)`, `update_doodle(item_id, *, title=None,
       processed_image=None)`, `attach_pair(item_id, *, raw_image, processed_image)`
       (writes `pair_raw.png` and `pair.png`). All rewrite `metadata.json`
       atomically (write a temporary file, then `replace`).
-- [ ] `load_doodle(item_id) -> dict | None`: the metadata plus `raw` (raw.png if
+- [x] `load_doodle(item_id) -> dict | None`: the metadata plus `raw` (raw.png if
       present, else processed.png), `processed`, `pair_raw` (or None). None when
       the entry is missing. Validate the id resolves inside `library_root()` the
       way `delete_library_item` does.
-- [ ] `list_library_items(*, favourites_only=False)`.
-- [ ] `clear_history_keep_favourites() -> int`: deletes every non-favourite
+- [x] `list_library_items(*, favourites_only=False)`.
+- [x] `clear_history_keep_favourites() -> int`: deletes every non-favourite
       entry through `delete_library_item`, returns how many went.
-- [ ] `save_library_item` writes `favourite: true` explicitly.
-- [ ] Tests (each must be able to fail for a real bug): same raw bytes twice →
+- [x] `save_library_item` writes `favourite: true` explicitly.
+- [x] Tests (each must be able to fail for a real bug): same raw bytes twice →
       one entry; a legacy entry without the key is a favourite; favourite
       toggling round-trips; clearing keeps favourites and legacy entries and
       deletes the rest; `load_doodle` returns the pair; `load_doodle("../x")`
