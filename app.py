@@ -5,10 +5,12 @@ import hashlib
 import json
 import re
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 from io import BytesIO
+from urllib.parse import parse_qs
 
 import streamlit as st
 from PIL import Image, ImageOps
@@ -19,6 +21,7 @@ from colouring_factory.browser_drop import (
     DROP_EXTENSIONS,
     drop_overlay_html,
 )
+from colouring_factory.browser_history import LISTENER_JS, step_script
 from colouring_factory.browser_print import print_trigger_html
 from colouring_factory.calibration import profile_from_measurements
 from colouring_factory.characters import (
@@ -50,6 +53,7 @@ from colouring_factory.generators import (
     refine_with_provider,
 )
 from colouring_factory import history
+from colouring_factory.navigation import DETOURS, Trail, place_from_address
 from colouring_factory.guidance import guidance_for
 from colouring_factory.timings import (
     AXIS_SECONDS,
@@ -103,14 +107,21 @@ from colouring_factory.storage import (
     QUICK_AGE_CHOICES,
     QUICK_ALTERNATIVE_CHOICES,
     QUICK_STYLE_CHOICES,
+    attach_pair,
+    clear_history_keep_favourites,
     data_root,
     delete_library_item,
+    has_doodle,
+    is_favourite,
+    is_favourite_id,
     list_library_items,
-    load_library_image,
+    load_doodle,
     load_settings,
     quick_drawing_options,
-    save_library_item,
+    record_doodle,
     save_settings,
+    set_favourite,
+    update_doodle,
 )
 
 # Low quality renders fine detail such as a hat brim in pale grey that the
@@ -357,15 +368,15 @@ def _initialise_state() -> None:
         "current_raw": None,
         "current_metadata": {},
         "current_title": "",
+        "current_doodle_id": "",
         "pdf_bytes": None,
         "pdf_filename": "doodle.pdf",
         "pdf_summary": "",
         "pdf_signature": "",
-        "library_notice": "",
         "character_notice": "",
         "character_duplicate_notice": "",
-        "library_return": "home",
-        "pending_delete": "",
+        "history_shown": 24,
+        "pending_clear_history": False,
         # The picker's ticks live here rather than in per-character widget keys.
         # Streamlit garbage-collects a widget key the moment its widget is not
         # rendered, so ticking someone, visiting this screen and coming back
@@ -374,7 +385,6 @@ def _initialise_state() -> None:
         "pending_character_delete": "",
         "quick_processed": None,
         "quick_pdf": None,
-        "quick_saved": False,
         "pair_raw": None,
         "pair_processed": None,
         "pair_pdf": None,
@@ -429,6 +439,15 @@ def _initialise_state() -> None:
         # network call. True once asked, whether or not the asking worked.
         "dropped_picture_described": False,
         "drop_well_nonce": 0,
+        # Back and Forward: the trail of places visited this session (see
+        # colouring_factory/navigation.py), the one-shot script the bar's
+        # arrows queue for the browser, and a stamp for this session so the
+        # tab, which outlives a session, never mistakes an earlier session's
+        # steps for this one's.
+        "nav_trail": None,
+        "nav_script": None,
+        "nav_count": 0,
+        "nav_session": uuid.uuid4().hex[:6],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -710,25 +729,40 @@ def _submit_home_prompt() -> None:
     st.session_state.screen = "generate" if api_key else "connect"
 
 
+def _clear_current_doodle() -> None:
+    """Forget the doodle on screen, and everything built from it.
+
+    Shared by New doodle and by deleting the doodle on screen from History: a
+    deleted doodle left in memory came straight back, recorded again, the next
+    time the result screen was shown.
+    """
+
+    st.session_state.candidates = []
+    st.session_state.current_raw = None
+    st.session_state.current_metadata = {}
+    st.session_state.current_title = ""
+    st.session_state.current_doodle_id = ""
+    st.session_state.pdf_bytes = None
+    st.session_state.pdf_summary = ""
+    st.session_state.pdf_signature = ""
+    st.session_state.quick_processed = None
+    st.session_state.quick_pdf = None
+    st.session_state.pair_raw = None
+    st.session_state.pair_processed = None
+    st.session_state.pair_pdf = None
+    # A chain left behind points the change box at the previous picture, so a
+    # refinement quietly edits a doodle that is no longer on screen.
+    st.session_state.doodle_versions = ()
+    st.session_state.current_version = 0
+
+
 def _start_new_doodle() -> None:
     st.session_state.screen = "home"
     st.session_state.home_prompt = ""
     st.session_state.home_error = ""
     st.session_state.home_error_code = ""
     st.session_state.generation_idea = ""
-    st.session_state.candidates = []
-    st.session_state.current_raw = None
-    st.session_state.current_metadata = {}
-    st.session_state.current_title = ""
-    st.session_state.pdf_bytes = None
-    st.session_state.pdf_summary = ""
-    st.session_state.pdf_signature = ""
-    st.session_state.quick_processed = None
-    st.session_state.quick_pdf = None
-    st.session_state.quick_saved = False
-    st.session_state.pair_raw = None
-    st.session_state.pair_processed = None
-    st.session_state.pair_pdf = None
+    _clear_current_doodle()
     # badge_previews is deliberately left alone, the same rule colour_previews
     # already follows: both are content-addressed caches, so an entry for a
     # picture no longer on screen is just unused, never wrong.
@@ -738,10 +772,6 @@ def _start_new_doodle() -> None:
     st.session_state.quick_mode = "ai"
     st.session_state.generation_nonce = 0
     _clear_generation_plan()
-    # A chain left behind points the change box at the previous picture, so a
-    # refinement quietly edits a doodle that is no longer on screen.
-    st.session_state.doodle_versions = ()
-    st.session_state.current_version = 0
     # Cleared, unlike chosen_characters below. A cast is an answer to "who do I
     # draw for", which stays true; a dropped picture is one picture, and
     # leaving it attached would put it into the next unrelated drawing and
@@ -921,6 +951,18 @@ def _render_homepage() -> None:
             right: 1.3rem;
             z-index: 20;
           }
+          /* Back and Forward take the opposite corner, out of the search
+             bar's way for the same reason, and fade when there is nowhere to
+             go rather than disappearing, so the pair never jumps about. */
+          .st-key-doodle-nav-home {
+            position: fixed;
+            top: .7rem;
+            left: 1.3rem;
+            z-index: 20;
+          }
+          .st-key-doodle-nav-home button:disabled {
+            opacity: .4;
+          }
           /* The settings read as one line of small grey text under the button.
              Each value opens its choices in a floating panel, so nothing on
              this page is a form and nothing reflows when it is opened. */
@@ -949,6 +991,7 @@ def _render_homepage() -> None:
             margin: 0;
           }
           .st-key-doodle-home-corner button,
+          .st-key-doodle-nav-home button,
           .st-key-doodle-home-settings button {
             color: #5f6368 !important;
             font-size: .92rem;
@@ -958,6 +1001,7 @@ def _render_homepage() -> None:
             min-height: 0;
           }
           .st-key-doodle-home-corner button:hover,
+          .st-key-doodle-nav-home button:hover,
           .st-key-doodle-home-settings button:hover {
             background: #f4f5f7 !important;
             color: #202124 !important;
@@ -978,20 +1022,29 @@ def _render_homepage() -> None:
         """,
         unsafe_allow_html=True,
     )
+    _render_nav_arrows(where="home")
     # Offered only once there is something to open, so a first-time homepage
     # is a logo, a bar and a button and nothing else.
     saved_count = _saved_doodle_count()
     if saved_count:
+        favourite_count = len(list_library_items(favourites_only=True))
         with st.container(
             key="doodle-home-corner", horizontal=True, horizontal_alignment="right"
         ):
             if st.button(
-                f"Saved doodles ({saved_count})",
+                "History",
                 type="tertiary",
-                key="home_saved_link",
+                key="home_history_link",
             ):
-                st.session_state.library_return = "home"
-                st.session_state.screen = "library"
+                st.session_state.screen = "history"
+                st.rerun()
+            if st.button(
+                f"Favourites ({favourite_count})" if favourite_count else "Favourites",
+                type="tertiary",
+                key="home_favourites_link",
+                disabled=not favourite_count,
+            ):
+                st.session_state.screen = "favourites"
                 st.rerun()
 
     st.markdown(_doodle_logo("hero", centred=True), unsafe_allow_html=True)
@@ -1145,12 +1198,48 @@ def _character_portrait(character_id: str) -> bytes | None:
     )
 
 
-def _set_current_artwork(raw: bytes, *, title: str, metadata: dict) -> None:
+def _set_current_artwork(
+    raw: bytes, *, title: str, metadata: dict, doodle_id: str | None = None
+) -> None:
     st.session_state.current_raw = raw
     st.session_state.current_title = title
     st.session_state.current_metadata = metadata
     st.session_state.pdf_bytes = None
     st.session_state.pdf_summary = ""
+    # Every route that puts a picture on screen passes through here, so this
+    # is the one place that needs to record it. Reopening an entry passes its
+    # id straight in, so reopening never writes a duplicate; every other
+    # caller leaves it unset and gets a fresh (or reused, by raw bytes) entry.
+    if doodle_id is None:
+        doodle_id = record_doodle(
+            raw_image=raw,
+            processed_image=_quick_clean(raw),
+            title=title or "Doodle",
+            metadata=metadata,
+        )
+    st.session_state.current_doodle_id = doodle_id
+
+
+def _current_doodle_id() -> str:
+    """The id every favourite control acts on.
+
+    A test or a restored session can plant current_raw in session state
+    directly, without ever going through _set_current_artwork, leaving no id
+    behind; and the folder behind a good id can be removed outside the app,
+    which once made the heart crash writing to a folder that had gone.
+    Recording it here, the moment something needs it, keeps both gaps in one
+    place rather than in every caller.
+    """
+
+    if st.session_state.current_raw is None:
+        return ""
+    if not has_doodle(str(st.session_state.get("current_doodle_id", ""))):
+        _set_current_artwork(
+            st.session_state.current_raw,
+            title=st.session_state.current_title,
+            metadata=st.session_state.current_metadata,
+        )
+    return str(st.session_state.current_doodle_id)
 
 
 def _slug(text: str, fallback: str = "doodle") -> str:
@@ -1228,30 +1317,45 @@ def _render_brand_home(where: str, *, centred: bool = False) -> None:
 
 
 def _render_top_bar(*, where: str) -> None:
-    """The logo and the two routes that must never be more than one click away.
+    """Back and Forward, the logo, and the routes that must never be more
+    than one click away.
 
     Starting a fresh doodle used to mean scrolling past the change box to a
-    button at the very bottom, and reaching the saved doodles meant finding
+    button at the very bottom, and reaching a saved doodle meant finding
     Doodle Studio first.
     """
 
-    brand, saved, fresh = st.columns([3, 1.5, 1.3])
+    _render_nav_arrows(where=where)
+    brand, history_col, favourites_col, fresh = st.columns([2.4, 1.4, 1.7, 1.3])
     with brand:
         _render_brand_home(where)
-    with saved:
-        count = _saved_doodle_count()
+    with history_col:
+        history_count = _saved_doodle_count()
         if st.button(
-            f"Saved ({count})" if count else "Saved",
+            "History",
             width="stretch",
-            icon=":material/collections_bookmark:",
-            key=f"top_saved_{where}",
-            disabled=not count,
-            help="Every doodle you have saved on this computer."
-            if count
-            else "Nothing saved yet.",
+            icon=":material/history:",
+            key=f"top_history_{where}",
+            disabled=not history_count,
+            help="Every doodle you have made, kept on this computer."
+            if history_count
+            else "Nothing here yet.",
         ):
-            st.session_state.library_return = where
-            st.session_state.screen = "library"
+            st.session_state.screen = "history"
+            st.rerun()
+    with favourites_col:
+        favourite_count = len(list_library_items(favourites_only=True))
+        if st.button(
+            f"Favourites ({favourite_count})" if favourite_count else "Favourites",
+            width="stretch",
+            icon=":material/favorite:",
+            key=f"top_favourites_{where}",
+            disabled=not favourite_count,
+            help="The doodles you have kept, on this computer."
+            if favourite_count
+            else "No favourites yet.",
+        ):
+            st.session_state.screen = "favourites"
             st.rerun()
     with fresh:
         if st.button(
@@ -1394,6 +1498,9 @@ def _render_alternatives_picker() -> None:
                     characters=candidate.metadata.get("characters", []),
                 )
                 _prepare_quick_outputs()
+                # The grown-up sheet stays on screen beside whichever reading
+                # is tapped, so it goes into that reading's History entry too.
+                _prepare_pair_outputs()
                 st.rerun()
 
     with st.expander("How these differ"):
@@ -1577,7 +1684,7 @@ def _render_home_options() -> None:
             # so the only way to find out was to buy a drawing and look at it.
             # Each row is the picture Doodle actually returns at that setting.
             style = _render_style_picker(options["style"], caricature=bool(dropped))
-        # Rendered from the first run, unlike Saved doodles (n) in the
+        # Rendered from the first run, unlike History and Favourites in the
         # corner: hiding this until a cast existed left no control anywhere
         # that reached the characters screen, so a parent could never add
         # their first character. Hidden only when the active service cannot
@@ -1780,22 +1887,71 @@ def _saved_doodle_count() -> int:
     return len(list_library_items())
 
 
-def _render_library_grid() -> None:
-    """The grid of saved doodles, shared by the Saved screen and the Studio tab.
+def _open_doodle(item_id: str) -> bool:
+    """Reopen a doodle from History or Favourites, on the result screen,
+    ready to print — exactly where a freshly drawn one lands.
 
-    Loading a doodle always ends up in Doodle Studio, because laying a picture
-    out and printing it is the only reason to reopen one.
+    Replaces the inline load the grid used to do itself, which opened the
+    processed picture as though it were the raw one and left whatever
+    version chain and pair the previous doodle had standing behind it.
     """
 
-    items = list_library_items()
-    if not items:
-        st.info(
-            "You have no saved doodles yet. Draw a picture, then press Save to your doodles."
+    loaded = load_doodle(item_id)
+    if loaded is None:
+        return False
+
+    metadata = loaded.get("metadata", {})
+    title = str(loaded.get("title", "Doodle"))
+    _set_current_artwork(
+        loaded["raw"], title=title, metadata=metadata, doodle_id=item_id
+    )
+    # A portrait or an old hand-saved entry has no scene idea behind it, but
+    # "Draw this idea again" on the result screen always reads
+    # generation_idea, so it falls back to the title rather than being left
+    # empty (see FB-01 in tests/test_app_characters.py).
+    st.session_state.generation_idea = metadata.get("concept") or title
+    _start_version_chain(
+        GeneratedArtwork(
+            image_bytes=loaded["raw"],
+            prompt=metadata.get("prompt", ""),
+            provider=metadata.get("source", "Doodle"),
+            model=metadata.get("model", ""),
         )
+    )
+    st.session_state.candidates = []
+    st.session_state.pair_raw = loaded["pair_raw"]
+    _prepare_quick_outputs()
+    _prepare_pair_outputs()
+    st.session_state.screen = "result"
+    return True
+
+
+def _render_doodle_grid(*, favourites_only: bool, key_prefix: str) -> None:
+    """The grid of doodles, shared by History, Favourites and the Studio tab.
+
+    One picture, one screen: opening a doodle always lands on the result
+    screen, ready to print, the same as a freshly drawn one.
+    """
+
+    items = list_library_items(favourites_only=favourites_only)
+    if not items:
+        if favourites_only:
+            st.info(
+                "No favourites yet. Press Add to favourites on a doodle to keep it here."
+            )
+        else:
+            st.info("Nothing here yet. Every doodle you make will appear here.")
         return
 
+    shown = items
+    show_more = False
+    if not favourites_only:
+        limit = int(st.session_state.get("history_shown", 24))
+        show_more = len(items) > limit
+        shown = items[:limit]
+
     columns = st.columns(3)
-    for index, item in enumerate(items):
+    for index, item in enumerate(shown):
         with columns[index % 3]:
             with st.container(border=True):
                 st.image(item["processed_path"], width="stretch")
@@ -1811,93 +1967,137 @@ def _render_library_grid() -> None:
                 source = item.get("metadata", {}).get("source", "Unknown source")
                 st.caption(f"Source: {source}")
 
-                if st.session_state.get("pending_delete") == item["id"]:
-                    # Deleting a saved doodle removes the only copy, so the
-                    # second click is the one that does it.
+                pending_key = f"{key_prefix}_pending_delete"
+                if st.session_state.get(pending_key) == item["id"]:
+                    # Deleting a doodle removes the only copy, so the second
+                    # click is the one that does it.
                     st.warning("Delete this doodle? This cannot be undone.")
+                    if is_favourite(item):
+                        st.caption("It is one of your favourites.")
                     confirm_col, cancel_col = st.columns(2)
                     with confirm_col:
                         if st.button(
                             "Delete for good",
-                            key=f"confirm_delete_{item['id']}",
+                            key=f"{key_prefix}_confirm_delete_{item['id']}",
                             width="stretch",
                             icon=":material/delete_forever:",
                         ):
                             delete_library_item(item["id"])
-                            st.session_state.pending_delete = ""
+                            if item["id"] == st.session_state.get(
+                                "current_doodle_id"
+                            ):
+                                _clear_current_doodle()
+                            st.session_state[pending_key] = ""
                             st.rerun()
                     with cancel_col:
                         if st.button(
                             "Keep it",
-                            key=f"cancel_delete_{item['id']}",
+                            key=f"{key_prefix}_cancel_delete_{item['id']}",
                             width="stretch",
                         ):
-                            st.session_state.pending_delete = ""
+                            st.session_state[pending_key] = ""
                             st.rerun()
                     continue
 
-                use_col, delete_col = st.columns(2)
-                with use_col:
-                    if st.button(
+                open_col, favourite_col, delete_col = st.columns(3)
+                with open_col:
+                    # An on_click callback rather than the usual "if clicked,
+                    # mutate, rerun" body: _open_doodle sets generation_idea,
+                    # and the Studio route (where this grid also renders, as
+                    # the Favourites tab) has already instantiated a widget
+                    # with that same key earlier in this run by the time the
+                    # button's own branch would run. A callback runs before
+                    # the rerun, while the key is still free — the same
+                    # reason _apply_sheet_margin is wired this way.
+                    st.button(
                         "Open",
-                        key=f"load_{item['id']}",
+                        key=f"{key_prefix}_open_{item['id']}",
                         width="stretch",
                         icon=":material/open_in_new:",
+                        on_click=_open_doodle,
+                        args=(item["id"],),
+                    )
+                with favourite_col:
+                    item_is_favourite = is_favourite(item)
+                    # Shorter than the result screen's wording: a third of a
+                    # tile cut "Remove from favourites" down to "Remove fr…".
+                    if st.button(
+                        "Unfavourite" if item_is_favourite else "Favourite",
+                        key=f"{key_prefix}_favourite_{item['id']}",
+                        width="stretch",
+                        icon=":material/heart_minus:"
+                        if item_is_favourite
+                        else ":material/favorite:",
                     ):
-                        _set_current_artwork(
-                            load_library_image(item["id"], prefer_raw=False),
-                            title=item.get("title", "Saved doodle"),
-                            metadata={
-                                "source": "Saved doodles",
-                                "library_id": item["id"],
-                            },
-                        )
-                        # The same screen a freshly drawn doodle lands on. It
-                        # used to open Doodle Studio instead, so the same
-                        # picture had two entirely different interfaces
-                        # depending on how you reached it — one a friendly page
-                        # with the drawing and four buttons, the other a
-                        # numbered form with threshold sliders and a despeckle
-                        # menu. Studio is still one click away, under "Other
-                        # sizes & advanced options", for the times those
-                        # controls are what you came for.
-                        _prepare_quick_outputs()
-                        st.session_state.quick_saved = True
-                        st.session_state.pair_raw = None
-                        st.session_state.pair_processed = None
-                        st.session_state.pair_pdf = None
-                        st.session_state.library_notice = ""
-                        st.session_state.screen = "result"
+                        set_favourite(item["id"], not item_is_favourite)
                         st.rerun()
                 with delete_col:
                     if st.button(
                         "Delete",
-                        key=f"delete_{item['id']}",
+                        key=f"{key_prefix}_delete_{item['id']}",
                         width="stretch",
                         icon=":material/delete:",
                     ):
-                        st.session_state.pending_delete = item["id"]
+                        st.session_state[pending_key] = item["id"]
                         st.rerun()
 
+    if show_more:
+        if st.button(
+            "Show more",
+            key=f"{key_prefix}_show_more",
+            width="stretch",
+        ):
+            st.session_state.history_shown = int(st.session_state.history_shown) + 24
+            st.rerun()
 
-def _render_library_screen() -> None:
-    _render_brand_home("library")
-    st.header("Saved doodles")
-    st.caption(f"Kept on this computer, in {data_root()}.")
 
-    _render_library_grid()
+def _render_history_screen() -> None:
+    _render_top_bar(where="history")
+    st.header("History")
+    st.caption(
+        f"Every doodle you have made, newest first, kept on this computer in {data_root()}."
+    )
+
+    _render_doodle_grid(favourites_only=False, key_prefix="history")
+
+    if not list_library_items():
+        return
 
     st.divider()
-    back_col, new_col = st.columns(2)
-    with back_col:
-        target = str(st.session_state.get("library_return", "home"))
-        label = "Back to your doodle" if target == "result" else "Back"
-        if st.button(label, width="stretch", icon=":material/arrow_back:"):
-            st.session_state.screen = target if target != "library" else "home"
-            st.rerun()
-    with new_col:
-        if st.button("New doodle", width="stretch", icon=":material/add:"):
-            _start_new_doodle()
+    if st.session_state.get("pending_clear_history"):
+        st.warning("Clear every doodle that is not a favourite? This cannot be undone.")
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button(
+                "Clear history",
+                width="stretch",
+                icon=":material/delete_sweep:",
+            ):
+                clear_history_keep_favourites()
+                if not has_doodle(
+                    str(st.session_state.get("current_doodle_id", ""))
+                ):
+                    _clear_current_doodle()
+                st.session_state.pending_clear_history = False
+                st.rerun()
+        with cancel_col:
+            if st.button("Keep them", width="stretch"):
+                st.session_state.pending_clear_history = False
+                st.rerun()
+    elif st.button(
+        "Clear history, keep favourites",
+        icon=":material/delete_sweep:",
+    ):
+        st.session_state.pending_clear_history = True
+        st.rerun()
+
+
+def _render_favourites_screen() -> None:
+    _render_top_bar(where="favourites")
+    st.header("Favourites")
+    st.caption("The doodles you have kept, on this computer.")
+
+    _render_doodle_grid(favourites_only=True, key_prefix="favourites")
 
 
 # The segmented control speaks the way a parent would ("A toy"); the storage
@@ -1971,12 +2171,6 @@ def _render_characters_screen() -> None:
     """
 
     _render_top_bar(where="characters")
-
-    # The homepage's "Add a character" button is the only route here, so Back
-    # always has exactly one place to return to.
-    if st.button("Back", width="stretch", icon=":material/arrow_back:"):
-        st.session_state.screen = "home"
-        st.rerun()
 
     st.header("Your characters")
 
@@ -2431,6 +2625,7 @@ def _render_refine_controls(*, key_prefix: str) -> None:
                         # rebuilding quick_processed/quick_pdf here too, the
                         # result screen kept showing the version just left.
                         _prepare_quick_outputs()
+                        _prepare_pair_outputs()
                         st.rerun()
 
     with st.form(f"{key_prefix}_refine", clear_on_submit=True):
@@ -2510,6 +2705,9 @@ def _render_refine_controls(*, key_prefix: str) -> None:
     # picture from before the change, so pressing "Change it" appeared to do
     # nothing at all.
     _prepare_quick_outputs()
+    # A change redraws the children's sheet only; the grown-up sheet beside
+    # it is unchanged and belongs in the new version's History entry too.
+    _prepare_pair_outputs()
     st.rerun()
 
 
@@ -2600,20 +2798,10 @@ def _render_connection_setup() -> None:
         unsafe_allow_html=True,
     )
 
-    top_left, top_middle, top_right = st.columns([1, 3, 1])
-    with top_left:
-        if st.button("Back", width="stretch", icon=":material/arrow_back:"):
-            st.session_state.screen = (
-                "home"
-                if st.session_state.connect_return == "generate"
-                else st.session_state.connect_return
-            )
-            st.session_state.connection_error = None
-            st.rerun()
-    with top_middle:
-        _render_brand_home("connect", centred=True)
-    with top_right:
-        st.empty()
+    # The arrows' Back replaces this screen's own, which had to be told where
+    # it had been reached from; the trail already knows.
+    _render_nav_arrows(where="connect")
+    _render_brand_home("connect", centred=True)
 
     st.markdown(
         '<div class="connection-title">Connect an image generator</div>',
@@ -3283,15 +3471,20 @@ def _finish_quick_generation() -> None:
     st.session_state.screen = "result"
 
 
-def _prepare_quick_outputs() -> None:
-    """Clean the current picture and build its A4 PDF."""
+def _quick_clean(raw: bytes) -> bytes:
+    """The same cleaning pass the result screen shows, cached by content.
+
+    Shared with recording: a newly recorded entry's processed.png is this
+    same call, so drawing one costs nothing extra and reopening it later
+    shows exactly what the result screen showed at the time.
+    """
 
     # Take the tuned defaults rather than repeating them. A copied number here
     # was quietly undoing the threshold set everywhere else, on the very first
     # picture a new user sees.
     quick_defaults = ProcessingOptions(despeckle_size=3)
-    processed = _cached_process(
-        st.session_state.current_raw,
+    return _cached_process(
+        raw,
         quick_defaults.threshold,
         quick_defaults.auto_invert,
         quick_defaults.crop_whitespace,
@@ -3299,6 +3492,12 @@ def _prepare_quick_outputs() -> None:
         quick_defaults.despeckle_size,
         quick_defaults.thicken_pixels,
     )
+
+
+def _prepare_quick_outputs() -> None:
+    """Clean the current picture and build its A4 PDF."""
+
+    processed = _quick_clean(st.session_state.current_raw)
     config = FullPageConfig(
         page_width_mm=210.0,
         page_height_mm=297.0,
@@ -3309,7 +3508,6 @@ def _prepare_quick_outputs() -> None:
     )
     st.session_state.quick_processed = processed
     st.session_state.quick_pdf = create_full_page_pdf(processed, config)
-    st.session_state.quick_saved = False
 
 
 A4_SHEET = FullPageConfig(
@@ -3352,6 +3550,10 @@ def _prepare_pair_outputs() -> None:
     )
     st.session_state.pair_processed = processed
     st.session_state.pair_pdf = create_full_page_pdf(processed, A4_SHEET)
+
+    doodle_id = _current_doodle_id()
+    if doodle_id:
+        attach_pair(doodle_id, raw_image=raw, processed_image=processed)
 
 
 def _render_grown_up_sheet() -> None:
@@ -3936,6 +4138,7 @@ def _render_generating_screen() -> None:
         """,
         unsafe_allow_html=True,
     )
+    _render_nav_arrows(where="generate")
     st.markdown(_doodle_logo("compact", centred=True), unsafe_allow_html=True)
     st.markdown(
         '<div class="drawing-title">Drawing your Doodle…</div>', unsafe_allow_html=True
@@ -4082,6 +4285,10 @@ def _render_first_result() -> None:
         """,
         unsafe_allow_html=True,
     )
+    # A test or a restored session can land here with current_raw set but no
+    # doodle_id yet; recording it before the bar above reads its counts means
+    # History and Favourites already see it on this same run.
+    _current_doodle_id()
     _render_top_bar(where="result")
 
     if st.session_state.get("generation_notice"):
@@ -4131,28 +4338,20 @@ def _render_first_result() -> None:
             st.session_state.screen = "generate"
             st.rerun()
     with love_col:
-        already_saved = bool(st.session_state.get("quick_saved"))
-        if already_saved:
-            # A dead "Saved" button left the doodle apparently nowhere. The
-            # button that replaces it is the route to where it went.
+        doodle_id = _current_doodle_id()
+        favourited = bool(doodle_id) and is_favourite_id(doodle_id)
+        if favourited:
             if st.button(
-                "See your saved doodles",
+                "Remove from favourites",
                 width="stretch",
-                icon=":material/collections_bookmark:",
+                icon=":material/heart_minus:",
             ):
-                st.session_state.library_return = "result"
-                st.session_state.screen = "library"
+                set_favourite(doodle_id, False)
                 st.rerun()
         elif st.button(
-            "Save to your doodles", width="stretch", icon=":material/favorite:"
+            "Add to favourites", width="stretch", icon=":material/favorite:"
         ):
-            save_library_item(
-                processed_image=processed,
-                raw_image=st.session_state.current_raw,
-                title=st.session_state.current_title or "Doodle",
-                metadata=st.session_state.current_metadata,
-            )
-            st.session_state.quick_saved = True
+            set_favourite(doodle_id, True)
             st.rerun()
     with print_col:
         if st.button(
@@ -4176,9 +4375,6 @@ def _render_first_result() -> None:
             icon=":material/download:",
             key="save_pdf_result",
         )
-
-    if st.session_state.get("quick_saved"):
-        st.success("Saved to your doodles, on this computer.", icon=":material/check:")
 
     _render_print_help(
         st.session_state.quick_pdf,
@@ -4218,14 +4414,184 @@ def _render_first_result() -> None:
                 st.rerun()
 
 
+# Back and Forward. How this fits together, and why it is not built on
+# Streamlit's own pages (each move there writes two browser-history entries, so
+# the browser's Back needed pressing twice), is in
+# docs/superpowers/specs/2026-09-12-history-favourites-navigation-design.md.
+# Registered on every run, which Streamlit accepts silently because the
+# definition never changes.
+_BROWSER_HISTORY = st.components.v2.component("doodle_browser_history", js=LISTENER_JS)
+
+
+def _place_now() -> tuple[str, str]:
+    screen = str(st.session_state.screen)
+    return screen, (_current_doodle_id() if screen == "result" else "")
+
+
+def _address(search: str) -> dict[str, str]:
+    return {key: values[0] for key, values in parse_qs(search.lstrip("?")).items()}
+
+
+def _show_stop(trail: Trail) -> Trail:
+    """Put the app where the trail's current stop says it was.
+
+    Returns the trail, with that stop rewritten when it cannot be shown.
+    """
+
+    stop = trail.here
+    if stop.screen == "result" and stop.doodle != st.session_state.get(
+        "current_doodle_id"
+    ):
+        # Going back to a doodle that is no longer the one in memory, most
+        # often after New doodle emptied the screen: it comes back from
+        # History. Deleted since, there is nothing to show, so the homepage,
+        # written into that stop rather than added as a new one (see
+        # Trail.replace_here): a new stop dropped the way forward, and the
+        # browser then stepped back onto a step the trail had forgotten.
+        if not stop.doodle or not _open_doodle(stop.doodle):
+            st.session_state.screen = "home"
+            return trail.replace_here("home")
+    st.session_state.screen = stop.screen
+    st.session_state.connection_error = None
+    return trail
+
+
+def _queue_browser_step(direction: str) -> None:
+    st.session_state.nav_count = int(st.session_state.nav_count) + 1
+    st.session_state.nav_script = step_script(
+        direction, f"{st.session_state.nav_session}.{st.session_state.nav_count}"
+    )
+
+
+def _stop_drawing_for_back() -> bool:
+    """Leaving the drawing screen by any Back is exactly Stop.
+
+    True when pictures were already drawn: Stop lands on them, because they
+    were paid for. Back used to walk away from them instead, back to where the
+    drawing was asked from, keeping only the first in History.
+    """
+
+    drawn = bool(st.session_state.get("generation_collected"))
+    _stop_quick_generation()
+    return drawn
+
+
+def _step_back() -> None:
+    trail = st.session_state.nav_trail
+    if st.session_state.screen == "generate" and _stop_drawing_for_back():
+        return
+    if st.session_state.screen in DETOURS:
+        # The drawing and connection screens are not stops of their own, so
+        # Back returns to the stop they were reached from. The browser's
+        # address never left it, so the browser is not asked to move.
+        st.session_state.nav_trail = _show_stop(trail)
+        return
+    if not trail.can_go_back:
+        return
+    st.session_state.nav_trail = _show_stop(trail.back())
+    _queue_browser_step("back")
+
+
+def _step_forward() -> None:
+    trail = st.session_state.nav_trail
+    if st.session_state.screen in DETOURS or not trail.can_go_forward:
+        return
+    st.session_state.nav_trail = _show_stop(trail.forward())
+    _queue_browser_step("forward")
+
+
+def _render_nav_arrows(*, where: str) -> None:
+    """Back and Forward, the same pair at the top of every screen.
+
+    Back buttons used to be dotted about, one per screen and each with its
+    own idea of where it led, while the browser's own Back did nothing. These
+    and the browser's buttons now walk the same trail.
+    """
+
+    trail = st.session_state.get("nav_trail")
+    on_detour = st.session_state.screen in DETOURS
+    with st.container(horizontal=True, key=f"doodle-nav-{where}"):
+        st.button(
+            "Back",
+            key=f"nav_back_{where}",
+            icon=":material/arrow_back:",
+            type="tertiary",
+            disabled=not (on_detour or (trail is not None and trail.can_go_back)),
+            on_click=_step_back,
+        )
+        st.button(
+            "Forward",
+            key=f"nav_forward_{where}",
+            icon=":material/arrow_forward:",
+            type="tertiary",
+            disabled=on_detour or trail is None or not trail.can_go_forward,
+            on_click=_step_forward,
+        )
+
+
+def _sync_navigation() -> None:
+    """Keep the trail, the screen and the browser's address in step, once a run."""
+
+    trail = st.session_state.nav_trail
+    if trail is None:
+        address = st.query_params.to_dict()
+        # A fresh page load, from a refresh or a bookmark, arrives with only
+        # the address to go on. A test or a restored session that already put
+        # the app somewhere keeps that.
+        if st.session_state.screen == "home" and "screen" in address:
+            screen, doodle = place_from_address(address)
+            _show_stop(
+                Trail.start(screen, doodle, session=st.session_state.nav_session)
+            )
+        screen, doodle = _place_now()
+        if screen in DETOURS:
+            screen, doodle = "home", ""
+        trail = Trail.start(
+            screen,
+            doodle,
+            session=st.session_state.nav_session,
+            token=address.get("step", ""),
+        )
+
+    moved = _BROWSER_HISTORY(
+        key="doodle_browser_history", on_moved_change=lambda: None
+    ).moved
+    if moved is not None:
+        # The browser's own Back or Forward. The trail follows the browser
+        # either way; leaving a drawing is Stop, the same as the arrow's Back,
+        # and pictures already drawn stay on screen and become a new stop
+        # below, after wherever the browser now is.
+        trail = trail.arrive(_address(moved))
+        if not (st.session_state.screen == "generate" and _stop_drawing_for_back()):
+            trail = _show_stop(trail)
+
+    screen, doodle = _place_now()
+    if screen not in DETOURS and (screen, doodle) != (
+        trail.here.screen,
+        trail.here.doodle,
+    ):
+        trail = trail.go(screen, doodle)
+        st.query_params.from_dict(trail.address())
+    st.session_state.nav_trail = trail
+
+    if st.session_state.nav_script:
+        st.html(st.session_state.nav_script, unsafe_allow_javascript=True)
+        st.session_state.nav_script = None
+
+
 # A direct prompt should always enter the happy path. Injected artwork in tests or
-# a restored session goes straight to the advanced studio.
+# a restored session goes straight to the advanced studio. Only on a session's
+# first run: after that a doodle in memory is simply the one being worked on,
+# and Back to the homepage has to show the homepage rather than bounce to Studio.
 if (
-    st.session_state.current_raw is not None
+    st.session_state.nav_trail is None
+    and st.session_state.current_raw is not None
     and st.session_state.screen == "home"
     and not st.session_state.home_prompt
 ):
     st.session_state.screen = "studio"
+
+_sync_navigation()
 
 if st.session_state.screen == "home":
     _render_homepage()
@@ -4242,8 +4608,11 @@ if st.session_state.screen == "result":
 if st.session_state.screen == "characters":
     _render_characters_screen()
     st.stop()
-if st.session_state.screen == "library":
-    _render_library_screen()
+if st.session_state.screen == "history":
+    _render_history_screen()
+    st.stop()
+if st.session_state.screen == "favourites":
+    _render_favourites_screen()
     st.stop()
 
 settings = load_settings()
@@ -4339,16 +4708,11 @@ with st.sidebar:
     st.divider()
     st.caption(f"Local data: {data_root()}")
 
-create_tab, library_tab, calibration_tab, guide_tab = st.tabs(
-    ["Create", "Saved doodles", "Print scale", "About"]
+create_tab, favourites_tab, calibration_tab, guide_tab = st.tabs(
+    ["Create", "Favourites", "Print scale", "About"]
 )
 
 with create_tab:
-    # Opening a saved doodle lands here, so the confirmation belongs here too.
-    if st.session_state.library_notice:
-        st.success(st.session_state.library_notice, icon=":material/check:")
-        st.session_state.library_notice = ""
-
     st.markdown(
         '<div class="step-label">Step 1 · Choose the artwork source</div>',
         unsafe_allow_html=True,
@@ -4692,21 +5056,14 @@ with create_tab:
                 placeholder="Name for this doodle",
             )
             if st.button(
-                "Save to your doodles", width="stretch", icon=":material/favorite:"
+                "Add to favourites", width="stretch", icon=":material/favorite:"
             ):
-                save_library_item(
-                    processed_image=processed,
-                    raw_image=st.session_state.current_raw,
-                    title=save_title,
-                    metadata={
-                        **st.session_state.current_metadata,
-                        "processing": asdict(processing_options),
-                    },
+                studio_doodle_id = _current_doodle_id()
+                update_doodle(
+                    studio_doodle_id, title=save_title, processed_image=processed
                 )
-                st.success(
-                    "Saved. You will find it under Saved doodles.",
-                    icon=":material/check:",
-                )
+                set_favourite(studio_doodle_id, True)
+                st.success("Added to your favourites.", icon=":material/check:")
 
         st.divider()
         st.markdown(
@@ -4990,10 +5347,10 @@ with create_tab:
     else:
         st.info("Generate, upload or choose a demo picture to begin.")
 
-with library_tab:
-    st.header("Saved doodles")
-    st.caption(f"Kept on this computer, in {data_root()}.")
-    _render_library_grid()
+with favourites_tab:
+    st.header("Favourites")
+    st.caption(f"The doodles you have kept, on this computer, in {data_root()}.")
+    _render_doodle_grid(favourites_only=True, key_prefix="studio_favourites")
 
 with calibration_tab:
     st.header("Print scale")
@@ -5115,15 +5472,16 @@ with guide_tab:
         "again before it succeeds, photograph included — ordinary here, and "
         "nothing beyond that one request goes anywhere new. Both the "
         "photograph and the portrait stay on this computer, in the local "
-        "data folder, along with your saved doodles.\n\n"
+        "data folder, along with your doodle history.\n\n"
         "A picture you drag onto the page is sent too. It goes once so the "
         "service can describe what is in it, and then again with each "
         "drawing in the batch — four pictures means four sends — because "
         "that picture is the likeness the drawing is made from. It stays "
         "attached until you press New doodle, which is longer than it is "
         "shown in the bar: pressing Draw this idea again on a finished "
-        "picture sends it once more. It is not written to this computer at "
-        "all unless you save the doodle it made.\n\n"
+        "picture sends it once more. Once it becomes the doodle on screen it "
+        "is written to this computer automatically, the same as anything "
+        "else you draw.\n\n"
         "Removing a character deletes their photograph from this computer, "
         "which is the only copy Doodle has; it cannot recall anything a "
         "drawing service has already been sent. What each service does with "

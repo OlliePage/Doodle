@@ -27,7 +27,7 @@ illustration. Print geometry remains deterministic.
 - Custom-size PDF pages
 - Optional captions added as proper PDF text
 - PDF preview and download
-- Local saved-doodle library
+- A local history of every doodle made, with favourites marked by a heart
 - A picture dragged anywhere onto the page, which drops into the prompt bar
   and is drawn from
 - Saved characters — people, toys or anything else recognisable — kept on this

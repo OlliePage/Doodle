@@ -490,23 +490,25 @@ def test_a_character_with_no_name_is_not_drawn(monkeypatch) -> None:
     assert list_characters() == []
 
 
-def test_the_back_button_returns_to_the_homepage() -> None:
-    """The homepage's "Add a character" button is the only route to this screen,
-    so Back has exactly one place to return to. An earlier version tracked
-    a characters_return key that was only ever set to "home", making the
-    branch that read it unreachable and covered only by a test that set
-    state no production path ever set."""
+def test_back_returns_to_the_homepage_the_characters_screen_was_reached_from() -> None:
+    """The screen's own Back button has gone; the arrow at the top of every
+    screen replaces it, and returns to wherever this screen was reached from.
+    Reached the only way a parent reaches it, from the homepage, rather than by
+    setting the screen directly: an earlier version tracked a
+    characters_return key that no production path ever set, covered only by a
+    test that set it."""
 
     at = AppTest.from_file(APP, default_timeout=120)
-    at.session_state["screen"] = "characters"
     at.run()
+    at = next(b for b in at.button if b.label == "Add a character").click().run()
+    assert at.session_state["screen"] == "characters"
 
     for button in at.button:
         if button.label == "Back":
-            button.click().run()
+            at = button.click().run()
             break
     else:
-        raise AssertionError("Back button not found")
+        raise AssertionError("Back arrow not found")
 
     assert not at.exception
     assert at.session_state["screen"] == "home"

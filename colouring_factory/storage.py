@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -34,6 +35,34 @@ def settings_path() -> Path:
     return data_root() / "settings.json"
 
 
+def _new_item_id() -> str:
+    return (
+        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        + "-"
+        + uuid.uuid4().hex[:8]
+    )
+
+
+def _item_folder(item_id: str) -> Path:
+    folder = library_root() / item_id
+    root = library_root().resolve()
+    resolved = folder.resolve()
+    if root not in resolved.parents:
+        raise ValueError("Invalid library item path.")
+    return folder
+
+
+def _read_metadata(folder: Path) -> dict[str, Any]:
+    return json.loads((folder / "metadata.json").read_text(encoding="utf-8"))
+
+
+def _write_metadata(folder: Path, payload: dict[str, Any]) -> None:
+    path = folder / "metadata.json"
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    temporary.replace(path)
+
+
 def save_library_item(
     *,
     processed_image: bytes,
@@ -41,11 +70,7 @@ def save_library_item(
     title: str,
     metadata: dict[str, Any],
 ) -> str:
-    item_id = (
-        datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        + "-"
-        + uuid.uuid4().hex[:8]
-    )
+    item_id = _new_item_id()
     folder = library_root() / item_id
     folder.mkdir(parents=True, exist_ok=False)
 
@@ -58,14 +83,117 @@ def save_library_item(
         "title": title.strip() or "Untitled artwork",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "metadata": metadata,
+        "favourite": True,
     }
-    (folder / "metadata.json").write_text(
-        json.dumps(payload, indent=2), encoding="utf-8"
-    )
+    _write_metadata(folder, payload)
     return item_id
 
 
-def list_library_items() -> list[dict[str, Any]]:
+def record_doodle(
+    *,
+    raw_image: bytes,
+    processed_image: bytes,
+    title: str,
+    metadata: dict[str, Any],
+) -> str:
+    raw_sha256 = hashlib.sha256(raw_image).hexdigest()
+    for item in list_library_items():
+        if item.get("raw_sha256") == raw_sha256:
+            return item["id"]
+
+    item_id = _new_item_id()
+    folder = library_root() / item_id
+    folder.mkdir(parents=True, exist_ok=False)
+
+    (folder / "processed.png").write_bytes(processed_image)
+    (folder / "raw.png").write_bytes(raw_image)
+
+    payload = {
+        "id": item_id,
+        "title": title.strip() or "Untitled artwork",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "metadata": metadata,
+        "favourite": False,
+        "raw_sha256": raw_sha256,
+    }
+    _write_metadata(folder, payload)
+    return item_id
+
+
+def is_favourite(item: dict[str, Any]) -> bool:
+    # An entry with no favourite key was saved by hand before history
+    # existed, so it counts as a favourite.
+    return item.get("favourite", True)
+
+
+def is_favourite_id(item_id: str) -> bool:
+    """Whether one entry is a favourite, without loading its pictures.
+
+    A favourite control that only has the id (the result screen's heart)
+    would otherwise have to go through load_doodle and decode raw.png and
+    processed.png just to read one flag.
+    """
+
+    folder = _item_folder(item_id)
+    metadata_file = folder / "metadata.json"
+    if not metadata_file.exists():
+        return False
+    return is_favourite(_read_metadata(folder))
+
+
+def has_doodle(item_id: str) -> bool:
+    # The app holds on to the id of the doodle on screen, and that entry can be
+    # deleted or cleared from History while the picture is still showing.
+    if not item_id:
+        return False
+    return (_item_folder(item_id) / "metadata.json").exists()
+
+
+def set_favourite(item_id: str, favourite: bool) -> None:
+    folder = _item_folder(item_id)
+    payload = _read_metadata(folder)
+    payload["favourite"] = favourite
+    _write_metadata(folder, payload)
+
+
+def update_doodle(
+    item_id: str,
+    *,
+    title: str | None = None,
+    processed_image: bytes | None = None,
+) -> None:
+    folder = _item_folder(item_id)
+    payload = _read_metadata(folder)
+    if title is not None:
+        payload["title"] = title.strip() or "Untitled artwork"
+    if processed_image is not None:
+        (folder / "processed.png").write_bytes(processed_image)
+    _write_metadata(folder, payload)
+
+
+def attach_pair(item_id: str, *, raw_image: bytes, processed_image: bytes) -> None:
+    folder = _item_folder(item_id)
+    (folder / "pair_raw.png").write_bytes(raw_image)
+    (folder / "pair.png").write_bytes(processed_image)
+
+
+def load_doodle(item_id: str) -> dict[str, Any] | None:
+    folder = _item_folder(item_id)
+    metadata_file = folder / "metadata.json"
+    processed_file = folder / "processed.png"
+    if not metadata_file.exists() or not processed_file.exists():
+        return None
+
+    payload = _read_metadata(folder)
+    raw_file = folder / "raw.png"
+    pair_raw_file = folder / "pair_raw.png"
+    payload["raw"] = (raw_file if raw_file.exists() else processed_file).read_bytes()
+    payload["processed"] = processed_file.read_bytes()
+    payload["pair_raw"] = pair_raw_file.read_bytes() if pair_raw_file.exists() else None
+    return payload
+
+
+def list_library_items(*, favourites_only: bool = False) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for folder in library_root().iterdir():
         if not folder.is_dir():
@@ -79,6 +207,8 @@ def list_library_items() -> list[dict[str, Any]]:
             item["processed_path"] = str(processed_file)
             raw_path = folder / "raw.png"
             item["raw_path"] = str(raw_path) if raw_path.exists() else None
+            if favourites_only and not is_favourite(item):
+                continue
             items.append(item)
         except (OSError, json.JSONDecodeError):
             continue
@@ -96,13 +226,19 @@ def load_library_image(item_id: str, prefer_raw: bool = False) -> bytes:
 
 
 def delete_library_item(item_id: str) -> None:
-    folder = library_root() / item_id
-    root = library_root().resolve()
-    resolved = folder.resolve()
-    if root not in resolved.parents:
-        raise ValueError("Invalid library item path.")
+    folder = _item_folder(item_id)
     if folder.exists():
         shutil.rmtree(folder)
+
+
+def clear_history_keep_favourites() -> int:
+    cleared = 0
+    for item in list_library_items():
+        if is_favourite(item):
+            continue
+        delete_library_item(item["id"])
+        cleared += 1
+    return cleared
 
 
 def load_settings() -> dict[str, Any]:

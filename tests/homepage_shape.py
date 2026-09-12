@@ -21,7 +21,10 @@ from streamlit.testing.v1 import AppTest
 def _walk(node, inside_popover: bool, found: list[str]) -> None:
     for child in getattr(node, "children", {}).values():
         kind = getattr(child, "type", type(child).__name__)
-        if type(child).__name__ == "Button" and not inside_popover:
+        # Back and Forward are pinned to the corner, out of page flow, the same
+        # as History and Favourites in the other corner.
+        is_arrow = str(getattr(child, "key", "") or "").startswith("nav_")
+        if type(child).__name__ == "Button" and not inside_popover and not is_arrow:
             found.append(child.label)
         _walk(child, inside_popover or kind == "popover", found)
 

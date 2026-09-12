@@ -65,15 +65,22 @@ and no native API reaches it.
 
 ## Routes
 
-Saved doodles are reachable from wherever a doodle exists, never only from
-inside Doodle Studio. Saving used to end at a disabled `Saved` button with no
-route onward, so the library it wrote to was effectively invisible. The rules:
+Every doodle is kept automatically, in History, the moment it is the picture on
+screen: a new drawing, an alternative tapped, each change made to it, anything
+set in Doodle Studio, and a character's portrait opened as a doodle. The same
+picture seen again reuses its entry. Favourites are the ones kept on purpose,
+marked with the heart. They replaced a library that held only what had been
+saved by hand, so every picture nobody thought to save was lost. The rules:
 
-- The result screen's save button becomes the route to what it just saved.
-- The homepage offers `Saved doodles (n)` in the top-right corner once there is
-  at least one, out of the centre column, and shows nothing there before that.
-- One picture, one screen. Opening a saved doodle lands exactly where a freshly
-  drawn one does, on the result screen, ready to print. It used to open Doodle
+- History and Favourites are reachable from wherever a doodle exists, never only
+  from inside Doodle Studio. The top bar carries both; the homepage offers them
+  in its top-right corner once there is at least one doodle, out of the centre
+  column, and shows nothing there before that.
+- The result screen's heart adds the doodle to favourites and takes it out
+  again. There is no separate save step to forget.
+- One picture, one screen. Opening a doodle from History or Favourites lands
+  exactly where a freshly drawn one does, on the result screen, ready to print,
+  with its grown-up sheet when it had one. It used to open Doodle
   Studio instead, so the same doodle wore two entirely different interfaces
   depending on how it was reached: a friendly page with the drawing and four
   buttons, or a numbered form with a black/white threshold slider and a
@@ -89,7 +96,8 @@ route onward, so the library it wrote to was effectively invisible. The rules:
   costs nothing and works for a character added weeks ago as well as one
   just drawn.
 
-Deleting a saved doodle asks first. It removes the only copy.
+Deleting a doodle asks first, and says so when it is a favourite. It removes the
+only copy. Clearing History asks first too, and keeps every favourite.
 
 ## Printing
 
@@ -120,9 +128,18 @@ below the button turned the page into a column of same-weight boxes, which is
 the look the page exists to avoid. Nothing on the homepage opens in place, so
 nothing below it ever moves.
 
-Every screen holding a doodle carries the same top bar: the logo, `Saved (n)`
-and `New doodle`. Both routes are one click from the top of the page, never at
-the bottom of one and inside a tab on another.
+Every screen holding a doodle carries the same top bar: the logo, `History`,
+`Favourites (n)` and `New doodle`. Each route is one click from the top of the
+page, never at the bottom of one and inside a tab on another.
+
+Every screen, the homepage and the drawing screen included, carries `Back` and
+`Forward` at the very top, greyed out when there is nowhere to go. There are no
+other Back buttons: they used to be dotted about, one per screen and each with
+its own idea of where it led, while the browser's own Back did nothing useful.
+The pair and the browser's own buttons now walk one trail. The drawing screen
+and the connection screen are never stops on it, so no Back or Forward can land
+on the drawing screen and pay for a picture again; Back on the drawing screen
+counts as Stop, and keeps whatever is already drawn.
 
 `Draw this idea again` redraws the same idea; `New doodle` returns to an empty
 homepage. The two used to read `Draw another` and `New doodle`, which describe

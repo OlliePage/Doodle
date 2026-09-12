@@ -160,17 +160,18 @@ def test_the_homepage_stacks_nothing_below_the_button() -> None:
     assert not at.exception
     assert _blocks(at.main, "expander") == [], "no panel below the search bar"
 
-    # The route to the library is a corner link, not a fourth stacked row.
+    # The route to History and Favourites is a corner link, not a fourth
+    # stacked row.
     corner = [
         block
         for block in _blocks(at.main, "flex_container")
         if "doodle-home-corner" in block.proto.id
     ]
     assert len(corner) == 1
-    saved = _button(at, "saved doodles")
-    assert saved.key == "home_saved_link"
-    assert saved.proto.type == "tertiary", "the corner link carries no weight"
-    assert saved.proto.id in str(corner[0].children[0].proto.id)
+    history_link = _button(at, "history")
+    assert history_link.key == "home_history_link"
+    assert history_link.proto.type == "tertiary", "the corner link carries no weight"
+    assert history_link.proto.id in str(corner[0].children[0].proto.id)
 
 
 def test_asking_for_three_draws_three_and_offers_the_choice(drawn) -> None:
@@ -234,18 +235,25 @@ def test_a_new_doodle_is_one_click_from_the_top_of_the_result_screen() -> None:
     assert at.session_state["current_raw"] is None
 
 
-def test_the_saved_route_is_offered_before_anything_is_saved() -> None:
+def test_the_history_and_favourites_routes_appear_once_something_exists() -> None:
     at = _result_screen()
-    saved = _button(at, "saved")
-    assert saved.disabled, "nothing is saved yet, so there is nowhere to go"
+    # Rendering the result screen records the current picture, so History is
+    # already open; Favourites stays closed until something is favourited.
+    history_button = _button(at, "history")
+    assert not history_button.disabled
+    favourites_button = _button(at, "favourites")
+    assert favourites_button.disabled, "nothing has been favourited yet"
 
-    at = _button(at, "save to your doodles").click().run()
-    at = _button(at, "saved (1)").click().run()
+    at = _button(at, "add to favourites").click().run()
+    favourites_button = _button(at, "favourites")
+    assert not favourites_button.disabled
+
+    at = favourites_button.click().run()
     assert not at.exception
-    assert at.session_state["screen"] == "library"
+    assert at.session_state["screen"] == "favourites"
 
 
-def test_the_studio_carries_the_same_two_routes() -> None:
+def test_the_studio_carries_the_same_routes() -> None:
     at = AppTest.from_file(APP, default_timeout=120)
     at.session_state["screen"] = "studio"
     at.session_state["current_raw"] = ARTWORK
@@ -255,4 +263,5 @@ def test_the_studio_carries_the_same_two_routes() -> None:
 
     assert not at.exception
     assert _has_button(at, "new doodle")
-    assert _has_button(at, "saved")
+    assert _has_button(at, "history")
+    assert _has_button(at, "favourites")
