@@ -172,27 +172,75 @@ def _draw_header(pdf: canvas.Canvas, top: float) -> None:
     pdf.line(date_start, baseline - 2, right, baseline - 2)
 
 
+TITLE_FLOOR = 22.0
+
+
+def _clip(text: str, font: str, size: float, width: float) -> str:
+    if stringWidth(text, font, size) <= width:
+        return text
+    while text and stringWidth(text + "…", font, size) > width:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
+def title_layout(text: str, width: float) -> tuple[list[str], float]:
+    """The title's lines and type size, guaranteed to fit `width`.
+
+    One line if it fits at a readable size, otherwise two lines split at the
+    space that balances them best, and only past that is the end cut off.
+    Nothing is ever drawn beyond the frame.
+    """
+
+    text = " ".join(text.split()) or "Word search"
+    size = _fit(text, DISPLAY, TITLE_MAX, width, TITLE_FLOOR)
+    if stringWidth(text, DISPLAY, size) <= width:
+        return [text], size
+    words = text.split(" ")
+    if len(words) > 1:
+        splits = [
+            (" ".join(words[:i]), " ".join(words[i:])) for i in range(1, len(words))
+        ]
+        first, second = min(
+            splits,
+            key=lambda pair: max(stringWidth(p, DISPLAY, 10) for p in pair),
+        )
+        longer = max((first, second), key=lambda p: stringWidth(p, DISPLAY, 10))
+        size = _fit(longer, DISPLAY, TITLE_MAX * 0.75, width, TITLE_FLOOR)
+        return [
+            _clip(first, DISPLAY, size, width),
+            _clip(second, DISPLAY, size, width),
+        ], size
+    return [_clip(text, DISPLAY, TITLE_FLOOR, width)], TITLE_FLOOR
+
+
+def _title_height(lines: list[str], size: float) -> float:
+    return size * 1.25 + (len(lines) - 1) * size * 1.05
+
+
 def _draw_title(pdf: canvas.Canvas, text: str, top: float, *, outline: bool) -> float:
     """Draw the title below `top` and return its height."""
 
     left, _bottom, right, _top = _content_box()
-    size = _fit(text, DISPLAY, TITLE_MAX, right - left, 20)
-    baseline = top - size * 0.95
+    lines, size = title_layout(text, right - left)
     pdf.saveState()
     pdf.setFillColor(INK)
     pdf.setStrokeColor(INK)
     pdf.setLineWidth(1.5)
     pdf.setLineJoin(1)
-    text_object = pdf.beginText()
-    text_object.setFont(DISPLAY, size)
-    # Render mode 1 strokes the letter outlines without filling them, which
-    # turns the title into bubble letters a child can colour in.
-    text_object.setTextRenderMode(1 if outline else 0)
-    text_object.setTextOrigin((A4[0] - stringWidth(text, DISPLAY, size)) / 2, baseline)
-    text_object.textOut(text)
-    pdf.drawText(text_object)
+    for index, line in enumerate(lines):
+        baseline = top - size * 0.95 - index * size * 1.05
+        text_object = pdf.beginText()
+        text_object.setFont(DISPLAY, size)
+        # Render mode 1 strokes the letter outlines without filling them,
+        # which turns the title into bubble letters a child can colour in.
+        text_object.setTextRenderMode(1 if outline else 0)
+        text_object.setTextOrigin(
+            (A4[0] - stringWidth(line, DISPLAY, size)) / 2, baseline
+        )
+        text_object.textOut(line)
+        pdf.drawText(text_object)
     pdf.restoreState()
-    return size * 1.25
+    return _title_height(lines, size)
 
 
 def _draw_instruction(pdf: canvas.Canvas, text: str, top: float) -> None:
@@ -444,8 +492,7 @@ def create_wordsearch_pdf(
     # at the top of an empty one.
     _draw_frame(pdf)
     _draw_header(pdf, top)
-    title_size = _fit(title, DISPLAY, TITLE_MAX, right - left, 20)
-    title_h = title_size * 1.25
+    title_h = _title_height(*title_layout(title, right - left))
     per_row, bank_rows, picture = _bank_layout(
         len(words), right - left - mm_to_pt(10), show_pictures
     )

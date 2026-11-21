@@ -28,6 +28,13 @@ def isolated(monkeypatch, tmp_path):
     for variable in ("GEMINI_API_KEY", "RECRAFT_API_TOKEN"):
         monkeypatch.delenv(variable, raising=False)
 
+    # No test reaches the real text model; a test that wants an answer from
+    # it replaces this stand-in with its own.
+    def offline(model, api_key, instruction):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(wordsearch_words, "_openai_text", offline)
+
 
 @pytest.fixture
 def drawn(monkeypatch) -> list[str]:
@@ -110,6 +117,8 @@ def test_a_topic_is_turned_into_words_by_the_text_model(monkeypatch, drawn) -> N
 
     def fake_text(model, api_key, instruction):
         asked.append(instruction)
+        if "title" in instruction:
+            return '"Down on the Farm!"'
         return '["cat", "dog", "hen", "cow", "pig", "fox"]'
 
     monkeypatch.setattr(wordsearch_words, "_openai_text", fake_text)
@@ -118,8 +127,9 @@ def test_a_topic_is_turned_into_words_by_the_text_model(monkeypatch, drawn) -> N
     assert not at.exception
     assert at.session_state["screen"] == "wordsearch_result"
     sheet = at.session_state["ws_sheet"]
-    assert sheet["title"] == "Farm animals"
-    assert len(asked) == 1 and "farm animals" in asked[0]
+    # The quotation marks are stripped; the exclamation mark is kept.
+    assert sheet["title"] == "Down on the Farm!"
+    assert len(asked) == 2 and all("farm animals" in a for a in asked)
     # 4-5 years takes five words, so the sixth the model offered is dropped.
     assert [d for d, _l in sheet["words"]] == ["cat", "dog", "hen", "cow", "pig"]
 
@@ -294,3 +304,24 @@ def test_the_longest_word_never_exceeds_the_grid_width() -> None:
     at.slider(key="ws_custom_maxlen").set_value(9).run()
 
     assert load_settings()["wordsearch_custom"]["max_len"] == 5
+
+
+def test_a_long_topic_never_becomes_a_title_that_runs_off_the_page(drawn) -> None:
+    # Ollie's real sheet: a run-on topic printed straight across the frame.
+    # With no text model answering, the topic is cut to whole words instead.
+    at = _make(_word_search_home(), "Teddy bears naomi aria daddy mummy families")
+
+    assert at.session_state["screen"] == "wordsearch_result"
+    title = at.session_state["ws_sheet"]["title"]
+    assert title == "Teddy bears naomi aria daddy"
+    assert len(title) <= 28
+
+
+def test_a_model_title_that_is_too_long_is_not_used(monkeypatch, drawn) -> None:
+    def chatty(model, api_key, instruction):
+        return "A Wonderful Woodland Adventure With Lots Of Friends"
+
+    monkeypatch.setattr(wordsearch_words, "_openai_text", chatty)
+    at = _make(_word_search_home(), "cat, dog, hen")
+
+    assert at.session_state["ws_sheet"]["title"] == "Find these words"

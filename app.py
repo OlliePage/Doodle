@@ -67,7 +67,7 @@ from colouring_factory.wordsearch import (
 )
 from colouring_factory.wordsearch_clues import clue_pictures
 from colouring_factory.wordsearch_pdf import create_wordsearch_pdf, preview_png
-from colouring_factory.wordsearch_words import words_for_topic
+from colouring_factory.wordsearch_words import title_for_sheet, words_for_topic
 from colouring_factory.timings import (
     AXIS_SECONDS,
     bar_heights,
@@ -1400,14 +1400,12 @@ def _submit_word_search() -> None:
                     seen.add(letters)
                     words.append((display, letters))
             words = words[: level.word_count]
-            title = parsed.topic[:1].upper() + parsed.topic[1:]
         else:
             # Words a parent typed are the ones they chose on purpose, so the
             # preset's word count and lengths, which exist to pick from a
             # topic, do not apply. Only a word the grid cannot hold is left
             # out, and build_puzzle names it.
             words = list(parsed.words)
-            title = "Find these words"
         if not words:
             skipped = ", ".join(f"{w} ({why})" for w, why in left_out)
             st.session_state.home_error = (
@@ -1438,6 +1436,13 @@ def _submit_word_search() -> None:
             # A topic's words are interchangeable, so a word that will not fit
             # is simply left out and named on the result.
             seed = random.SystemRandom().randrange(1, 2**31)
+        with st.spinner("Thinking of a title..."):
+            title = title_for_sheet(
+                topic=parsed.topic if parsed.kind == "topic" else "",
+                words=[display for display, _letters in words],
+                provider_id=provider_id,
+                api_key=api_key,
+            )
         spinner_text = (
             f"Drawing picture clues with {model}..."
             if pictures

@@ -418,3 +418,64 @@ def words_for_topic(
             code="unknown_topic",
         )
     return words
+
+
+TITLE_LIMIT = 28
+
+_TITLE_INSTRUCTION = (
+    "Write a short, cheerful title for a children's word search printed at "
+    "the top of the page. {about}\n"
+    "At most {limit} characters and four words, British English, no quotation "
+    "marks, no emoji, no full stop. Reply with only the title."
+)
+
+
+def _tidy_title(raw: str) -> str:
+    title = " ".join(str(raw).strip().strip("\"'“”‘’.").split())
+    return title[:1].upper() + title[1:]
+
+
+def _short_fallback(text: str) -> str:
+    # Whole words up to the limit, so a long typed topic never becomes a
+    # title that runs off the page even when no model is reachable.
+    kept: list[str] = []
+    for word in text.split():
+        if len(" ".join([*kept, word])) > TITLE_LIMIT:
+            break
+        kept.append(word)
+    return _tidy_title(" ".join(kept)) if kept else ""
+
+
+def title_for_sheet(
+    *,
+    topic: str = "",
+    words: list[str] | tuple[str, ...] = (),
+    provider_id: str,
+    api_key: str,
+) -> str:
+    """A short title for the sheet, from the topic or the words on it.
+
+    The connected provider's small text model writes it; if that fails, or
+    its answer is too long, the topic itself is shortened instead.
+    """
+
+    if topic.strip():
+        about = f"The topic is: {topic.strip()}."
+    else:
+        about = "The words to find are: " + ", ".join(words) + "."
+    fallback = _short_fallback(topic) or "Find these words"
+    spec = get_provider(provider_id)
+    if not spec.text_model or not api_key.strip():
+        return fallback
+    instruction = _TITLE_INSTRUCTION.format(about=about, limit=TITLE_LIMIT)
+    try:
+        if spec.id == "google":
+            reply = _google_text(spec.text_model, api_key.strip(), instruction)
+        else:
+            reply = _openai_text(spec.text_model, api_key.strip(), instruction)
+    except Exception:
+        return fallback
+    title = _tidy_title(reply.splitlines()[0] if reply.strip() else "")
+    if not title or len(title) > TITLE_LIMIT:
+        return fallback
+    return title

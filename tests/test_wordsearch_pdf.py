@@ -112,3 +112,22 @@ def test_the_sheet_uses_the_childrens_typefaces() -> None:
     }
     assert any("Andika" in name for name in fonts)
     assert any("Sniglet" in name for name in fonts)
+
+
+def test_no_title_is_ever_wider_than_the_frame() -> None:
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    from colouring_factory.wordsearch_pdf import DISPLAY, _content_box, title_layout
+
+    left, _bottom, right, _top = _content_box()
+    width = right - left
+    for title in (
+        "Pets",
+        "Teddy bears naomi aria daddy mummy families",
+        "Supercalifragilisticexpialidociousandmoreandmoreandmore",
+        "a " * 60,
+    ):
+        lines, size = title_layout(title, width)
+        assert 1 <= len(lines) <= 2
+        assert all(stringWidth(line, DISPLAY, size) <= width for line in lines)
+    assert title_layout("Pets", width)[0] == ["Pets"]
