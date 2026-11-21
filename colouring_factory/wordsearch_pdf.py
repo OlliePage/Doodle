@@ -119,6 +119,14 @@ def _draw_clues(
     top: float,
 ) -> None:
     words = [p.display for p in puzzle.placements]
+    # Printed in the grid's own case: a four-year-old matches the shapes of
+    # letters, and "cat" under a grid of capitals is three shapes she has to
+    # translate before she can look for them.
+    capitals = any(letter.isupper() for letter in "".join(puzzle.grid))
+
+    def shown(word: str) -> str:
+        return word.upper() if capitals else word.lower()
+
     if not show_pictures:
         columns = 3
         per_column = math.ceil(len(words) / columns)
@@ -130,7 +138,7 @@ def _draw_clues(
             pdf.drawString(
                 MARGIN_PT + col * col_width,
                 top - (row + 1) * mm_to_pt(10) + mm_to_pt(3),
-                word,
+                shown(word),
             )
         return
 
@@ -149,11 +157,13 @@ def _draw_clues(
                 pdf, image, x + pad, y_top - box + pad, box - 2 * pad, box - 2 * pad
             )
         size = 13.0
-        while size > 7 and stringWidth(word, FONT, size) > box:
+        while size > 7 and stringWidth(shown(word), FONT, size) > box:
             size -= 0.5
         pdf.setFillColor(colors.black)
         pdf.setFont(FONT, size)
-        pdf.drawCentredString(x + box / 2, y_top - box - CLUE_WORD_PT + 3, word)
+        pdf.drawCentredString(
+            x + box / 2, y_top - box - CLUE_WORD_PT + 3, shown(word)
+        )
 
 
 def _draw_ring(

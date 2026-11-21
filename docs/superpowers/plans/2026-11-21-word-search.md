@@ -109,42 +109,42 @@ How this plan runs:
 
 ## Task 5: wiring it into the app (`app.py`)
 
-- [ ] A homepage switch, `st.segmented_control` with key `home_mode`, offering
+- [x] A homepage switch, `st.segmented_control` with key `home_mode`, offering
   `Colouring page` and `Word search`. The choice is saved in settings as
   `home_mode`.
-- [ ] In word search mode:
+- [x] In word search mode:
   - the placeholder changes as the spec says;
   - the settings line shows the difficulty popover and the image-model item,
     and hides the pictures, style and characters items;
   - the button label is `Make the word search`.
-- [ ] The difficulty popover offers:
+- [x] The difficulty popover offers:
   - the four presets;
   - the saved favourites (from `settings["wordsearch_favourites"]`, a list of
     `{name, settings}`), with delete;
   - a Custom section with the controls from the spec, `Save as a favourite`
     and a name box;
   - the `Pictures beside the words` toggle.
-- [ ] Making a sheet:
+- [x] Making a sheet:
   - parse the input, then get the words, the puzzle, the clues (when pictures
     are on, with a spinner naming the model) and the PDF and preview;
   - errors go through the same guidance routing as drawing.
-- [ ] The result screen for a word search shows:
+- [x] The result screen for a word search shows:
   - the preview, `Print this word search` (primary) and `Save as a PDF`;
   - `Make another`, which uses the same words, a new seed and the cached
     pictures;
   - `Add to favourites`, and the Back and Forward arrows.
-- [ ] History: record the sheet with metadata `kind: "wordsearch"`, the words,
+- [x] History: record the sheet with metadata `kind: "wordsearch"`, the words,
   the settings and the seed. The preview PNG is stored as its image, and the
   PDF is rebuilt on reopen from the cached clues. Reopening lands on the word
   search result.
-- [ ] AppTest coverage, clicking every control:
+- [x] AppTest coverage, clicking every control:
   - switching mode;
   - typed words producing a result;
   - a topic with the text model faked;
   - saving and choosing a favourite difficulty;
   - Make another;
   - reopening from History.
-- [ ] Update `docs/ui-conventions.md` with the new labels.
+- [x] Update `docs/ui-conventions.md` with the new labels.
 
 ## Finish
 

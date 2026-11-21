@@ -18,7 +18,7 @@ DETOURS = frozenset({"generate", "connect"})
 
 # Screens a fresh page load or an unrecognised browser address may open.
 RESTORABLE = frozenset(
-    {"home", "result", "history", "favourites", "characters", "studio"}
+    {"home", "result", "wordsearch_result", "history", "favourites", "characters", "studio"}
 )
 
 
@@ -111,11 +111,11 @@ def place_from_address(params: Mapping[str, str]) -> tuple[str, str]:
     screen = params.get("screen", "home")
     if screen not in RESTORABLE:
         return "home", ""
-    if screen != "result":
+    if screen not in {"result", "wordsearch_result"}:
         return screen, ""
     doodle = params.get("doodle", "")
     # Typed or edited in the address bar, so it is checked before it can name
     # a folder on disk; an empty one fails the same check.
     if not re.fullmatch(r"[\w-]+", doodle):
         return "home", ""
-    return "result", doodle
+    return screen, doodle

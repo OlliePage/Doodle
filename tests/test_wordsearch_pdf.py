@@ -58,7 +58,7 @@ def test_two_pages_with_title_and_every_word() -> None:
     text = reader.pages[0].extract_text()
     assert "Farm friends" in text
     for placement in puzzle.placements:
-        assert placement.display in text
+        assert placement.display.upper() in text
     assert "Answers" in reader.pages[1].extract_text()
 
 
@@ -76,7 +76,7 @@ def test_renders_without_pictures() -> None:
     for pdf in (all_none, text_only):
         assert len(PdfReader(BytesIO(pdf)).pages) == 2
         assert preview_png(pdf).startswith(b"\x89PNG")
-    assert "Owl" in PdfReader(BytesIO(text_only)).pages[0].extract_text()
+    assert "OWL" in PdfReader(BytesIO(text_only)).pages[0].extract_text()
 
 
 def test_preview_png_for_each_page() -> None:
