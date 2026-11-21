@@ -463,6 +463,28 @@ def _draw_ring(
     pdf.restoreState()
 
 
+ANSWER_SEPARATOR = "   ·   "
+
+
+def answer_lines(words: list[str], width: float) -> list[str]:
+    """The answer page's word list, wrapped into centred lines within `width`.
+
+    Ten Christmas words ran straight off both sides of the frame on one line.
+    """
+
+    # The fewest lines that fit, with the words shared evenly between them,
+    # so ten words read as five and five rather than eight and a stray two.
+    for count in range(1, len(words) + 1):
+        per_line = math.ceil(len(words) / count)
+        lines = [
+            ANSWER_SEPARATOR.join(words[i : i + per_line])
+            for i in range(0, len(words), per_line)
+        ]
+        if all(stringWidth(line, TEXT_BOLD, 13) <= width for line in lines):
+            return lines
+    return list(words)
+
+
 def create_wordsearch_pdf(
     puzzle: PuzzleLike,
     *,
@@ -558,9 +580,10 @@ def create_wordsearch_pdf(
     list_top = grid_top - rows * answer_cell - 2 * GRID_PAD - SECTION_GAP
     pdf.setFillColor(INK)
     pdf.setFont(TEXT_BOLD, 13)
-    pdf.drawCentredString(
-        A4[0] / 2, list_top - mm_to_pt(4), "   ·   ".join(shown(w) for w in words)
-    )
+    for index, line in enumerate(
+        answer_lines([shown(w) for w in words], right - left - mm_to_pt(8))
+    ):
+        pdf.drawCentredString(A4[0] / 2, list_top - mm_to_pt(4) - index * 20, line)
     pdf.showPage()
     pdf.save()
     return buffer.getvalue()
