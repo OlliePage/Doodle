@@ -13,7 +13,6 @@ _FORWARD_STEPS: dict[str, tuple[tuple[int, int], ...]] = {
     "down": ((1, 0),),
     "diagonal": ((1, 1), (-1, 1)),
 }
-_ATTEMPTS_PER_WORD = 200
 
 
 @dataclass(frozen=True)
@@ -150,6 +149,72 @@ def _fits(
     return True
 
 
+_LAYOUTS_PER_PUZZLE = 6
+
+
+def _shared_letters(
+    cells: list[list[str]], letters: str, start: tuple[int, int], step: tuple[int, int]
+) -> int:
+    r, c = start
+    return sum(
+        1 for i in range(len(letters)) if cells[r + step[0] * i][c + step[1] * i]
+    )
+
+
+def _lay_out(
+    words: list[tuple[str, str]],
+    rows: int,
+    cols: int,
+    steps: list[tuple[int, int]],
+    rng: random.Random,
+) -> tuple[list[list[str]], list[Placement], list[Skipped], int]:
+    """One attempt at the whole grid, crossing words wherever it can.
+
+    Like a crossword compiler: every spot and direction a word could go is
+    considered, and it goes where it borrows the most letters from words
+    already down. Among equally good spots one is picked at random, so each
+    sheet still differs.
+    """
+
+    cells: list[list[str]] = [["" for _ in range(cols)] for _ in range(rows)]
+    placements: list[Placement] = []
+    skipped: list[Skipped] = []
+    crossings = 0
+
+    # Longest first: long words give the short ones the most letters to
+    # borrow, and short words fit into the gaps that long ones leave.
+    for display, letters in sorted(words, key=lambda w: -len(w[1])):
+        if len(letters) > max(rows, cols):
+            skipped.append(Skipped(display, "too long for the grid"))
+            continue
+        best = -1
+        choices: list[tuple[tuple[int, int], tuple[int, int]]] = []
+        for step in steps:
+            for r in range(rows):
+                for c in range(cols):
+                    if not _fits(cells, letters, (r, c), step):
+                        continue
+                    shared = _shared_letters(cells, letters, (r, c), step)
+                    # A word lying wholly inside another could never be
+                    # circled on its own: CAT vanishing into CATERPILLAR.
+                    if shared == len(letters):
+                        continue
+                    if shared > best:
+                        best, choices = shared, [((r, c), step)]
+                    elif shared == best:
+                        choices.append(((r, c), step))
+        if not choices:
+            skipped.append(Skipped(display, "no room left in the grid"))
+            continue
+        start, step = rng.choice(choices)
+        placement = Placement(display, letters, start, step)
+        for (r, c), ch in zip(placement.cells(), letters, strict=True):
+            cells[r][c] = ch
+        placements.append(placement)
+        crossings += best
+    return cells, placements, skipped, crossings
+
+
 def build_puzzle(
     words: list[tuple[str, str]] | tuple[tuple[str, str], ...],
     settings: WordSearchSettings,
@@ -157,27 +222,20 @@ def build_puzzle(
 ) -> Puzzle:
     rng = random.Random(seed)
     rows, cols = settings.rows, settings.cols
-    cells: list[list[str]] = [["" for _ in range(cols)] for _ in range(rows)]
     steps = _steps_for(settings.directions)
-    placements: list[Placement] = []
-    skipped: list[Skipped] = []
 
-    # Longest first: short words fit into the gaps that long ones leave.
-    for display, letters in sorted(words, key=lambda w: -len(w[1])):
-        if len(letters) > max(rows, cols):
-            skipped.append(Skipped(display, "too long for the grid"))
-            continue
-        for _ in range(_ATTEMPTS_PER_WORD):
-            step = rng.choice(steps)
-            start = (rng.randrange(rows), rng.randrange(cols))
-            if _fits(cells, letters, start, step):
-                placement = Placement(display, letters, start, step)
-                for (r, c), ch in zip(placement.cells(), letters, strict=True):
-                    cells[r][c] = ch
-                placements.append(placement)
-                break
-        else:
-            skipped.append(Skipped(display, "no room left in the grid"))
+    # Several whole layouts, keeping the one that places the most words and,
+    # among those, shares the most letters. The first word's spot decides
+    # what every later word can borrow, so one try is often a poor one.
+    best_layout = None
+    best_score = (-1, -1)
+    for _ in range(_LAYOUTS_PER_PUZZLE):
+        layout = _lay_out(list(words), rows, cols, steps, rng)
+        score = (len(layout[1]), layout[3])
+        if score > best_score:
+            best_layout, best_score = layout, score
+    assert best_layout is not None
+    cells, placements, skipped, _crossings = best_layout
 
     for r in range(rows):
         for c in range(cols):

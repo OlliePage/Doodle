@@ -106,3 +106,34 @@ def test_the_smallest_grid_is_reported_for_a_list_that_overflows() -> None:
     words = [(w, w.upper()) for w in ("elephant", "cat", "dog")]
     # Eight letters cannot go in a 5 x 5 grid in any direction.
     assert smallest_grid_that_fits(words, PRESETS["2-3 years"]) == 8
+
+
+def _shared_cells(puzzle) -> int:
+    from collections import Counter
+
+    uses = Counter(cell for p in puzzle.placements for cell in p.cells())
+    return sum(1 for n in uses.values() if n > 1)
+
+
+def test_words_cross_and_borrow_letters_from_each_other() -> None:
+    # Ollie: every word sat in its own row or column, so the sheet was dull
+    # and wasted space. Christmas words share plenty of letters; across 20
+    # sheets they should cross on every one.
+    words = [
+        (w, w.upper())
+        for w in ("sleigh", "santa", "bells", "angel", "tree", "star", "gift", "snow")
+    ]
+    for seed in range(1, 21):
+        puzzle = build_puzzle(words, PRESETS["6-9 years"], seed)
+        assert puzzle.skipped == ()
+        assert _shared_cells(puzzle) >= 3, seed
+
+
+def test_a_word_is_never_hidden_inside_another() -> None:
+    # CAT lying wholly inside CATERPILLAR could never be circled on its own.
+    words = [("caterpillar", "CATERPILLAR"), ("cat", "CAT"), ("pill", "PILL")]
+    for seed in range(1, 21):
+        puzzle = build_puzzle(words, PRESETS["Grown-up"], seed)
+        cells = {p.word: set(p.cells()) for p in puzzle.placements}
+        assert not cells["cat"] <= cells["caterpillar"]
+        assert not cells["pill"] <= cells["caterpillar"]
