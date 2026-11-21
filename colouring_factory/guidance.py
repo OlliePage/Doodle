@@ -135,6 +135,12 @@ _ENTRIES: dict[str, Guidance] = {
         fix="Switch to OpenAI or Google Gemini for more varied alternatives.",
         control=_SETTINGS,
     ),
+    "unknown_topic": Guidance(
+        title="Doodle has no words for that topic",
+        cause="The provider has no text model to think of words, and the built-in lists do not cover this topic.",
+        fix="Type your own words instead, separated by commas, such as cat, dog, hen.",
+        control="The word search box on the homepage",
+    ),
     "appearance_failed": Guidance(
         title="Their appearance could not be described",
         cause="The provider did not return a usable description of the photograph.",
