@@ -196,6 +196,30 @@ The grown-up sheet is cleaned more gently than the children's. The despeckle
 pass that removes stray pixels from a bold drawing eats fine pattern work, and
 thickening lines closes the smallest regions altogether.
 
+## Word searches
+
+A switch above the idea box, `Colouring page` / `Word search`, changes what the
+homepage makes; the choice is remembered. It is a segmented control outside the
+form, so the page still holds one text box and one button below the logo. In
+word search mode the same box takes a topic or a list of words (placeholder
+"A topic, or your own words: cat, dog, hen"), and the button reads
+`Make the word search`.
+
+The settings line swaps the picture count, style and characters for one
+difficulty item, named after the preset or favourite chosen (`4-5 years`,
+`Custom`, a favourite's own name). The image model stays, because it draws the
+clue pictures. The difficulty panel holds the four presets, saved favourites
+with `Delete <name>`, the `Pictures beside the words` switch, the custom
+controls (`Grid size`, `Number of words`, `Directions`, `Capital letters`) and
+`Save as a favourite` with a `Name for this favourite` box. Changing any custom
+control selects Custom.
+
+The result screen carries `Print this word search` (primary), `Save as a PDF`,
+`Make another` (same words, new grid, pictures from the cache, no new charge)
+and `Add to favourites`. Words that did not fit are named in a notice, never
+dropped silently. The sheet is kept in History like any doodle and reopens on
+the word search screen.
+
 ## Colour is for the screen only
 
 `Colour it in for me` draws a coloured copy of the doodle to look at while

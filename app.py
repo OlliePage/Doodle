@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import hashlib
 import json
+import random
 import re
 import time
 import uuid
@@ -56,6 +57,15 @@ from colouring_factory.generators import (
 from colouring_factory import history
 from colouring_factory.navigation import DETOURS, Trail, place_from_address
 from colouring_factory.guidance import guidance_for
+from colouring_factory.wordsearch import (
+    PRESETS as WORD_SEARCH_PRESETS,
+    WordSearchSettings,
+    build_puzzle,
+    parse_word_input,
+)
+from colouring_factory.wordsearch_clues import clue_pictures
+from colouring_factory.wordsearch_pdf import create_wordsearch_pdf, preview_png
+from colouring_factory.wordsearch_words import words_for_topic
 from colouring_factory.timings import (
     AXIS_SECONDS,
     bar_heights,
@@ -374,6 +384,7 @@ def _initialise_state() -> None:
         "pdf_filename": "doodle.pdf",
         "pdf_summary": "",
         "pdf_signature": "",
+        "ws_sheet": None,
         "character_notice": "",
         "character_duplicate_notice": "",
         "history_shown": 24,
@@ -489,7 +500,11 @@ def _model_for(provider_id: str, spec, settings: dict) -> str:
     """
 
     model = str(settings.get(f"{provider_id}_model", spec.default_model))
-    return model if model in _models_for(provider_id, spec, settings) else spec.default_model
+    return (
+        model
+        if model in _models_for(provider_id, spec, settings)
+        else spec.default_model
+    )
 
 
 def _models_for(provider_id: str, spec, settings: dict) -> list[str]:
@@ -925,6 +940,7 @@ def _clear_current_doodle() -> None:
     st.session_state.pdf_bytes = None
     st.session_state.pdf_summary = ""
     st.session_state.pdf_signature = ""
+    st.session_state.ws_sheet = None
     st.session_state.quick_processed = None
     st.session_state.quick_pdf = None
     st.session_state.pair_raw = None
@@ -961,6 +977,556 @@ def _start_new_doodle() -> None:
     # same children wants the same cast next time, the same reasoning the
     # homepage settings already follow.
     st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Word searches. A switch on the homepage turns the idea box into a topic or a
+# list of words, and the sheet that comes back is a PDF rather than a drawing.
+# The pieces that build it live in colouring_factory/wordsearch*.py; this is
+# only the screens and the settings that choose between them.
+# ---------------------------------------------------------------------------
+
+COLOURING_MODE = "Colouring page"
+WORD_SEARCH_MODE = "Word search"
+_WORD_DIRECTIONS = ("across", "down", "diagonal", "backwards")
+
+
+def _home_mode() -> str:
+    chosen = st.session_state.get("home_mode") or load_settings().get("home_mode")
+    return WORD_SEARCH_MODE if chosen == WORD_SEARCH_MODE else COLOURING_MODE
+
+
+def _choose_home_mode() -> None:
+    chosen = st.session_state.get("home_mode")
+    # A segmented control returns None when its selection is cleared, which
+    # must not overwrite the saved mode with a null.
+    if chosen:
+        settings = load_settings()
+        settings["home_mode"] = chosen
+        save_settings(settings)
+
+
+def _word_search_favourites(settings: dict) -> list[dict]:
+    kept = []
+    for entry in settings.get("wordsearch_favourites") or []:
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("name"), str)
+            and isinstance(entry.get("settings"), dict)
+        ):
+            kept.append(entry)
+    return kept
+
+
+def _default_word_search_level(settings: dict) -> str:
+    level = str(settings.get("quick_age_profile") or "")
+    return level if level in WORD_SEARCH_PRESETS else next(iter(WORD_SEARCH_PRESETS))
+
+
+def _word_search_difficulty(settings: dict) -> tuple[str, str, WordSearchSettings]:
+    """The chosen difficulty as (stored value, label, settings)."""
+
+    default = _default_word_search_level(settings)
+    value = str(settings.get("wordsearch_difficulty") or default)
+    if value in WORD_SEARCH_PRESETS:
+        return value, value, WORD_SEARCH_PRESETS[value]
+    try:
+        if value.startswith("fav:"):
+            for entry in _word_search_favourites(settings):
+                if entry["name"] == value[4:]:
+                    return (
+                        value,
+                        entry["name"],
+                        WordSearchSettings.from_dict(entry["settings"]),
+                    )
+        elif value == "custom":
+            return (
+                value,
+                "Custom",
+                WordSearchSettings.from_dict(
+                    settings.get("wordsearch_custom")
+                    or WORD_SEARCH_PRESETS[default].to_dict()
+                ),
+            )
+    except (KeyError, TypeError, ValueError):
+        pass
+    return default, default, WORD_SEARCH_PRESETS[default]
+
+
+def _custom_word_search_from_state() -> dict:
+    size = int(st.session_state.ws_custom_size)
+    chosen = [d for d in _WORD_DIRECTIONS if d in st.session_state.ws_custom_dirs]
+    return WordSearchSettings(
+        rows=size,
+        cols=size,
+        word_count=int(st.session_state.ws_custom_words),
+        min_len=3,
+        max_len=min(size, 12),
+        directions=frozenset(chosen or ["across"]),
+        uppercase=bool(st.session_state.ws_custom_caps),
+    ).to_dict()
+
+
+def _choose_word_search_difficulty() -> None:
+    settings = load_settings()
+    settings["wordsearch_difficulty"] = st.session_state.ws_difficulty_pick
+    save_settings(settings)
+
+
+def _custom_word_search_changed() -> None:
+    settings = load_settings()
+    settings["wordsearch_custom"] = _custom_word_search_from_state()
+    settings["wordsearch_difficulty"] = "custom"
+    save_settings(settings)
+    st.session_state.ws_difficulty_pick = "custom"
+
+
+def _save_word_search_favourite() -> None:
+    name = " ".join(str(st.session_state.get("ws_fav_name", "")).split())
+    if not name:
+        st.session_state.ws_fav_note = "Give it a name first."
+        return
+    if name in WORD_SEARCH_PRESETS:
+        st.session_state.ws_fav_note = (
+            f"{name} is already one of the choices. Pick another name."
+        )
+        return
+    settings = load_settings()
+    kept = [f for f in _word_search_favourites(settings) if f["name"] != name]
+    kept.append({"name": name, "settings": _custom_word_search_from_state()})
+    settings["wordsearch_favourites"] = kept
+    settings["wordsearch_difficulty"] = f"fav:{name}"
+    save_settings(settings)
+    st.session_state.ws_difficulty_pick = f"fav:{name}"
+    st.session_state.ws_fav_name = ""
+    st.session_state.ws_fav_note = f"Saved {name}."
+
+
+def _delete_word_search_favourite(name: str) -> None:
+    settings = load_settings()
+    settings["wordsearch_favourites"] = [
+        f for f in _word_search_favourites(settings) if f["name"] != name
+    ]
+    if settings.get("wordsearch_difficulty") == f"fav:{name}":
+        settings["wordsearch_difficulty"] = _default_word_search_level(settings)
+        st.session_state.ws_difficulty_pick = settings["wordsearch_difficulty"]
+    save_settings(settings)
+
+
+def _choose_word_search_pictures() -> None:
+    settings = load_settings()
+    settings["wordsearch_pictures"] = bool(st.session_state.ws_pictures)
+    save_settings(settings)
+
+
+def _render_word_search_difficulty(settings: dict) -> None:
+    value, label, chosen = _word_search_difficulty(settings)
+    favourites = _word_search_favourites(settings)
+
+    # The widgets' own state is seeded from the saved settings before they are
+    # drawn, which Streamlit allows; changing it afterwards happens only in the
+    # callbacks above.
+    base = (
+        settings.get("wordsearch_custom")
+        or WORD_SEARCH_PRESETS[_default_word_search_level(settings)].to_dict()
+    )
+    try:
+        seed = WordSearchSettings.from_dict(base)
+    except (KeyError, TypeError, ValueError):
+        seed = WORD_SEARCH_PRESETS[_default_word_search_level(settings)]
+    st.session_state.setdefault("ws_custom_size", seed.rows)
+    st.session_state.setdefault("ws_custom_words", seed.word_count)
+    st.session_state.setdefault(
+        "ws_custom_dirs", [d for d in _WORD_DIRECTIONS if d in seed.directions]
+    )
+    st.session_state.setdefault("ws_custom_caps", seed.uppercase)
+    st.session_state.ws_difficulty_pick = value
+    st.session_state.ws_pictures = bool(settings.get("wordsearch_pictures", True))
+
+    options = [
+        *WORD_SEARCH_PRESETS,
+        *[f"fav:{f['name']}" for f in favourites],
+        "custom",
+    ]
+
+    def name_of(option: str) -> str:
+        if option.startswith("fav:"):
+            return option[4:]
+        return "Custom" if option == "custom" else option
+
+    with st.popover(label, type="tertiary"):
+        st.radio(
+            "Difficulty",
+            options,
+            key="ws_difficulty_pick",
+            format_func=name_of,
+            on_change=_choose_word_search_difficulty,
+        )
+        st.caption(
+            f"{chosen.rows} × {chosen.cols} grid, {chosen.word_count} words, "
+            f"{chosen.min_len} to {chosen.max_len} letters each."
+        )
+        st.toggle(
+            "Pictures beside the words",
+            key="ws_pictures",
+            on_change=_choose_word_search_pictures,
+            help="A small colourable drawing beside every word, for children who cannot read it yet.",
+        )
+        st.caption("Custom: changing any of these switches to your own settings.")
+        st.slider(
+            "Grid size",
+            5,
+            15,
+            key="ws_custom_size",
+            on_change=_custom_word_search_changed,
+        )
+        st.slider(
+            "Number of words",
+            3,
+            15,
+            key="ws_custom_words",
+            on_change=_custom_word_search_changed,
+        )
+        st.multiselect(
+            "Directions",
+            list(_WORD_DIRECTIONS),
+            key="ws_custom_dirs",
+            format_func=str.capitalize,
+            on_change=_custom_word_search_changed,
+        )
+        st.toggle(
+            "Capital letters",
+            key="ws_custom_caps",
+            on_change=_custom_word_search_changed,
+        )
+        st.text_input("Name for this favourite", key="ws_fav_name")
+        st.button(
+            "Save as a favourite",
+            key="ws_fav_save",
+            icon=":material/favorite:",
+            on_click=_save_word_search_favourite,
+            width="stretch",
+        )
+        note = st.session_state.get("ws_fav_note")
+        if note:
+            st.caption(note)
+        for entry in favourites:
+            st.button(
+                f"Delete {entry['name']}",
+                key=f"ws_fav_delete_{entry['name']}",
+                icon=":material/delete:",
+                on_click=_delete_word_search_favourite,
+                args=(entry["name"],),
+                type="tertiary",
+            )
+
+
+def _build_word_sheet(
+    words: list[tuple[str, str]],
+    settings_dict: dict,
+    seed: int,
+    title: str,
+    pictures: bool,
+    left_out: list[tuple[str, str]],
+) -> dict:
+    """Everything the result screen shows, built from its ingredients.
+
+    Free of Streamlit calls so that both a fresh sheet and one reopened from
+    History come through here; the pictures come back from the disk cache.
+    """
+
+    settings = WordSearchSettings.from_dict(settings_dict)
+    puzzle = build_puzzle(words, settings, seed)
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    model = _model_for(provider_id, spec, load_settings())
+    api_key, _source = _provider_key(provider_id)
+    clues: dict[str, bytes | None] = {}
+    if pictures and puzzle.placements:
+        clues = clue_pictures(
+            [p.word for p in puzzle.placements],
+            provider_id=provider_id,
+            model=model,
+            api_key=api_key,
+        )
+    pdf = create_wordsearch_pdf(
+        puzzle, title=title, clues=clues, show_pictures=pictures
+    )
+    return {
+        "words": [tuple(w) for w in words],
+        "settings": settings.to_dict(),
+        "seed": seed,
+        "title": title,
+        "pictures": pictures,
+        "model": model,
+        "puzzle": puzzle,
+        "pdf": pdf,
+        "preview": preview_png(pdf),
+        "answers": preview_png(pdf, page=1),
+        "left_out": list(left_out),
+        "pictures_failed": bool(
+            pictures and puzzle.placements and not any(clues.values())
+        ),
+    }
+
+
+def _word_sheet_metadata(sheet: dict) -> dict:
+    return {
+        "kind": "wordsearch",
+        "source": "Word search",
+        "model": sheet["model"] if sheet["pictures"] else "",
+        "concept": sheet["title"],
+        "words": [list(w) for w in sheet["words"]],
+        "settings": sheet["settings"],
+        "seed": sheet["seed"],
+        "pictures": sheet["pictures"],
+    }
+
+
+def _adopt_word_sheet(sheet: dict) -> None:
+    _clear_current_doodle()
+    st.session_state.ws_sheet = sheet
+    metadata = _word_sheet_metadata(sheet)
+    doodle_id = record_doodle(
+        raw_image=sheet["preview"],
+        processed_image=sheet["preview"],
+        title=sheet["title"],
+        metadata=metadata,
+    )
+    _set_current_artwork(
+        sheet["preview"], title=sheet["title"], metadata=metadata, doodle_id=doodle_id
+    )
+    st.session_state.generation_idea = sheet["title"]
+    st.session_state.screen = "wordsearch_result"
+
+
+def _open_word_search(item_id: str, loaded: dict) -> bool:
+    metadata = loaded.get("metadata", {})
+    try:
+        sheet = _build_word_sheet(
+            [tuple(w) for w in metadata["words"]],
+            metadata["settings"],
+            int(metadata["seed"]),
+            str(loaded.get("title", "Find these words")),
+            bool(metadata.get("pictures", True)),
+            [],
+        )
+    except (KeyError, TypeError, ValueError, GeneratorError):
+        return False
+    _clear_current_doodle()
+    st.session_state.ws_sheet = sheet
+    _set_current_artwork(
+        loaded["raw"],
+        title=str(loaded.get("title", "")),
+        metadata=metadata,
+        doodle_id=item_id,
+    )
+    st.session_state.generation_idea = str(loaded.get("title", ""))
+    st.session_state.candidates = []
+    st.session_state.screen = "wordsearch_result"
+    return True
+
+
+def _submit_word_search() -> None:
+    prompt = str(st.session_state.get("home_prompt", "")).strip()
+    if not prompt:
+        return
+    st.session_state.generation_idea = prompt
+    st.session_state.home_error = ""
+    st.session_state.home_error_code = ""
+
+    settings = load_settings()
+    _value, _label, level = _word_search_difficulty(settings)
+    pictures = bool(settings.get("wordsearch_pictures", True))
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    model = _model_for(provider_id, spec, settings)
+    api_key, _source = _provider_key(provider_id)
+    if pictures and not api_key:
+        # The pictures are drawn by the connected image model, so say what to
+        # do rather than sending the sheet off to draw nothing.
+        st.session_state.home_error = (
+            f"{spec.label} is not connected yet, and the pictures beside the "
+            "words need it. Connect it from the model setting, or switch off "
+            "Pictures beside the words in the difficulty setting."
+        )
+        return
+
+    parsed = parse_word_input(prompt)
+    words: list[tuple[str, str]] = []
+    left_out: list[tuple[str, str]] = []
+    try:
+        if parsed.kind == "topic":
+            with st.spinner("Thinking of words..."):
+                shown = words_for_topic(
+                    parsed.topic,
+                    word_count=level.word_count,
+                    min_len=level.min_len,
+                    max_len=level.max_len,
+                    provider_id=provider_id,
+                    api_key=api_key,
+                )
+            seen: set[str] = set()
+            for display in shown:
+                letters = re.sub(r"[^A-Z]", "", display.upper())
+                if letters and letters not in seen:
+                    seen.add(letters)
+                    words.append((display, letters))
+            words = words[: level.word_count]
+            title = parsed.topic[:1].upper() + parsed.topic[1:]
+        else:
+            # Words a parent typed are the ones they chose on purpose, so the
+            # preset's word count and lengths, which exist to pick from a
+            # topic, do not apply. Only a word the grid cannot hold is left
+            # out, and build_puzzle names it.
+            words = list(parsed.words)
+            title = "Find these words"
+        if not words:
+            skipped = ", ".join(f"{w} ({why})" for w, why in left_out)
+            st.session_state.home_error = (
+                "None of those words fit this difficulty."
+                + (f" Left out: {skipped}." if skipped else "")
+                + " Try other words, or pick a bigger setting."
+            )
+            return
+        spinner_text = (
+            f"Drawing picture clues with {model}..."
+            if pictures
+            else "Making your word search..."
+        )
+        with st.spinner(spinner_text):
+            sheet = _build_word_sheet(
+                words,
+                level.to_dict(),
+                random.SystemRandom().randrange(1, 2**31),
+                title,
+                pictures,
+                left_out,
+            )
+    except GeneratorError as exc:
+        st.session_state.home_error = str(exc)
+        st.session_state.home_error_code = exc.code
+        return
+    except ValueError as exc:
+        st.session_state.home_error = (
+            f"That word search could not be prepared for printing: {exc}"
+        )
+        return
+    _adopt_word_sheet(sheet)
+
+
+def _make_another_word_search() -> None:
+    sheet = st.session_state.ws_sheet
+    seed = sheet["seed"]
+    while seed == sheet["seed"]:
+        seed = random.SystemRandom().randrange(1, 2**31)
+    try:
+        with st.spinner("Making another grid..."):
+            fresh = _build_word_sheet(
+                sheet["words"],
+                sheet["settings"],
+                seed,
+                sheet["title"],
+                sheet["pictures"],
+                sheet["left_out"],
+            )
+    except (GeneratorError, ValueError) as exc:
+        st.error(f"That word search could not be made: {exc}")
+        return
+    _adopt_word_sheet(fresh)
+    st.rerun()
+
+
+def _render_word_search_result() -> None:
+    st.markdown(
+        """
+        <style>
+          [data-testid="stHeader"], [data-testid="stToolbar"],
+          [data-testid="stSidebar"], [data-testid="collapsedControl"] {display:none!important;}
+          .block-container,[data-testid="stMainBlockContainer"] {max-width:800px!important;padding:2.5rem 1.15rem 4rem!important;overflow:visible!important;}
+          .happy-title{text-align:center;font-size:1.1rem;font-weight:720;color:#34373b;margin:.5rem 0 .15rem;}
+          .happy-idea{text-align:center;font-size:.94rem;color:#777b81;margin:0 0 1.15rem;}
+          [data-testid="stImage"] img{border:1px solid #e5e7eb;border-radius:1rem;background:#fff;box-shadow:0 10px 30px rgba(20,20,20,.06);}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    _current_doodle_id()
+    _render_top_bar(where="wordsearch")
+
+    sheet = st.session_state.get("ws_sheet")
+    if not sheet:
+        st.error("That word search is not ready yet. Make it again.")
+        return
+
+    st.markdown(
+        '<div class="happy-title">Your word search is ready</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div class="happy-idea">{html.escape(sheet["title"])}</div>',
+        unsafe_allow_html=True,
+    )
+    left_out = [
+        *sheet["left_out"],
+        *((s.word, s.reason) for s in sheet["puzzle"].skipped),
+    ]
+    if left_out:
+        st.warning(
+            "Left out: " + ", ".join(f"{word} ({why})" for word, why in left_out),
+            icon=":material/info:",
+        )
+    if sheet["pictures_failed"]:
+        st.warning(
+            "The pictures could not be drawn, so the sheet has the words only.",
+            icon=":material/info:",
+        )
+    st.image(sheet["preview"], width="stretch")
+    if sheet["pictures"]:
+        drawn_with = _model_line(
+            get_provider(_active_provider_id()).label, sheet["model"]
+        )
+        if drawn_with:
+            st.caption(drawn_with)
+    with st.expander("Answers"):
+        st.image(sheet["answers"], width="stretch")
+
+    again_col, love_col = st.columns(2)
+    with again_col:
+        if st.button(
+            "Make another",
+            width="stretch",
+            icon=":material/refresh:",
+            key="ws_make_another",
+        ):
+            _make_another_word_search()
+    with love_col:
+        doodle_id = _current_doodle_id()
+        if doodle_id and is_favourite_id(doodle_id):
+            if st.button(
+                "Remove from favourites",
+                width="stretch",
+                icon=":material/heart_minus:",
+                key="ws_unfavourite",
+            ):
+                set_favourite(doodle_id, False)
+                st.rerun()
+        elif st.button(
+            "Add to favourites",
+            width="stretch",
+            icon=":material/favorite:",
+            key="ws_favourite",
+        ):
+            set_favourite(doodle_id, True)
+            st.rerun()
+    file_name = f"{_slug(sheet['title'], 'word-search')}-word-search.pdf"
+    _render_export_row(
+        sheet["pdf"],
+        file_name=file_name,
+        key="wordsearch",
+        label="Print this word search",
+    )
+    _render_print_help(sheet["pdf"], file_name=file_name, key="wordsearch")
 
 
 def _render_homepage() -> None:
@@ -1121,6 +1687,7 @@ def _render_homepage() -> None:
             min-height: 48px;
             font-size: 1rem;
           }
+          .st-key-doodle-home-mode {align-items: center; margin-bottom: .9rem;}
           /* The route to saved doodles leaves the centre column entirely and
              takes the corner, the way a homepage keeps its account and inbox
              links out of the way of the search bar. Fixed, so it stays put
@@ -1231,7 +1798,18 @@ def _render_homepage() -> None:
     # A form, not on_change: a bare text input commits when it loses focus as
     # well as on Enter, so clicking away from a half-typed prompt jumped
     # straight to the next screen. A form commits only on Enter or the button.
-    dropped = _dropped_picture()
+    saved_mode = _home_mode()
+    with st.container(key="doodle-home-mode"):
+        st.segmented_control(
+            "What to make",
+            [COLOURING_MODE, WORD_SEARCH_MODE],
+            default=saved_mode,
+            key="home_mode",
+            on_change=_choose_home_mode,
+            label_visibility="collapsed",
+        )
+    word_search_mode = _home_mode() == WORD_SEARCH_MODE
+    dropped = None if word_search_mode else _dropped_picture()
     with st.form("home_prompt_form", border=False, clear_on_submit=False):
         # Inside the bar rather than above or below it. The homepage holds one
         # full-width element and the button that acts on it, and nothing on it
@@ -1244,12 +1822,18 @@ def _render_homepage() -> None:
             "Describe a picture to colour",
             key="home_prompt",
             placeholder=(
-                "What shall we draw with it?" if dropped else "What shall we draw?"
+                "A topic, or your own words: cat, dog, hen"
+                if word_search_mode
+                else "What shall we draw with it?"
+                if dropped
+                else "What shall we draw?"
             ),
             label_visibility="collapsed",
         )
         home_submitted = st.form_submit_button(
-            "Draw it", type="primary", width="stretch"
+            "Make the word search" if word_search_mode else "Draw it",
+            type="primary",
+            width="stretch",
         )
         # A second submit button rather than an st.button, which Streamlit
         # refuses inside a form. Rendered only when there is a picture to
@@ -1265,7 +1849,10 @@ def _render_homepage() -> None:
         _clear_dropped_picture()
         st.rerun()
     if home_submitted:
-        _submit_home_prompt()
+        if word_search_mode:
+            _submit_word_search()
+        else:
+            _submit_home_prompt()
         if st.session_state.screen != "home":
             st.rerun()
     # Outside the form on purpose: a form batches its widgets and commits only
@@ -1795,6 +2382,19 @@ def _render_home_options() -> None:
     """
 
     settings = load_settings()
+    if _home_mode() == WORD_SEARCH_MODE:
+        # Difficulty replaces the picture count, style and characters, none of
+        # which a word search has. The model stays: it draws the clue pictures.
+        with st.container(
+            key="doodle-home-settings",
+            horizontal=True,
+            horizontal_alignment="center",
+            vertical_alignment="center",
+            gap="small",
+        ):
+            _render_word_search_difficulty(settings)
+            _render_home_model_picker()
+        return
     options = quick_drawing_options(settings)
     dropped = _dropped_picture()
 
@@ -2082,6 +2682,8 @@ def _open_doodle(item_id: str) -> bool:
         return False
 
     metadata = loaded.get("metadata", {})
+    if metadata.get("kind") == "wordsearch":
+        return _open_word_search(item_id, loaded)
     title = str(loaded.get("title", "Doodle"))
     _set_current_artwork(
         loaded["raw"], title=title, metadata=metadata, doodle_id=item_id
@@ -4667,7 +5269,9 @@ _BROWSER_HISTORY = st.components.v2.component("doodle_browser_history", js=LISTE
 
 def _place_now() -> tuple[str, str]:
     screen = str(st.session_state.screen)
-    return screen, (_current_doodle_id() if screen == "result" else "")
+    return screen, (
+        _current_doodle_id() if screen in {"result", "wordsearch_result"} else ""
+    )
 
 
 def _address(search: str) -> dict[str, str]:
@@ -4681,9 +5285,10 @@ def _show_stop(trail: Trail) -> Trail:
     """
 
     stop = trail.here
-    if stop.screen == "result" and stop.doodle != st.session_state.get(
-        "current_doodle_id"
-    ):
+    if stop.screen in {
+        "result",
+        "wordsearch_result",
+    } and stop.doodle != st.session_state.get("current_doodle_id"):
         # Going back to a doodle that is no longer the one in memory, most
         # often after New doodle emptied the screen: it comes back from
         # History. Deleted since, there is nothing to show, so the homepage,
@@ -4693,6 +5298,9 @@ def _show_stop(trail: Trail) -> Trail:
         if not stop.doodle or not _open_doodle(stop.doodle):
             st.session_state.screen = "home"
             return trail.replace_here("home")
+        # _open_doodle chose the screen: a word search reopens on its own.
+        st.session_state.connection_error = None
+        return trail
     st.session_state.screen = stop.screen
     st.session_state.connection_error = None
     return trail
@@ -4846,6 +5454,9 @@ if st.session_state.screen == "generate":
     st.stop()
 if st.session_state.screen == "result":
     _render_first_result()
+    st.stop()
+if st.session_state.screen == "wordsearch_result":
+    _render_word_search_result()
     st.stop()
 if st.session_state.screen == "characters":
     _render_characters_screen()
