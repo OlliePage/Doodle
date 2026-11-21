@@ -491,6 +491,16 @@ def _model_for(provider_id: str, spec, settings: dict) -> str:
     return model if model in spec.models else spec.default_model
 
 
+def _model_line(provider_label: str, model: str) -> str:
+    """Which model drew this picture, so a parent can keep track of it as the
+    providers retire one model for the next. Blank for the sample pictures and
+    portraits, which no image model drew."""
+
+    if not model or provider_label not in {spec.label for spec in PROVIDERS.values()}:
+        return ""
+    return f"Drawn with {provider_label} · {model}"
+
+
 def _dropped_picture() -> bytes | None:
     """The prepared bytes of a picture dragged onto the page, if there is one."""
 
@@ -1965,7 +1975,10 @@ def _render_doodle_grid(*, favourites_only: bool, key_prefix: str) -> None:
                     readable = created
                 st.caption(readable)
                 source = item.get("metadata", {}).get("source", "Unknown source")
-                st.caption(f"Source: {source}")
+                model = item.get("metadata", {}).get("model", "")
+                st.caption(
+                    f"Source: {source} · {model}" if model else f"Source: {source}"
+                )
 
                 pending_key = f"{key_prefix}_pending_delete"
                 if st.session_state.get(pending_key) == item["id"]:
@@ -1983,9 +1996,7 @@ def _render_doodle_grid(*, favourites_only: bool, key_prefix: str) -> None:
                             icon=":material/delete_forever:",
                         ):
                             delete_library_item(item["id"])
-                            if item["id"] == st.session_state.get(
-                                "current_doodle_id"
-                            ):
+                            if item["id"] == st.session_state.get("current_doodle_id"):
                                 _clear_current_doodle()
                             st.session_state[pending_key] = ""
                             st.rerun()
@@ -2074,9 +2085,7 @@ def _render_history_screen() -> None:
                 icon=":material/delete_sweep:",
             ):
                 clear_history_keep_favourites()
-                if not has_doodle(
-                    str(st.session_state.get("current_doodle_id", ""))
-                ):
+                if not has_doodle(str(st.session_state.get("current_doodle_id", ""))):
                     _clear_current_doodle()
                 st.session_state.pending_clear_history = False
                 st.rerun()
@@ -4163,6 +4172,10 @@ def _render_generating_screen() -> None:
             unsafe_allow_html=True,
         )
         st.markdown(_waiting_chart_html(done), unsafe_allow_html=True)
+        waiting_provider_id = _active_provider_id()
+        waiting_spec = get_provider(waiting_provider_id)
+        waiting_model = _model_for(waiting_provider_id, waiting_spec, load_settings())
+        st.caption(f"Drawing with {waiting_spec.label} · {waiting_model}")
         # Tucked behind a question mark rather than printed. It answers a
         # question a parent asks once and then knows the answer to for good,
         # and until they ask it, it is four lines of grey between the child's
@@ -4239,6 +4252,56 @@ def _render_generating_screen() -> None:
         st.rerun()
         return
     st.rerun()
+
+
+def _redraw_with_chosen_model(provider_id: str) -> None:
+    # A callback rather than code after the button, so the screen change is in
+    # place before the rerun rather than one click late.
+    settings = load_settings()
+    settings[f"{provider_id}_model"] = st.session_state.redraw_model
+    save_settings(settings)
+    st.session_state.generation_nonce = (
+        int(st.session_state.get("generation_nonce", 0)) + 1
+    )
+    st.session_state.screen = "generate"
+
+
+def _render_redraw_with_model() -> None:
+    """Draw the same idea on another model, for comparing them while iterating.
+
+    The choice becomes the new default: it writes the same setting as the
+    Studio's Image model picker, so the two can never disagree about which
+    model the next picture will use.
+    """
+
+    if st.session_state.get("quick_mode") == "demo":
+        return
+    if not st.session_state.get("generation_idea"):
+        return
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    api_key, _source = _provider_key(provider_id)
+    if not api_key or len(spec.models) < 2:
+        return
+    models = list(spec.models)
+    current = _model_for(provider_id, spec, load_settings())
+    pick_col, go_col = st.columns([2, 1], vertical_alignment="bottom")
+    with pick_col:
+        st.selectbox(
+            f"Try another {spec.label} model",
+            models,
+            index=models.index(current),
+            key="redraw_model",
+        )
+    with go_col:
+        st.button(
+            "Draw with this model",
+            width="stretch",
+            icon=":material/swap_horiz:",
+            key="redraw_with_model",
+            on_click=_redraw_with_chosen_model,
+            args=(provider_id,),
+        )
 
 
 def _how_long_that_took() -> str:
@@ -4325,6 +4388,12 @@ def _render_first_result() -> None:
     took = _how_long_that_took()
     if took:
         st.caption(took)
+    current_metadata = st.session_state.get("current_metadata") or {}
+    drawn_with = _model_line(
+        str(current_metadata.get("source", "")), str(current_metadata.get("model", ""))
+    )
+    if drawn_with:
+        st.caption(drawn_with)
     _render_alternatives_picker()
 
     again_col, love_col, print_col, file_col = st.columns([1, 1, 1.2, 1.1])
@@ -4375,6 +4444,8 @@ def _render_first_result() -> None:
             icon=":material/download:",
             key="save_pdf_result",
         )
+
+    _render_redraw_with_model()
 
     _render_print_help(
         st.session_state.quick_pdf,

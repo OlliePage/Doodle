@@ -49,7 +49,7 @@ def test_google_is_available_with_a_text_model() -> None:
     assert "google" in PROVIDERS
     google = PROVIDERS["google"]
     assert google.text_model == "gemini-3.5-flash-lite"
-    assert google.default_model == "gemini-3.1-flash-image"
+    assert google.default_model == "gemini-nano-banana-2.1"
     assert google.portrait_size == "3:4"
     assert google.square_size == "1:1"
 

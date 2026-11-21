@@ -73,8 +73,12 @@ PROVIDERS: dict[str, ProviderSpec] = {
         key_url="https://aistudio.google.com/apikey",
         billing_url="https://aistudio.google.com/usage",
         docs_url="https://ai.google.dev/gemini-api/docs/image-generation",
-        default_model="gemini-3.1-flash-image",
+        # Google deprecated gemini-3.1-flash-image on 6 October 2026 and named
+        # Nano Banana 2.1 as its replacement. The older models stay listed so
+        # a parent can still draw the same idea on both and compare.
+        default_model="gemini-nano-banana-2.1",
         models=(
+            "gemini-nano-banana-2.1",
             "gemini-3.1-flash-image",
             "gemini-3.1-flash-lite-image",
             "gemini-3-pro-image",
