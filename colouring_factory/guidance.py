@@ -96,6 +96,12 @@ _ENTRIES: dict[str, Guidance] = {
         control=_SETTINGS,
         action_label="Choose a provider",
     ),
+    "no_model_list": Guidance(
+        title="This provider cannot list its models",
+        cause="Recraft publishes no list of its models for Doodle to ask.",
+        fix="Look up the model's name in Recraft's documentation and add it by name.",
+        control=_SETTINGS,
+    ),
     "missing_prompt": Guidance(
         title="No picture idea yet",
         cause="Doodle has nothing to draw until you describe something.",
