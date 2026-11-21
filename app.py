@@ -62,6 +62,8 @@ from colouring_factory.wordsearch import (
     WordSearchSettings,
     build_puzzle,
     parse_word_input,
+    seed_that_fits,
+    smallest_grid_that_fits,
 )
 from colouring_factory.wordsearch_clues import clue_pictures
 from colouring_factory.wordsearch_pdf import create_wordsearch_pdf, preview_png
@@ -1056,12 +1058,13 @@ def _word_search_difficulty(settings: dict) -> tuple[str, str, WordSearchSetting
 def _custom_word_search_from_state() -> dict:
     size = int(st.session_state.ws_custom_size)
     chosen = [d for d in _WORD_DIRECTIONS if d in st.session_state.ws_custom_dirs]
+    longest = min(int(st.session_state.ws_custom_maxlen), size)
     return WordSearchSettings(
         rows=size,
         cols=size,
         word_count=int(st.session_state.ws_custom_words),
-        min_len=3,
-        max_len=min(size, 12),
+        min_len=min(3, longest),
+        max_len=longest,
         directions=frozenset(chosen or ["across"]),
         uppercase=bool(st.session_state.ws_custom_caps),
     ).to_dict()
@@ -1084,7 +1087,7 @@ def _custom_word_search_changed() -> None:
 def _save_word_search_favourite() -> None:
     name = " ".join(str(st.session_state.get("ws_fav_name", "")).split())
     if not name:
-        st.session_state.ws_fav_note = "Give it a name first."
+        st.session_state.ws_fav_note = "Give the preset a name first."
         return
     if name in WORD_SEARCH_PRESETS:
         st.session_state.ws_fav_note = (
@@ -1136,6 +1139,7 @@ def _render_word_search_difficulty(settings: dict) -> None:
         seed = WORD_SEARCH_PRESETS[_default_word_search_level(settings)]
     st.session_state.setdefault("ws_custom_size", seed.rows)
     st.session_state.setdefault("ws_custom_words", seed.word_count)
+    st.session_state.setdefault("ws_custom_maxlen", seed.max_len)
     st.session_state.setdefault(
         "ws_custom_dirs", [d for d in _WORD_DIRECTIONS if d in seed.directions]
     )
@@ -1154,71 +1158,93 @@ def _render_word_search_difficulty(settings: dict) -> None:
             return option[4:]
         return "Custom" if option == "custom" else option
 
-    with st.popover(label, type="tertiary"):
-        st.radio(
-            "Difficulty",
-            options,
-            key="ws_difficulty_pick",
-            format_func=name_of,
-            on_change=_choose_word_search_difficulty,
-        )
-        st.caption(
-            f"{chosen.rows} × {chosen.cols} grid, {chosen.word_count} words, "
-            f"{chosen.min_len} to {chosen.max_len} letters each."
-        )
-        st.toggle(
-            "Pictures beside the words",
-            key="ws_pictures",
-            on_change=_choose_word_search_pictures,
-            help="A small colourable drawing beside every word, for children who cannot read it yet.",
-        )
-        st.caption("Custom: changing any of these switches to your own settings.")
-        st.slider(
-            "Grid size",
-            5,
-            15,
-            key="ws_custom_size",
-            on_change=_custom_word_search_changed,
-        )
-        st.slider(
-            "Number of words",
-            3,
-            15,
-            key="ws_custom_words",
-            on_change=_custom_word_search_changed,
-        )
-        st.multiselect(
-            "Directions",
-            list(_WORD_DIRECTIONS),
-            key="ws_custom_dirs",
-            format_func=str.capitalize,
-            on_change=_custom_word_search_changed,
-        )
-        st.toggle(
-            "Capital letters",
-            key="ws_custom_caps",
-            on_change=_custom_word_search_changed,
-        )
-        st.text_input("Name for this favourite", key="ws_fav_name")
+    with st.popover(label, type="tertiary", icon=":material/tune:"):
+        choose_tab, own_tab = st.tabs(["Choose", "Make your own"])
+        with choose_tab:
+            st.radio(
+                "Difficulty",
+                options,
+                key="ws_difficulty_pick",
+                format_func=name_of,
+                on_change=_choose_word_search_difficulty,
+            )
+            st.caption(
+                f"{chosen.rows} × {chosen.cols} grid, {chosen.word_count} words, "
+                f"longest word {chosen.max_len} letters."
+            )
+            st.toggle(
+                "Pictures beside the words",
+                key="ws_pictures",
+                on_change=_choose_word_search_pictures,
+                help="A small colourable drawing beside every word, for children who cannot read it yet.",
+            )
+            for entry in favourites:
+                st.button(
+                    f"Delete {entry['name']}",
+                    key=f"ws_fav_delete_{entry['name']}",
+                    icon=":material/delete:",
+                    on_click=_delete_word_search_favourite,
+                    args=(entry["name"],),
+                    type="tertiary",
+                )
+        with own_tab:
+            _render_own_word_search_settings()
+
+
+def _render_own_word_search_settings() -> None:
+    st.caption(
+        "Set it up the way you want, then save it as a preset to pick it in "
+        "one tap next time."
+    )
+    name_col, save_col = st.columns([3, 2], vertical_alignment="bottom")
+    with name_col:
+        st.text_input("Name for this preset", key="ws_fav_name", placeholder="Zara")
+    with save_col:
         st.button(
-            "Save as a favourite",
+            "Save as a preset",
             key="ws_fav_save",
-            icon=":material/favorite:",
+            icon=":material/bookmark_add:",
             on_click=_save_word_search_favourite,
             width="stretch",
         )
-        note = st.session_state.get("ws_fav_note")
-        if note:
-            st.caption(note)
-        for entry in favourites:
-            st.button(
-                f"Delete {entry['name']}",
-                key=f"ws_fav_delete_{entry['name']}",
-                icon=":material/delete:",
-                on_click=_delete_word_search_favourite,
-                args=(entry["name"],),
-                type="tertiary",
-            )
+    note = st.session_state.get("ws_fav_note")
+    if note:
+        st.caption(note)
+    st.slider(
+        "Grid size",
+        5,
+        15,
+        key="ws_custom_size",
+        on_change=_custom_word_search_changed,
+    )
+    st.slider(
+        "Number of words",
+        3,
+        15,
+        key="ws_custom_words",
+        on_change=_custom_word_search_changed,
+        help="How many words Doodle picks for a topic. Words you type yourself are all used.",
+    )
+    st.slider(
+        "Longest word",
+        3,
+        15,
+        key="ws_custom_maxlen",
+        on_change=_custom_word_search_changed,
+        help="In letters. Never more than the grid is wide.",
+    )
+    st.multiselect(
+        "Directions",
+        list(_WORD_DIRECTIONS),
+        key="ws_custom_dirs",
+        format_func=str.capitalize,
+        on_change=_custom_word_search_changed,
+    )
+    st.toggle(
+        "Capital letters",
+        key="ws_custom_caps",
+        on_change=_custom_word_search_changed,
+    )
 
 
 def _build_word_sheet(
@@ -1334,6 +1360,7 @@ def _submit_word_search() -> None:
     st.session_state.generation_idea = prompt
     st.session_state.home_error = ""
     st.session_state.home_error_code = ""
+    st.session_state.ws_fit_size = 0
 
     settings = load_settings()
     _value, _label, level = _word_search_difficulty(settings)
@@ -1389,6 +1416,28 @@ def _submit_word_search() -> None:
                 + " Try other words, or pick a bigger setting."
             )
             return
+        # Checked before any picture is paid for: a list that cannot all fit
+        # is reported with the smallest grid that would hold it.
+        seed = seed_that_fits(words, level, random.SystemRandom().randrange(1, 2**31))
+        if seed is None and parsed.kind == "words":
+            size = smallest_grid_that_fits(words, level)
+            if size:
+                st.session_state.home_error = (
+                    f"Those {len(words)} words will not all fit on a "
+                    f"{level.rows} × {level.cols} grid. {_grid_name(size).capitalize()} "
+                    "holds every one."
+                )
+                st.session_state.ws_fit_size = size
+            else:
+                st.session_state.home_error = (
+                    f"Those {len(words)} words will not fit even on the biggest "
+                    "grid, 15 × 15. Take some out and try again."
+                )
+            return
+        if seed is None:
+            # A topic's words are interchangeable, so a word that will not fit
+            # is simply left out and named on the result.
+            seed = random.SystemRandom().randrange(1, 2**31)
         spinner_text = (
             f"Drawing picture clues with {model}..."
             if pictures
@@ -1398,7 +1447,7 @@ def _submit_word_search() -> None:
             sheet = _build_word_sheet(
                 words,
                 level.to_dict(),
-                random.SystemRandom().randrange(1, 2**31),
+                seed,
                 title,
                 pictures,
                 left_out,
@@ -1413,6 +1462,34 @@ def _submit_word_search() -> None:
         )
         return
     _adopt_word_sheet(sheet)
+
+
+def _grid_name(size: int) -> str:
+    # "An 8 × 8 grid", "an 11 × 11 grid": the article follows the sound.
+    article = "an" if size in (8, 11) else "a"
+    return f"{article} {size} × {size} grid"
+
+
+def _grow_word_search_grid(size: int) -> None:
+    """Move to a grid big enough for the typed words, and make the sheet."""
+
+    settings = load_settings()
+    _value, _label, level = _word_search_difficulty(settings)
+    grown = WordSearchSettings(
+        rows=size,
+        cols=size,
+        word_count=level.word_count,
+        min_len=level.min_len,
+        max_len=max(level.max_len, size),
+        directions=level.directions,
+        uppercase=level.uppercase,
+    )
+    settings["wordsearch_custom"] = grown.to_dict()
+    settings["wordsearch_difficulty"] = "custom"
+    save_settings(settings)
+    st.session_state.ws_custom_size = size
+    st.session_state.ws_custom_maxlen = grown.max_len
+    _submit_word_search()
 
 
 def _make_another_word_search() -> None:
@@ -1868,6 +1945,15 @@ def _render_homepage() -> None:
             _show_guidance(code, detail=st.session_state.home_error)
         else:
             st.error(st.session_state.home_error)
+        fit_size = int(st.session_state.get("ws_fit_size") or 0)
+        if fit_size and _home_mode() == WORD_SEARCH_MODE:
+            st.button(
+                f"Make it on {_grid_name(fit_size)}",
+                key="ws_fit_grow",
+                icon=":material/open_in_full:",
+                on_click=_grow_word_search_grid,
+                args=(fit_size,),
+            )
 
     _render_home_options()
 
