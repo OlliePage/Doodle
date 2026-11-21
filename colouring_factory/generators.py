@@ -947,6 +947,66 @@ def refine_with_provider(
         raise
 
 
+def list_image_models(provider_id: str, api_key: str) -> list[str]:
+    """The image models this key can use, as the provider lists them today.
+
+    Providers retire image models every few months, so Doodle asks rather than
+    relying only on the list it shipped with. Neither listing says which models
+    draw pictures, so both are filtered by name: OpenAI calls its image models
+    gpt-image-*, and Google's are named *-image or nano-banana-*. Recraft
+    publishes no model listing.
+    """
+
+    provider = provider_id.strip().lower()
+    key = api_key.strip()
+    if provider == "openai":
+        request = Request(
+            "https://api.openai.com/v1/models",
+            headers={"Accept": "application/json", "Authorization": f"Bearer {key}"},
+            method="GET",
+        )
+        label = "OpenAI"
+    elif provider == "google":
+        request = Request(
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+            headers={"Accept": "application/json", "x-goog-api-key": key},
+            method="GET",
+        )
+        label = "Google Gemini"
+    else:
+        raise GeneratorError(
+            "This provider does not publish a list of its models. Add one by name "
+            "from its documentation instead.",
+            code="no_model_list",
+        )
+
+    try:
+        with urlopen(request, timeout=30) as response:
+            raw = response.read().decode("utf-8")
+            payload = json.loads(raw) if raw else {}
+    except HTTPError as exc:
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")
+        except OSError:
+            detail = ""
+        raise _normalise_error(
+            label, exc, status_code=exc.code, details=detail
+        ) from exc
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise _normalise_error(label, exc) from exc
+
+    if provider == "openai":
+        names = [str(item.get("id", "")) for item in payload.get("data", [])]
+        wanted = [name for name in names if "image" in name]
+    else:
+        names = [
+            str(item.get("name", "")).removeprefix("models/")
+            for item in payload.get("models", [])
+        ]
+        wanted = [name for name in names if "image" in name or "banana" in name]
+    return sorted(set(wanted))
+
+
 def check_provider_connection(provider_id: str, api_key: str) -> dict[str, Any]:
     """Verify a credential without creating a paid image.
 

@@ -50,6 +50,7 @@ from colouring_factory.generators import (
     GeneratorError,
     check_provider_connection,
     generate_with_provider,
+    list_image_models,
     refine_with_provider,
 )
 from colouring_factory import history
@@ -488,7 +489,121 @@ def _model_for(provider_id: str, spec, settings: dict) -> str:
     """
 
     model = str(settings.get(f"{provider_id}_model", spec.default_model))
-    return model if model in spec.models else spec.default_model
+    return model if model in _models_for(provider_id, spec, settings) else spec.default_model
+
+
+def _models_for(provider_id: str, spec, settings: dict) -> list[str]:
+    """The models Doodle ships with, then any the parent has added by name.
+
+    Added ones live in settings rather than in the code, so a model released
+    after this version of Doodle can be used the day it appears.
+    """
+
+    added = [str(name) for name in settings.get(f"{provider_id}_added_models", [])]
+    return list(dict.fromkeys([*spec.models, *added]))
+
+
+def _add_model(provider_id: str, name: str) -> None:
+    name = name.strip()
+    if not name:
+        return
+    settings = load_settings()
+    added = [str(item) for item in settings.get(f"{provider_id}_added_models", [])]
+    if name not in get_provider(provider_id).models and name not in added:
+        added.append(name)
+    settings[f"{provider_id}_added_models"] = added
+    settings[f"{provider_id}_model"] = name
+    save_settings(settings)
+
+
+def _add_typed_model(provider_id: str) -> None:
+    _add_model(provider_id, str(st.session_state.get("new_model_name", "")))
+    # Clearing a widget's value is allowed here, in its own callback, and
+    # refused anywhere after the widget has been drawn.
+    st.session_state.new_model_name = ""
+
+
+def _remove_added_model(provider_id: str, name: str) -> None:
+    settings = load_settings()
+    settings[f"{provider_id}_added_models"] = [
+        str(item)
+        for item in settings.get(f"{provider_id}_added_models", [])
+        if str(item) != name
+    ]
+    if settings.get(f"{provider_id}_model") == name:
+        settings[f"{provider_id}_model"] = get_provider(provider_id).default_model
+    save_settings(settings)
+
+
+def _find_new_models(provider_id: str, api_key: str) -> None:
+    st.session_state.model_lookup_error = ""
+    st.session_state.found_models = []
+    try:
+        listed = list_image_models(provider_id, api_key)
+    except GeneratorError as exc:
+        st.session_state.model_lookup_error = str(exc)
+        return
+    known = set(_models_for(provider_id, get_provider(provider_id), load_settings()))
+    st.session_state.found_models = [name for name in listed if name not in known]
+    st.session_state.found_models_checked = True
+
+
+def _render_model_manager(provider_id: str, spec, api_key: str, model: str) -> None:
+    """Bring in a model Doodle does not know about yet, without a code change."""
+
+    settings = load_settings()
+    added = [str(item) for item in settings.get(f"{provider_id}_added_models", [])]
+    with st.expander("Use a newer model"):
+        st.caption(
+            "Providers release new image models and retire old ones every few "
+            "months. Add one by the name in its documentation and it becomes "
+            "the model Doodle draws with."
+        )
+        st.link_button(
+            f"Open {spec.label}'s model list",
+            spec.docs_url,
+            icon=":material/open_in_new:",
+            width="stretch",
+        )
+        st.text_input("Model name", key="new_model_name", placeholder=model)
+        st.button(
+            "Add this model",
+            key="add_model",
+            width="stretch",
+            on_click=_add_typed_model,
+            args=(provider_id,),
+        )
+        if api_key and provider_id in {"openai", "google"}:
+            st.button(
+                f"Ask {spec.label} for new models",
+                key="find_models",
+                width="stretch",
+                icon=":material/travel_explore:",
+                on_click=_find_new_models,
+                args=(provider_id, api_key),
+            )
+            if st.session_state.get("model_lookup_error"):
+                st.error(st.session_state.model_lookup_error)
+            found = st.session_state.get("found_models") or []
+            for name in found:
+                st.button(
+                    f"Add {name}",
+                    key=f"add_found_{name}",
+                    width="stretch",
+                    on_click=_add_model,
+                    args=(provider_id, name),
+                )
+            if st.session_state.get("found_models_checked") and not found:
+                st.caption("Doodle already lists every image model your key can use.")
+        if model in added:
+            st.button(
+                f"Remove {model} from the list",
+                key="remove_model",
+                width="stretch",
+                icon=":material/delete:",
+                on_click=_remove_added_model,
+                args=(provider_id, model),
+            )
 
 
 def _model_line(provider_label: str, model: str) -> str:
@@ -4281,9 +4396,9 @@ def _render_redraw_with_model() -> None:
     provider_id = _active_provider_id()
     spec = get_provider(provider_id)
     api_key, _source = _provider_key(provider_id)
-    if not api_key or len(spec.models) < 2:
+    models = _models_for(provider_id, spec, load_settings())
+    if not api_key or len(models) < 2:
         return
-    models = list(spec.models)
     current = _model_for(provider_id, spec, load_settings())
     pick_col, go_col = st.columns([2, 1], vertical_alignment="bottom")
     with pick_col:
@@ -4735,10 +4850,11 @@ with st.sidebar:
         st.rerun()
 
     saved_model = _model_for(studio_provider_id, studio_provider, settings)
+    studio_models = _models_for(studio_provider_id, studio_provider, settings)
     model = st.selectbox(
         "Image model",
-        list(studio_provider.models),
-        index=list(studio_provider.models).index(saved_model),
+        studio_models,
+        index=studio_models.index(saved_model),
     )
     quality = DEFAULT_QUALITY
     if studio_provider_id == "openai":
@@ -4760,6 +4876,8 @@ with st.sidebar:
             updated_settings["openai_quality"] = quality
         save_settings(updated_settings)
         settings = updated_settings
+
+    _render_model_manager(studio_provider_id, studio_provider, api_key, model)
 
     st.caption("Demo and upload modes work without a provider connection.")
 
