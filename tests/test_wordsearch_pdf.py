@@ -96,3 +96,19 @@ def test_small_grid_letters_stay_large() -> None:
 def test_big_grid_still_fits_the_page() -> None:
     cell, _ = grid_layout(15, 15, reserved_height=250)
     assert cell * 15 <= 595.27 - 2 * 42
+
+
+def test_the_sheet_uses_the_childrens_typefaces() -> None:
+    # The page's look depends on Andika and Sniglet being embedded; a missing
+    # font file would otherwise fall back silently to Helvetica.
+    puzzle = _puzzle()
+    pdf = create_wordsearch_pdf(
+        puzzle, title="Farm friends", clues=_clues(puzzle), show_pictures=True
+    )
+    fonts = {
+        str(font.get_object()["/BaseFont"])
+        for page in PdfReader(BytesIO(pdf)).pages
+        for font in page["/Resources"]["/Font"].values()
+    }
+    assert any("Andika" in name for name in fonts)
+    assert any("Sniglet" in name for name in fonts)
