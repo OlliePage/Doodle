@@ -131,3 +131,13 @@ def test_no_title_is_ever_wider_than_the_frame() -> None:
         assert 1 <= len(lines) <= 2
         assert all(stringWidth(line, DISPLAY, size) <= width for line in lines)
     assert title_layout("Pets", width)[0] == ["Pets"]
+
+
+def test_without_answers_the_sheet_is_one_page_that_never_mentions_them() -> None:
+    pdf = create_wordsearch_pdf(
+        _puzzle(), title="Pets", clues={}, show_pictures=False, answers=False
+    )
+
+    reader = PdfReader(BytesIO(pdf))
+    assert len(reader.pages) == 1
+    assert "Answers" not in reader.pages[0].extract_text()

@@ -469,6 +469,7 @@ def create_wordsearch_pdf(
     title: str,
     clues: dict[str, bytes | None],
     show_pictures: bool,
+    answers: bool = True,
 ) -> bytes:
     _register_fonts()
     grid = puzzle.grid
@@ -535,6 +536,13 @@ def create_wordsearch_pdf(
             bank_h,
             picture_override=picture if show_pictures else None,
         )
+    if not answers:
+        # Printed double-sided, an answer page lands on the back of the puzzle,
+        # and children learn to turn it over; without it the sheet is one page
+        # and says nothing about answers.
+        pdf.showPage()
+        pdf.save()
+        return buffer.getvalue()
     _draw_footer(pdf, "Answers are on the next page")
     pdf.showPage()
 
