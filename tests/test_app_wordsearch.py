@@ -268,7 +268,12 @@ def test_the_longest_word_setting_is_saved_with_a_custom_difficulty() -> None:
 
 
 def test_too_many_words_for_the_grid_says_so_and_offers_a_bigger_one(drawn) -> None:
-    words = "cat, dog, hen, cow, pig, owl, ant, bee, elk, yak, emu, fox, rat"
+    # Thirteen five-letter words: 65 letters cannot share their way into the
+    # 36 squares of a 6 x 6 grid, however much they cross.
+    words = (
+        "horse, sheep, goose, mouse, tiger, zebra, camel, panda, koala, "
+        "llama, otter, skunk, whale"
+    )
     at = _make(_word_search_home(), words)
 
     # Nothing is drawn or paid for until the words fit.
