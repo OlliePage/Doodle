@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import re
 import string
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 ALL_DIRECTIONS: frozenset[str] = frozenset({"across", "down", "diagonal", "backwards"})
@@ -193,3 +193,54 @@ def build_puzzle(
         placed=tuple(p.word for p in placements),
         skipped=tuple(skipped),
     )
+
+
+def seed_that_fits(
+    words: list[tuple[str, str]] | tuple[tuple[str, str], ...],
+    settings: WordSearchSettings,
+    seed: int,
+    tries: int = 40,
+) -> int | None:
+    """A seed whose grid holds every word, or None if none was found.
+
+    Placement is random, so a tight grid that one seed cannot fill another
+    often can; trying a few before giving up is what lets a parent's own
+    list fill a small grid rather than lose a word to bad luck.
+    """
+
+    # A list that plainly cannot fit is refused at once rather than after
+    # forty full attempts, which for a hundred words would be seconds.
+    longest = max((len(letters) for _display, letters in words), default=0)
+    total = sum(len(letters) for _display, letters in words)
+    if longest > max(settings.rows, settings.cols) or total > (
+        settings.rows * settings.cols * 1.3
+    ):
+        return None
+    rng = random.Random(seed)
+    for _ in range(tries):
+        candidate = rng.randrange(1, 2**31)
+        if not build_puzzle(words, settings, candidate).skipped:
+            return candidate
+    return None
+
+
+def smallest_grid_that_fits(
+    words: list[tuple[str, str]] | tuple[tuple[str, str], ...],
+    settings: WordSearchSettings,
+    largest: int = 15,
+) -> int | None:
+    """The smallest square grid, larger than the current one, that holds
+    every word, or None when even the largest cannot."""
+
+    longest = max((len(letters) for _display, letters in words), default=0)
+    total = sum(len(letters) for _display, letters in words)
+    for size in range(max(settings.rows, settings.cols) + 1, largest + 1):
+        # Cheap refusals first: a word longer than a side cannot be placed in
+        # any direction, and overlaps rarely save more than a third of the
+        # letters, so a grid that small is not worth searching.
+        if longest > size or total > size * size * 1.3:
+            continue
+        trial = replace(settings, rows=size, cols=size)
+        if seed_that_fits(words, trial, size, tries=12) is not None:
+            return size
+    return None

@@ -227,14 +227,15 @@ def test_the_sheet_is_in_history_and_reopens_as_a_word_search(drawn) -> None:
     assert len(drawn) == 3  # the pictures came back from the cache
 
 
-def test_a_word_too_long_for_the_grid_is_named(drawn) -> None:
+def test_a_typed_word_too_long_for_the_grid_offers_one_that_holds_it(drawn) -> None:
+    # Typed words were chosen on purpose, so none is quietly dropped: the
+    # sheet waits, and the smallest grid that holds ELEPHANT is offered.
     at = _make(_word_search_home(), "cat, dog, elephant")
 
-    assert at.session_state["screen"] == "wordsearch_result"
-    assert sorted(at.session_state["ws_sheet"]["puzzle"].placed) == ["cat", "dog"]
-    warnings = " ".join(str(w.value) for w in at.warning)
-    assert "elephant" in warnings
-    assert len(drawn) == 2
+    assert at.session_state["screen"] == "home"
+    assert drawn == []
+    assert "An 8 × 8 grid holds every one" in " ".join(str(e.value) for e in at.error)
+    assert at.button(key="ws_fit_grow").label == "Make it on an 8 × 8 grid"
 
 
 def test_typed_words_are_kept_even_past_the_presets_word_count(drawn) -> None:
@@ -243,3 +244,53 @@ def test_typed_words_are_kept_even_past_the_presets_word_count(drawn) -> None:
     at = _make(_word_search_home(), "cat, dog, hen, cow, pig, owl, ant")
 
     assert len(at.session_state["ws_sheet"]["puzzle"].placed) == 7
+
+
+def test_the_longest_word_setting_is_saved_with_a_custom_difficulty() -> None:
+    at = _word_search_home()
+    at.slider(key="ws_custom_size").set_value(10).run()
+    at.slider(key="ws_custom_maxlen").set_value(7).run()
+
+    assert not at.exception
+    settings = load_settings()
+    assert settings["wordsearch_difficulty"] == "custom"
+    assert settings["wordsearch_custom"]["max_len"] == 7
+
+
+def test_too_many_words_for_the_grid_says_so_and_offers_a_bigger_one(drawn) -> None:
+    words = "cat, dog, hen, cow, pig, owl, ant, bee, elk, yak, emu, fox, rat"
+    at = _make(_word_search_home(), words)
+
+    # Nothing is drawn or paid for until the words fit.
+    assert at.session_state["screen"] == "home"
+    assert drawn == []
+    errors = " ".join(str(e.value) for e in at.error)
+    assert "13 words will not all fit on a 6 × 6 grid" in errors
+
+    grow = at.button(key="ws_fit_grow")
+    assert grow.label.startswith("Make it on a ")
+    at = grow.click().run()
+
+    assert not at.exception
+    assert at.session_state["screen"] == "wordsearch_result"
+    sheet = at.session_state["ws_sheet"]
+    assert len(sheet["puzzle"].placed) == 13
+    assert sheet["puzzle"].skipped == ()
+    assert load_settings()["wordsearch_difficulty"] == "custom"
+
+
+def test_a_list_too_big_for_any_grid_is_refused_plainly(drawn) -> None:
+    words = ", ".join(f"word{chr(97 + i % 26)}{chr(97 + i // 26)}x" for i in range(100))
+    at = _make(_word_search_home(), words)
+
+    assert at.session_state["screen"] == "home"
+    assert drawn == []
+    assert "biggest grid, 15 × 15" in " ".join(str(e.value) for e in at.error)
+
+
+def test_the_longest_word_never_exceeds_the_grid_width() -> None:
+    at = _word_search_home()
+    at.slider(key="ws_custom_size").set_value(5).run()
+    at.slider(key="ws_custom_maxlen").set_value(9).run()
+
+    assert load_settings()["wordsearch_custom"]["max_len"] == 5

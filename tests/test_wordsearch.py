@@ -87,3 +87,22 @@ def test_single_phrase_is_a_topic():
 def test_punctuation_dropped_blanks_and_duplicates_removed():
     parsed = parse_word_input("Ice cream!, , ICE-CREAM, it's,")
     assert parsed.words == (("Ice cream!", "ICECREAM"), ("it's", "ITS"))
+
+
+def test_a_full_fit_seed_places_every_word() -> None:
+    from colouring_factory.wordsearch import seed_that_fits
+
+    words = [("cat", "CAT"), ("dog", "DOG"), ("hen", "HEN"), ("owl", "OWL")]
+    settings = PRESETS["2-3 years"]
+    seed = seed_that_fits(words, settings, 1)
+
+    assert seed is not None
+    assert build_puzzle(words, settings, seed).skipped == ()
+
+
+def test_the_smallest_grid_is_reported_for_a_list_that_overflows() -> None:
+    from colouring_factory.wordsearch import smallest_grid_that_fits
+
+    words = [(w, w.upper()) for w in ("elephant", "cat", "dog")]
+    # Eight letters cannot go in a 5 x 5 grid in any direction.
+    assert smallest_grid_that_fits(words, PRESETS["2-3 years"]) == 8
