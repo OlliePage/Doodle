@@ -1276,7 +1276,10 @@ def _build_word_sheet(
             api_key=api_key,
         )
     pdf = create_wordsearch_pdf(
-        puzzle, title=title, clues=clues, show_pictures=pictures
+        puzzle, title=title, clues=clues, show_pictures=pictures, answers=True
+    )
+    puzzle_only = create_wordsearch_pdf(
+        puzzle, title=title, clues=clues, show_pictures=pictures, answers=False
     )
     return {
         "words": [tuple(w) for w in words],
@@ -1287,6 +1290,7 @@ def _build_word_sheet(
         "model": model,
         "puzzle": puzzle,
         "pdf": pdf,
+        "pdf_puzzle_only": puzzle_only,
         "preview": preview_png(pdf),
         "answers": preview_png(pdf, page=1),
         "left_out": list(left_out),
@@ -1519,6 +1523,12 @@ def _make_another_word_search() -> None:
     st.rerun()
 
 
+def _choose_word_search_answers() -> None:
+    settings = load_settings()
+    settings["wordsearch_print_answers"] = bool(st.session_state.ws_print_answers)
+    save_settings(settings)
+
+
 def _render_word_search_result() -> None:
     st.markdown(
         """
@@ -1601,14 +1611,31 @@ def _render_word_search_result() -> None:
         ):
             set_favourite(doodle_id, True)
             st.rerun()
+    # Off unless asked for: printed double-sided, the answers end up on the
+    # back of the puzzle, and Ollie's daughters learned to turn it over.
+    st.session_state.ws_print_answers = bool(
+        load_settings().get("wordsearch_print_answers", False)
+    )
+    st.toggle(
+        "Print the answer page too",
+        key="ws_print_answers",
+        on_change=_choose_word_search_answers,
+        help="Off: one page, the puzzle only. The answers are still on screen "
+        "under Answers above.",
+    )
+    printed = (
+        sheet["pdf"]
+        if st.session_state.ws_print_answers
+        else sheet.get("pdf_puzzle_only", sheet["pdf"])
+    )
     file_name = f"{_slug(sheet['title'], 'word-search')}-word-search.pdf"
     _render_export_row(
-        sheet["pdf"],
+        printed,
         file_name=file_name,
         key="wordsearch",
         label="Print this word search",
     )
-    _render_print_help(sheet["pdf"], file_name=file_name, key="wordsearch")
+    _render_print_help(printed, file_name=file_name, key="wordsearch")
 
 
 def _render_homepage() -> None:

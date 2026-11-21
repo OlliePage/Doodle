@@ -325,3 +325,36 @@ def test_a_model_title_that_is_too_long_is_not_used(monkeypatch, drawn) -> None:
     at = _make(_word_search_home(), "cat, dog, hen")
 
     assert at.session_state["ws_sheet"]["title"] == "Find these words"
+
+
+def _pages_sent_to_printer(at: AppTest) -> int:
+    """Press Print, and count the pages of the PDF handed to the browser."""
+
+    import base64
+    import re
+    from io import BytesIO
+
+    from pypdf import PdfReader
+
+    at = at.button(key="print_wordsearch").click().run()
+    assert not at.exception
+    emitted = " ".join(str(element.proto.body) for element in at.get("html"))
+    payloads = re.findall(r'atob\("([A-Za-z0-9+/=]+)"\)', emitted)
+    assert payloads, "nothing was sent to the printer"
+    return len(PdfReader(BytesIO(base64.b64decode(payloads[-1]))).pages)
+
+
+def test_the_answer_page_is_left_off_the_print_unless_switched_on(drawn) -> None:
+    at = _make(_word_search_home(), "cat, dog, hen")
+
+    # Off by default: the children turn the page over to find the answers.
+    assert at.toggle(key="ws_print_answers").value is False
+    assert _pages_sent_to_printer(at) == 1
+
+    at.toggle(key="ws_print_answers").set_value(True).run()
+    assert not at.exception
+    assert load_settings()["wordsearch_print_answers"] is True
+    assert _pages_sent_to_printer(at) == 2
+
+    # The answers stay on screen for the grown-up either way.
+    assert any(e.label == "Answers" for e in at.expander)
