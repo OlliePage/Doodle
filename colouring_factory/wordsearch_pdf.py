@@ -28,11 +28,13 @@ TEXT_BOLD = "Andika-Bold"
 FRAME_INSET = mm_to_pt(9)
 FRAME_RADIUS = mm_to_pt(7)
 CONTENT_PAD = mm_to_pt(9)
-MAX_CELL_PT = mm_to_pt(24)
+# Big enough that a 6 x 6 grid spans the page: the grid is the puzzle.
+MAX_CELL_PT = mm_to_pt(34)
 LETTER_FRACTION = 0.58
 GRID_PAD = mm_to_pt(3)
 SECTION_GAP = mm_to_pt(7)
-MAX_PICTURE = mm_to_pt(40)
+# Pictures are the key to the puzzle, not the puzzle, so they stay small.
+MAX_PICTURE = mm_to_pt(24)
 INK = colors.Color(0.08, 0.08, 0.1)
 SOFT_INK = colors.Color(0.32, 0.33, 0.36)
 HAIRLINE = colors.Color(0.8, 0.8, 0.82)
@@ -253,10 +255,17 @@ def _bank_layout(
     if not show_pictures:
         per_row = min(count, 3)
         return per_row, math.ceil(count / per_row), 0.0
-    per_row = count if count <= 5 else math.ceil(count / 2)
-    per_row = min(per_row, 6)
+    # One strip where it fits, so the key takes as little height as it can.
+    if count <= 6:
+        per_row = count
+        picture = min(width / per_row * 0.62, MAX_PICTURE)
+    else:
+        # More than six in one strip shrinks the words below what a child can
+        # read, so they go in two rows, and the pictures shrink instead to
+        # keep the grid's share of the page.
+        per_row = math.ceil(count / 2)
+        picture = min(width / per_row * 0.5, mm_to_pt(16))
     rows = math.ceil(count / per_row)
-    picture = min(width / per_row * 0.74, MAX_PICTURE)
     return per_row, rows, picture
 
 
@@ -328,6 +337,19 @@ def _draw_word_bank(
         top - PANEL_LABEL_H - (height - PANEL_LABEL_H - used_h) / 2 + mm_to_pt(1)
     )
 
+    # One size for every word, set by the longest: words in mixed sizes read as
+    # a mistake, and a short word printed bigger looks more important.
+    size = min(
+        _fit(
+            shown(word),
+            TEXT_BOLD,
+            18 if not show_pictures else 16,
+            item_w - mm_to_pt(9),
+            9,
+        )
+        for word in words
+    )
+
     for index, word in enumerate(words):
         row, col = divmod(index, per_row)
         # The last row is centred rather than left-aligned, so seven words read
@@ -346,9 +368,6 @@ def _draw_word_bank(
             baseline = y_top - picture - mm_to_pt(6.5)
         else:
             baseline = y_top - mm_to_pt(7)
-        size = _fit(
-            text, TEXT_BOLD, 18 if not show_pictures else 16, item_w - mm_to_pt(9), 9
-        )
         box = size * 0.72
         text_w = stringWidth(text, TEXT_BOLD, size)
         start = cx - (text_w + box + mm_to_pt(2)) / 2
@@ -444,14 +463,9 @@ def create_wordsearch_pdf(
     )
     grid_h = rows * cell + 2 * GRID_PAD
     spare = available - grid_h - bank_h - 2 * SECTION_GAP
-    # Spare room goes first into bigger pictures, which is what a child who
-    # cannot read the words relies on, then into the gaps.
-    if show_pictures and bank_rows and spare > 0:
-        grown = min(MAX_PICTURE * 1.25, picture + spare * 0.5 / bank_rows)
-        grown = min(grown, (right - left - mm_to_pt(10)) / per_row * 0.8)
-        bank_h += (grown - picture) * bank_rows
-        spare -= (grown - picture) * bank_rows
-        picture = grown
+    # The grid has already taken every bit of height it can use; whatever is
+    # left becomes breathing room, never bigger pictures. The grid is the
+    # puzzle and the pictures are only its key.
     gap = SECTION_GAP + max(0.0, spare) / 3
 
     cursor = top - HEADER_H - max(0.0, spare) / 6
