@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from tests.homepage_shape import text_inputs_on_the_page
+
 APP = str(Path(__file__).resolve().parent.parent / "app.py")
 
 
@@ -38,7 +40,7 @@ def test_typing_alone_does_not_leave_the_homepage() -> None:
     app.text_input[0].set_value("dfa").run()
 
     assert app.session_state["screen"] == "home"
-    assert len(app.text_input) == 1
+    assert text_inputs_on_the_page(app) == ["home_prompt"]
 
 
 def test_the_button_is_what_leaves_the_homepage() -> None:

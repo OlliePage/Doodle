@@ -197,8 +197,13 @@ def test_fresh_app_opens_on_minimal_doodle_homepage(monkeypatch, tmp_path) -> No
 
     assert any("doodle-logo--hero" in body for body in fake.markdown_calls)
 
-    assert len(fake.text_input_calls) == 1
-    label, kwargs = fake.text_input_calls[0]
+    # The model menu's box for a new model's name lives inside a popover on
+    # the settings line, not in page flow.
+    on_page = [
+        call for call in fake.text_input_calls if call[1].get("key") != "new_model_name"
+    ]
+    assert len(on_page) == 1
+    label, kwargs = on_page[0]
     assert label == "Describe a picture to colour"
     assert kwargs["key"] == "home_prompt"
     assert kwargs["placeholder"] == "What shall we draw?"

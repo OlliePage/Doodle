@@ -514,6 +514,9 @@ def _add_model(provider_id: str, name: str) -> None:
     settings[f"{provider_id}_added_models"] = added
     settings[f"{provider_id}_model"] = name
     save_settings(settings)
+    # The home page's model menu keeps its own value between reruns; dropping
+    # it lets the menu pick up the model just added instead.
+    st.session_state.pop(f"home_model_{provider_id}", None)
 
 
 def _add_typed_model(provider_id: str) -> None:
@@ -533,6 +536,53 @@ def _remove_added_model(provider_id: str, name: str) -> None:
     if settings.get(f"{provider_id}_model") == name:
         settings[f"{provider_id}_model"] = get_provider(provider_id).default_model
     save_settings(settings)
+    st.session_state.pop(f"home_model_{provider_id}", None)
+
+
+def _choose_home_provider() -> None:
+    _set_active_provider(provider_id_from_label(st.session_state.home_provider))
+
+
+def _choose_home_model(provider_id: str) -> None:
+    settings = load_settings()
+    settings[f"{provider_id}_model"] = st.session_state[f"home_model_{provider_id}"]
+    save_settings(settings)
+
+
+def _render_home_model_picker() -> None:
+    """The image model, named on the homepage's own line of settings.
+
+    Providers retire models every few months, and the only place to see or
+    change the model used to be the Studio sidebar, which this page hides.
+    """
+
+    provider_id = _active_provider_id()
+    spec = get_provider(provider_id)
+    settings = load_settings()
+    models = _models_for(provider_id, spec, settings)
+    model = _model_for(provider_id, spec, settings)
+    api_key, _source = _provider_key(provider_id)
+    with st.popover(model, type="tertiary", icon=":material/brush:"):
+        st.selectbox(
+            "Image provider",
+            [item.label for item in PROVIDERS.values()],
+            index=list(PROVIDERS).index(provider_id),
+            key="home_provider",
+            on_change=_choose_home_provider,
+        )
+        st.selectbox(
+            "Image model",
+            models,
+            index=models.index(model),
+            key=f"home_model_{provider_id}",
+            on_change=_choose_home_model,
+            args=(provider_id,),
+        )
+        if not api_key:
+            st.caption(
+                f"{spec.label} is not connected yet. Open Doodle Studio to connect it."
+            )
+        _render_model_manager(provider_id, spec, api_key, model, boxed=False)
 
 
 def _find_new_models(provider_id: str, api_key: str) -> None:
@@ -548,12 +598,17 @@ def _find_new_models(provider_id: str, api_key: str) -> None:
     st.session_state.found_models_checked = True
 
 
-def _render_model_manager(provider_id: str, spec, api_key: str, model: str) -> None:
+def _render_model_manager(
+    provider_id: str, spec, api_key: str, model: str, *, boxed: bool = True
+) -> None:
     """Bring in a model Doodle does not know about yet, without a code change."""
 
     settings = load_settings()
     added = [str(item) for item in settings.get(f"{provider_id}_added_models", [])]
-    with st.expander("Use a newer model"):
+    wrapper = st.expander("Use a newer model") if boxed else st.container()
+    with wrapper:
+        if not boxed:
+            st.markdown("**Use a newer model**")
         st.caption(
             "Providers release new image models and retire old ones every few "
             "months. Add one by the name in its documentation and it becomes "
@@ -1881,6 +1936,7 @@ def _render_home_options() -> None:
                 f"{active_spec.label} cannot draw from a picture of someone. "
                 "Connect OpenAI or Google Gemini to add characters."
             )
+        _render_home_model_picker()
 
     # A segmented control returns None when its selection is cleared, which
     # would otherwise write a null into the settings file.

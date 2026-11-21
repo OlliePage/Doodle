@@ -37,6 +37,26 @@ def buttons_on_the_page(at: AppTest) -> list[str]:
     return found
 
 
+def _walk_inputs(node, inside_popover: bool, found: list[str]) -> None:
+    for child in getattr(node, "children", {}).values():
+        kind = getattr(child, "type", type(child).__name__)
+        if type(child).__name__ == "TextInput" and not inside_popover:
+            found.append(child.key)
+        _walk_inputs(child, inside_popover or kind == "popover", found)
+
+
+def text_inputs_on_the_page(at: AppTest) -> list[str]:
+    """The keys of every text box in page flow, ignoring popovers' contents.
+
+    The model menu on the settings line holds a box for a model's name, which
+    is no more on the page than the buttons inside the other popovers.
+    """
+
+    found: list[str] = []
+    _walk_inputs(at.main, False, found)
+    return found
+
+
 def buttons_in_popovers(at: AppTest) -> list[str]:
     """The mirror image: only what a popover holds."""
 

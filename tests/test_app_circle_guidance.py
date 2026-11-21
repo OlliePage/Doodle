@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from tests.homepage_shape import buttons_on_the_page
+from tests.homepage_shape import buttons_on_the_page, text_inputs_on_the_page
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP = str(PROJECT_ROOT / "app.py")
@@ -110,7 +110,7 @@ def test_the_homepage_shows_one_prompt_bar_and_a_button() -> None:
 
     assert not at.exception
     assert at.session_state["screen"] == "home"
-    assert len(at.text_input) == 1
+    assert text_inputs_on_the_page(at) == ["home_prompt"]
     body = " ".join(block.value for block in at.markdown)
     assert "doodle-logo--hero" in body
     # The rule is about page flow: below the logo, one full-width element, the
