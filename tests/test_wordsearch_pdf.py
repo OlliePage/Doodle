@@ -141,3 +141,18 @@ def test_without_answers_the_sheet_is_one_page_that_never_mentions_them() -> Non
     reader = PdfReader(BytesIO(pdf))
     assert len(reader.pages) == 1
     assert "Answers" not in reader.pages[0].extract_text()
+
+
+def test_the_answer_list_wraps_inside_the_frame() -> None:
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    from colouring_factory.wordsearch_pdf import TEXT_BOLD, _content_box, answer_lines
+
+    # Ollie's sheet: ten Christmas words ran off both sides on one line.
+    words = "SANTA ANGEL TREE STAR BELL GIFT SNOW SLED TOYS BOW".split()
+    left, _bottom, right, _top = _content_box()
+    lines = answer_lines(words, right - left)
+
+    assert len(lines) >= 2
+    assert all(stringWidth(line, TEXT_BOLD, 13) <= right - left for line in lines)
+    assert " ".join(lines).replace("·", " ").split() == words
